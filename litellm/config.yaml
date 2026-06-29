@@ -1,0 +1,41 @@
+# LiteLLM gateway — ONE OpenAI-compatible endpoint that fans out to many providers.
+# JARVIS talks OpenAI dialect to this proxy; pick a model by its `model_name` below
+# in JARVIS_CONFIG.json (llm.model). Provider API keys are read from the environment
+# (JARVIS.sh exports them from JARVIS_CONFIG.json: llm.api_key -> OPENAI_API_KEY,
+# llm.anthropic_api_key -> ANTHROPIC_API_KEY, llm.gemini_api_key -> GEMINI_API_KEY).
+# Add/edit models freely. `drop_params` makes cross-provider calls tolerant of params
+# a given provider doesn't support.
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: o4-mini
+    litellm_params:
+      model: openai/o4-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-opus-4-8
+    litellm_params:
+      model: anthropic/claude-opus-4-8
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+  # Local models via Ollama on the host (run `ollama serve` on your Mac):
+  - model_name: ollama-llama3
+    litellm_params:
+      model: ollama/llama3
+      api_base: http://host.docker.internal:11434
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="arc"></span>
+      <div>
+        <div class="title" id="brand-title">JARVIS</div>
+        <div class="model" id="model-badge">—</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
+      <span class="mic" id="mic-state" title="voice state">voice off</span>
+      <span class="ctl-ic" title="Microphone mode">🎙️</span>
+      <div class="seg" id="mic-mode" role="group" aria-label="Microphone mode">
+        <button data-mode="off" class="active" title="Mic off — use the 🎤 Talk button">Off</button>
+        <button data-mode="wake" title="Wake word — say &quot;Jarvis&quot; to start talking">Wake</button>
+        <button data-mode="open" title="Always listening — just talk, no wake word">Open</button>
+      </div>
+      <span class="ctl-ic" id="audio-ic" title="Audio output (spoken replies)">🔊</span>
+      <label class="switch" title="Audio output (spoken replies / text-to-speech)">
+        <input type="checkbox" id="audio-toggle" checked>
+        <span class="slider"></span>
+      </label>
+      <div class="session-menu">
+        <button id="sessions-btn" class="ghost">Sessions ▾</button>
+        <div class="session-drop" id="sessions-drop" hidden>
+          <div class="sd-row">
+            <button id="session-save" class="ghost">💾 Save current</button>
+            <button id="session-new" class="ghost">＋ New</button>
+            <label class="ghost import-lbl">⤒ Import<input id="session-import" type="file" accept="application/json" hidden></label>
+          </div>
+          <div class="sd-cur" id="session-current"></div>
+          <div id="sessions-items"><div class="hint">No saved sessions.</div></div>
+        </div>
+      </div>
+      <button id="selftest-btn" class="ghost">System self-test</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="chat">
+      <div class="messages" id="messages">
+        <div class="msg assistant"><div class="bubble">
+          JARVIS online. I have memory (a database I own), a root Linux workbench I can
+          work in, and our two shared folders. Ask me anything, or turn on voice and say
+          <strong>"Jarvis"</strong> to start talking.
+        </div></div>
+      </div>
+      <form class="composer" id="composer">
+        <textarea id="input" rows="1" autocomplete="off" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </section>
+
+    <aside class="side">
+      <div class="tabs">
+        <button class="tab active" data-tab="activity">Activity</button>
+        <button class="tab" data-tab="tasks">Tasks</button>
+        <button class="tab" data-tab="workbench">Workbench</button>
+      </div>
+      <div class="panel active" id="panel-activity">
+        <div class="activity" id="activity">
+          <div class="hint">Tool calls (memory, shell, files) stream here so you can watch what JARVIS does.</div>
+        </div>
+      </div>
+      <div class="panel" id="panel-tasks">
+        <div class="tasks-pane">
+          <div class="tasks-head">
+            <h4>Scheduled tasks</h4><button id="tasks-refresh" class="ghost">↻</button>
+          </div>
+          <div id="tasks-list"><div class="hint">No scheduled tasks.</div></div>
+          <h4>Recent notifications</h4>
+          <div id="notes-list"><div class="hint">No notifications yet.</div></div>
+        </div>
+      </div>
+      <div class="panel" id="panel-workbench">
+        <iframe id="desktop" title="JARVIS Workbench desktop"></iframe>
+        <a id="desktop-link" class="desktop-link" target="_blank" rel="noopener">Open desktop in a new tab ↗</a>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/voice.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

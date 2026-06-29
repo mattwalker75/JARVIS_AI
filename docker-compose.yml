@@ -1,0 +1,98 @@
+name: jarvis
+
+# JARVIS multi-container stack. Everything binds to 127.0.0.1 (localhost only).
+#
+#   jarvis-app        Node.js backend + JS frontend (the orchestrator)        :8110
+#   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
+#   jarvis-litellm    LiteLLM gateway — one endpoint -> many model providers  :4000
+#   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111
+#
+# The app reaches the workbench via the Docker socket (docker exec), the memory
+# service + gateway over the internal network, and mounts the shared folders into
+# both the app and the workbench so files can be exchanged between you and the LLM.
+
+services:
+  jarvis-workbench:
+    build:
+      context: ./workbench
+      dockerfile: Dockerfile
+    image: jarvis-workbench:local
+    container_name: jarvis-workbench
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-America/Los_Angeles}
+      TITLE: JARVIS Workbench
+    ports:
+      - "127.0.0.1:${WORKBENCH_PORT:-8111}:3000"
+      - "127.0.0.1:9101-9150:9101-9150"   # web-app preview ports (serve_app tool)
+    volumes:
+      - jarvis_workbench_home:/config
+      - jarvis_workbench_work:/workspace
+      - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
+      - ./READ_WRITE_FILES:/READ_WRITE_FILES
+    shm_size: "1gb"
+
+  jarvis-memory:
+    build:
+      context: ./memory
+      dockerfile: Dockerfile
+    image: jarvis-memory:local
+    container_name: jarvis-memory
+    restart: unless-stopped
+    environment:
+      JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
+      MEM0_CHROMA_PATH: /data/chroma
+    ports:
+      - "127.0.0.1:${MEMORY_PORT:-8120}:8000"
+    volumes:
+      - ./memory/server.py:/app/server.py:ro
+      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
+      - jarvis_memory_data:/data
+
+  jarvis-litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: jarvis-litellm
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+
+  jarvis-app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: jarvis-app
+    restart: unless-stopped
+    depends_on:
+      jarvis-litellm:
+        condition: service_started
+    environment:
+      JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
+      JARVIS_TASKS_FILE: /data/tasks.json
+      PORT: "80"
+    ports:
+      - "127.0.0.1:${APP_PORT:-8110}:80"
+    volumes:
+      - ./app:/usr/src/app
+      - /usr/src/app/node_modules
+      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
+      - ./JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
+      - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
+      - ./READ_WRITE_FILES:/READ_WRITE_FILES
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  jarvis_workbench_home:
+  jarvis_workbench_work:
+  jarvis_memory_data:

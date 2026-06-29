@@ -1,0 +1,31 @@
+# Secrets / local config
+JARVIS_CONFIG.json
+JARVIS_SECRETS.json
+.env
+
+# Node
+app/node_modules/
+node_modules/
+
+# Database backups
+backups/*.sql
+
+# Shared read-write workspace contents (keep the folder, ignore its files)
+shared_rw/*
+!shared_rw/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Scheduler task/notification state
+data/*.json
+data/sessions/
+
+# Shared file-exchange folders
+READ_WRITE_FILES/*
+!READ_WRITE_FILES/.gitkeep
+READ_ONLY_FILES/*
+!READ_ONLY_FILES/.gitkeep
+!READ_ONLY_FILES/README.txt
