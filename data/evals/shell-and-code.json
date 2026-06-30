@@ -1,0 +1,12 @@
+[
+  {
+    "name": "shell-run",
+    "messages": [{ "role": "user", "content": "Use your shell to run exactly: echo EVAL_SHELL_OK  — then tell me what it printed." }],
+    "expect": { "tools_used": ["run_shell"], "contains": ["EVAL_SHELL_OK"], "max_cost_usd": 0.03 }
+  },
+  {
+    "name": "code-write-run-verify",
+    "messages": [{ "role": "user", "content": "Write a Python script that prints 7 factorial (i.e. 5040), save it to the workbench, run it, and tell me the result it printed." }],
+    "expect": { "tools_used": ["write_workbench_file", "run_shell"], "contains": ["5040"], "max_ms": 60000, "max_cost_usd": 0.05 }
+  }
+]

@@ -28,6 +28,9 @@
 #       --backup-memory   Save the semantic memory (Mem0 vector store) to backups/jarvis-memory-<ts>.tgz.
 #       --restore-memory [--from <file>]   Restore the memory from a backup tarball,
 #                      or (no --from) reset to a FRESH empty memory.
+#       --backup-workspace   Save the workbench /workspace to backups/jarvis-workspace-<ts>.tgz.
+#       --restore-workspace [--from <file>]   Restore /workspace from a backup,
+#                      or (no --from) reset it to EMPTY.
 #   -h, --help         Show this help.
 #
 # Lifecycle flags run in the order given, e.g.:  ./JARVIS.sh --setup --start
@@ -54,6 +57,8 @@
 #   # Back up / restore the LLM's semantic memory (Mem0 vector store):
 #   ./JARVIS.sh --backup-memory
 #   ./JARVIS.sh --restore-memory --from backups/jarvis-memory-20260628-101500.tgz
+#   ./JARVIS.sh --backup-workspace        # the LLM's /workspace project/code dir
+#   ./JARVIS.sh --restore-workspace --from backups/jarvis-workspace-20260628-101500.tgz
 #
 #   # Stop the stack, or fully tear it down (removes containers, network, AND
 #   # all data volumes -- wipes the semantic memory + workspace):
@@ -67,7 +72,8 @@
 #   data/sessions/<id>.json        saved conversations ("Save current" in the web UI; /save in --terminal)
 #   data/tasks.json                scheduled tasks + notification history
 #   READ_WRITE_FILES/              files JARVIS writes for you (READ_ONLY_FILES/ = files you share to it)
-#   backups/jarvis-memory-<ts>.tgz semantic-memory backups (--backup-memory)
+#   backups/jarvis-memory-<ts>.tgz    semantic-memory backups (--backup-memory)
+#   backups/jarvis-workspace-<ts>.tgz workbench /workspace backups (--backup-workspace)
 #   These survive --delete (they are bind mounts); the semantic memory + /workspace Docker volumes are wiped.
 #
 set -uo pipefail
@@ -80,6 +86,7 @@ WB_CONTAINER="jarvis-workbench"
 MEM_CONTAINER="jarvis-memory"
 LITELLM_CONTAINER="jarvis-litellm"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
+WB_VOLUME="${PROJECT}_jarvis_workbench_work"
 APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"; LITELLM_PORT="4000"
 
 # Export provider API keys from JARVIS_CONFIG.json so the LiteLLM gateway can reach
@@ -267,6 +274,44 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
   fi
 }
 
+# The workbench /workspace (the LLM's persistent project/code dir) lives in the
+# jarvis_workbench_work volume. Back it up / restore it as a tarball.
+cmd_backup_workspace() {
+  require_daemon
+  container_running "$WB_CONTAINER" || { err "Workbench is not running. Start it first: ./JARVIS.sh --start"; return 1; }
+  mkdir -p "${SCRIPT_DIR}/backups"
+  local ts file; ts="$(date +%Y%m%d-%H%M%S)"; file="${SCRIPT_DIR}/backups/jarvis-workspace-${ts}.tgz"
+  info "Backing up the workbench /workspace -> backups/jarvis-workspace-${ts}.tgz ..."
+  if docker exec "$WB_CONTAINER" sh -lc 'tar czf - -C /workspace .' > "$file" && [[ -s "$file" ]]; then
+    ok "Backup written: backups/jarvis-workspace-${ts}.tgz ($(du -h "$file" | cut -f1 | tr -d ' '))"
+  else
+    err "Backup failed."; rm -f "$file"; return 1
+  fi
+}
+
+cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /workspace)
+  require_daemon
+  local from="$1"
+  if [[ -n "$from" ]]; then
+    [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
+    warn "Restoring the workbench /workspace from ${from} — this REPLACES its current contents."
+    info "Stopping the workbench to restore cleanly..."
+    dc stop "$WB_CONTAINER" >/dev/null 2>&1 || true
+    if docker run --rm -i -v "${WB_VOLUME}:/data" alpine sh -c 'rm -rf /data/* /data/..?* 2>/dev/null; tar xzf - -C /data' < "$from"; then
+      dc up -d "$WB_CONTAINER" >/dev/null 2>&1 || return 1
+      ok "Workspace restored from ${from}. (the workbench desktop takes a few seconds to come back)"
+    else
+      err "Restore failed."; dc up -d "$WB_CONTAINER" >/dev/null 2>&1 || true; return 1
+    fi
+  else
+    warn "Resetting the workbench /workspace to EMPTY — this DESTROYS its current contents."
+    dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
+    docker volume rm "$WB_VOLUME" >/dev/null 2>&1 || true
+    dc up -d "$WB_CONTAINER" || return 1
+    ok "Fresh, empty /workspace deployed."
+  fi
+}
+
 usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
 main() {
@@ -295,6 +340,12 @@ main() {
         if [[ "$(lc "${2:-}")" == "--from" || "$(lc "${2:-}")" == "--from-backup" ]]; then from="${3:-}"; shift 2;
         elif [[ "$(lc "${2:-}")" == "--fresh" ]]; then shift 1; fi
         cmd_restore_memory "$from" || rc=$? ;;
+      --backup-workspace)  cmd_backup_workspace || rc=$? ;;
+      --restore-workspace)
+        local fromw=""
+        if [[ "$(lc "${2:-}")" == "--from" || "$(lc "${2:-}")" == "--from-backup" ]]; then fromw="${3:-}"; shift 2;
+        elif [[ "$(lc "${2:-}")" == "--fresh" ]]; then shift 1; fi
+        cmd_restore_workspace "$fromw" || rc=$? ;;
       -h|--help)    usage ;;
       check) cmd_check || rc=$? ;; setup) cmd_setup || rc=$? ;; start) cmd_start || rc=$? ;;
       reload) cmd_reload || rc=$? ;; terminal) cmd_terminal || rc=$? ;;

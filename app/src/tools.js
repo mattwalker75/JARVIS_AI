@@ -32,6 +32,18 @@ async function runShell(command) {
   });
 }
 
+// Write a file anywhere in the workbench (e.g. /workspace/app.py) RELIABLY, with no
+// shell-quoting issues — content is base64-piped in. Use this to create code/config
+// files for the workbench instead of run_shell heredocs/echo.
+async function writeWorkbenchFile(p, content) {
+  if (!p || !String(p).startsWith("/")) throw new Error("path must be an absolute workbench path, e.g. /workspace/app.py");
+  const b64 = Buffer.from(content == null ? "" : String(content)).toString("base64");
+  const dir = String(p).replace(/\/[^/]*$/, "") || "/";
+  const r = await runShell(`mkdir -p ${shq(dir)} && printf %s ${shq(b64)} | base64 -d > ${shq(p)} && wc -c < ${shq(p)}`);
+  if (r.exit_code) throw new Error("write failed: " + (r.output || "").slice(0, 300));
+  return { written: p, bytes: parseInt((r.output || "0").trim(), 10) || 0 };
+}
+
 // --- shared files (read-only + read-write dirs) ---
 function resolveShared(p, mustWrite) {
   const ro = config.shared.read_only_dir;
@@ -267,13 +279,15 @@ async function serveApp(command, port, cwd) {
     try { const r = await fetch(`http://jarvis-workbench:${port}/`, { signal: AbortSignal.timeout(2500) }); status = r.status; reachable = true; break; } catch (_) {}
   }
   const log = await runShell(`tail -n 20 /workspace/.preview_${port}.log 2>/dev/null`);
-  return {
-    url: `http://localhost:${port}`, reachable, status,
-    note: reachable
-      ? `The app is live — tell the user to open http://localhost:${port} in their browser to preview/test it.`
-      : `Not reachable yet: make sure the server binds to 0.0.0.0:${port} (NOT 127.0.0.1/localhost). See the log below.`,
-    log: (log.output || "").slice(-1500),
-  };
+  let note;
+  if (!reachable) {
+    note = `NOT reachable: make sure the server binds to 0.0.0.0:${port} (NOT 127.0.0.1/localhost), and that it started without errors (see log). Do not tell the user it's ready.`;
+  } else if (status >= 400) {
+    note = `Server is UP but GET / returned ${status} — there is NO page at the root, so the user's browser will show an error. The user opens http://localhost:${port}/ in a browser, so you MUST serve an interactive HTML UI at GET / (a real page they can use), not only API endpoints. Add the homepage, restart, and re-check that GET / returns 200 before telling the user.`;
+  } else {
+    note = `Live and serving a page at / (HTTP ${status}) — tell the user to open http://localhost:${port} in their browser to preview/test it.`;
+  }
+  return { url: `http://localhost:${port}`, reachable, status, ok_homepage: reachable && status < 400, note, log: (log.output || "").slice(-1500) };
 }
 
 const toolDefs = [
@@ -292,8 +306,11 @@ const toolDefs = [
   { type: "function", function: { name: "run_shell",
     description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code.",
     parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } },
+  { type: "function", function: { name: "write_workbench_file",
+    description: "Write a text/code file to an absolute path in your workbench (e.g. /workspace/app.py). Use THIS to create code/config files for the workbench — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
+    parameters: { type: "object", properties: { path: { type: "string", description: "Absolute workbench path, e.g. /workspace/app.py" }, content: { type: "string" } }, required: ["path", "content"] } } },
   { type: "function", function: { name: "serve_app",
-    description: "Run a web app/server inside the workbench and expose it so the USER can open it in their OWN browser to preview/test it (e.g. before you hand over the code). Build the app under /workspace, then call this with the command that starts the server BOUND TO 0.0.0.0 on one of the preview ports (9101-9150). Returns http://localhost:<port> for the user to visit; the server keeps running in the background (call again to restart). Bind-correct examples: 'python3 -m http.server 9101 --bind 0.0.0.0'; a Node app that listens on 0.0.0.0:9102; 'flask run --host 0.0.0.0 --port 9103'; 'npm run dev -- --host 0.0.0.0 --port 9104'. Also save the final code to /READ_WRITE_FILES.",
+    description: "Run a web app/server inside the workbench and expose it so the USER can open it in their OWN browser to preview/test it (e.g. before you hand over the code). The app MUST serve a real, interactive HTML page at GET / (a working UI the user can actually use) — NOT just JSON/API endpoints, or the browser shows 'Cannot GET /' and it looks broken. Build the app under /workspace, then call this with the command that starts the server BOUND TO 0.0.0.0 on one of the preview ports (9101-9150). The tool reports whether GET / returned 200 (ok_homepage); if it didn't, add the homepage UI and call again BEFORE telling the user it's ready. Returns http://localhost:<port> for the user to visit; the server keeps running in the background. Bind-correct examples: 'python3 -m http.server 9101 --bind 0.0.0.0' (serves files incl. index.html); a Node/Express app that serves a page at '/' and listens on 0.0.0.0:9102; 'flask run --host 0.0.0.0 --port 9103'. Also save the final code to /READ_WRITE_FILES.",
     parameters: { type: "object", properties: {
       command: { type: "string", description: "Command that starts the server, listening on 0.0.0.0:<port>." },
       port: { type: "integer", description: "One of 9101-9150 (exposed to the host browser)." },
@@ -438,6 +455,7 @@ async function _execTool(name, args) {
     case "list_memories": return await listMemories();
     case "delete_memory": return await deleteMemory(args.id);
     case "run_shell": return await runShell(args.command);
+    case "write_workbench_file": return await writeWorkbenchFile(args.path, args.content);
     case "serve_app": return await serveApp(args.command, args.port, args.cwd);
     case "list_dir": return await listDir(args.path);
     case "read_file": return await readFile(args.path);

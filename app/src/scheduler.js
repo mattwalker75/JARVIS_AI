@@ -115,10 +115,11 @@ async function runTask(task) {
   } else {
     sys += "When finished, call notify_user with a concise summary of the result so the user is informed.";
   }
-  sys += " Based on what you find, take whatever actions are appropriate using your tools. To post a message into the user's live chat conversation window, call post_to_chat; to send a passive alert/notification, call notify_user.";
+  sys += " Based on what you find, take whatever actions are appropriate using your tools. OUTPUT DESTINATIONS — send results wherever the task asks (default to what the user's instructions say): post_to_chat(message) writes a message straight into the user's LIVE CHAT conversation window (use this whenever the task should show its output in the chat / talk to the user); notify_user(message) is a passive alert/badge (and it STOPS a recurring task, so only use it as the stop signal or for one-shots); append_log/write_file to /READ_WRITE_FILES is a persistent file/log. You can combine them (e.g. log to a file AND post_to_chat). If the user asked for the result in the conversation, you MUST call post_to_chat — do not just put it in your final text (that goes only to the task record, not the chat).";
   sys += " HONESTY IS CRITICAL: report only what your tools actually returned. If a tool errors or returns empty/no data, say so plainly and do NOT invent values or claim success. Always VERIFY side effects — after writing to a file, read it back to confirm the new content is there. If this task LOGS to a file on a schedule, use append_log(path, message) so every entry has the SAME format (uniform timestamp, one line, never run together) — do not hand-format timestamps or vary the wording between runs. (append_log writes to the read-write shared folder; for the workbench /workspace use run_shell with `>>`, and write_file overwrites unless you pass append=true.)";
-  let notified = false;
+  let notified = false, hadError = false;
   const toolStats = {};
+  const data = { ok: 0, empty: 0 }; // did data-producing tools actually return content?
   const emit = (ev) => {
     if (ev.type === "tool") {
       if (ev.tool === "notify_user") notified = true;
@@ -127,12 +128,23 @@ async function runTask(task) {
       const st = (toolStats[ev.tool] = toolStats[ev.tool] || { ok: 0, err: 0 });
       const errored = typeof ev.output === "string" && /"error"\s*:/.test(ev.output);
       errored ? st.err++ : st.ok++;
+      if (!errored && (ev.tool === "run_shell" || ev.tool === "fetch_url" || ev.tool === "web_search")) {
+        let empty = false;
+        try {
+          const o = JSON.parse(ev.output);
+          const body = o.output != null ? o.output : (o.content != null ? o.content : null);
+          if (typeof body === "string" && body.trim() === "") empty = true;
+          if (Array.isArray(o.results) && o.results.length === 0) empty = true;
+        } catch (_) {}
+        empty ? data.empty++ : data.ok++;
+      }
     }
   };
   let result = "";
   try {
     result = await llm.chat({ messages: [{ role: "system", content: sys }, { role: "user", content: task.prompt }], emit, tier: "cheap" });
   } catch (e) {
+    hadError = true;
     result = "error: " + e.message;
     pushNotification({ task_id: task.id, label: task.label, level: "error", message: `Scheduled task failed: ${e.message}` });
   }
@@ -140,18 +152,35 @@ async function runTask(task) {
   // it shows which tools ACTUALLY ran (✓ ok / ✗ errored), or that none did.
   const usedTools = Object.entries(toolStats)
     .map(([n, s]) => `${n}${s.err ? "✗" : "✓"}${(s.ok + s.err) > 1 ? "×" + (s.ok + s.err) : ""}`).join(", ");
-  result = (result || "") + "\n[tools: " + (usedTools || "none — text-only reply, nothing was actually done") + "]";
+  // "no effective result": the run accomplished nothing useful — no tools ran, every
+  // tool errored, or data-producing tools returned empty (e.g. a dead API / wrong cmd).
+  const totalCalls = Object.values(toolStats).reduce((n, s) => n + s.ok + s.err, 0);
+  const totalOk = Object.values(toolStats).reduce((n, s) => n + s.ok, 0);
+  const noEffect = !hadError && !notified &&
+    (totalCalls === 0 || totalOk === 0 || (data.ok === 0 && data.empty > 0));
+  result = (result || "") + "\n[tools: " + (usedTools || "none — text-only reply, nothing was actually done") + (noEffect ? " | ⚠ no effective result" : "") + "]";
 
   const s = read();
   const t = s.tasks.find((x) => x.id === task.id);
   if (!t || t.status === "cancelled") { return; } // user cancelled mid-run
   t.runs++; t.last_run = Date.now(); t.last_result = (result || "").slice(0, 2000);
+  // Alert the user when a RECURRING task runs but does nothing useful — once, until it
+  // recovers (a one-shot already notifies on completion with the ⚠ in its result, so
+  // the standalone warning is only needed for recurring tasks that otherwise stay quiet).
+  if (noEffect && isRecurring) {
+    if (!t.warned_ineffective) {
+      t.warned_ineffective = true;
+      pushNotification({ task_id: t.id, label: t.label, level: "warn", message: `Recurring task${t.label ? ` "${t.label}"` : ""} ran but produced NO effective result (no successful action/data). It may be misconfigured — a dead API, wrong command, or nothing to do. Check the task.` });
+    }
+  } else if (!noEffect && t.warned_ineffective) {
+    t.warned_ineffective = false; // recovered
+  }
   // Report every run (even when no notification fires) so it's visible.
-  if (runCb) { try { runCb({ id: t.id, label: t.label, type: t.type, ran_at: t.last_run, runs: t.runs, result: (result || "").slice(0, 1200), notified }); } catch (_) {} }
+  if (runCb) { try { runCb({ id: t.id, label: t.label, type: t.type, ran_at: t.last_run, runs: t.runs, result: (result || "").slice(0, 1200), notified, flag: noEffect ? "no-effect" : null }); } catch (_) {} }
   if (!isRecurring) {
     t.status = "done";
     write(s);
-    if (!notified) pushNotification({ task_id: t.id, label: t.label, level: "info", message: `Scheduled task done${t.label ? ` (${t.label})` : ""}:\n${t.last_result}` });
+    if (!notified) pushNotification({ task_id: t.id, label: t.label, level: noEffect ? "warn" : "info", message: `Scheduled task ${noEffect ? "ran but produced NO effective result" : "done"}${t.label ? ` (${t.label})` : ""}:\n${t.last_result}` });
   } else if (notified) {
     t.status = "done"; // condition met -> stop the recurring task
     write(s);

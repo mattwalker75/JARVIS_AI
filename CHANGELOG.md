@@ -268,6 +268,67 @@ infrastructure, security, documentation, or test-policy changes.
   ambiguous "build me a dashboard" produced focused clarifying questions instead of
   guessing.
 
+- 2026-06-29: Made web-app previews reliably show a working UI. Root cause of "the
+  demo doesn't work": the model built API-only servers (no GET / route), so the browser
+  showed "Cannot GET /" even though the server was up — and serve_app reported "reachable"
+  regardless of status. serve_app now checks GET / and returns `ok_homepage` + the HTTP
+  status, with an explicit warning when / is 4xx/5xx (and the not-reachable message says
+  not to tell the user it's ready). The tool description, the system prompt, and the
+  `web-preview` skill (now with a known-good single-file Express UI+API template) require
+  serving a real interactive HTML page at GET /, using a preview port 9101-9150, iterating
+  in one app dir, and confirming 200 before handing the URL to the user.
+- 2026-06-29: Added an explicit `llm.model_mode` switch (`single` | `multi`).
+  `single` routes every task tier to `llm.model` (the `models` block is ignored, so it
+  can stay defined); `multi` uses the per-task tiers with fallback. Omitting the key
+  auto-detects (multi if a `models` block is present, else single). Implemented in
+  `config.js` (`modelMode()`, used by `modelFor()` and surfaced in `publicConfig`), and
+  documented in both `JARVIS_CONFIG.json` and `JARVIS_CONFIG_template.json` with
+  `_model_mode_comment`/`_models_comment`. So a single-model setup is a one-line flip.
+
+- 2026-06-29: Added a `TEMPLATES/` directory of ready-to-use example configs:
+  `JARVIS_CONFIG.single-openai` (OpenAI direct, simplest), `openai-tiers` (OpenAI
+  multi-tier via gateway), `multi-model` (OpenAI+Claude+Gemini), `anthropic-claude`,
+  `local-ollama`, `local-openai-compatible` (LM Studio/llama.cpp/vLLM), and
+  `mock-offline`; plus `JARVIS_SECRETS.empty`/`example` and a README. Each config is a
+  complete copy-paste-ready file (full system prompt) generated from
+  `JARVIS_CONFIG_template.json` by `TEMPLATES/_generate.py` — only the `llm` block
+  differs per scenario. Templates use REPLACE_ME placeholders (safe to commit); the
+  README documents the gateway-vs-direct choice and the Mem0/embeddings caveat for
+  local setups.
+
+- 2026-06-29: "Test what you build." Added a system-prompt principle: whenever the
+  model generates code/a program it must RUN it and do a baseline functionality test
+  before saying it's done (scripts: execute on a representative input, check output +
+  exit code; web apps: after GET / is 200, exercise the real endpoints/UI via curl or
+  Playwright) and report what it tested. Reinforced in the web-preview and workbench
+  skills. To make this practical, added a `write_workbench_file(path, content)` tool
+  that writes code files into the workbench reliably (base64-piped, no shell-quoting
+  issues) — eliminating run_shell heredoc thrashing (a factorial test went from 13
+  flailing run_shell calls to write_workbench_file + one run_shell). Bumped
+  `max_tool_iterations` 12 -> 15 for build-test-fix loops; regenerated the TEMPLATES.
+
+- 2026-06-29: Added a persistent "still working" indicator to the chat. Previously the
+  3-dot typing indicator vanished as soon as the first token streamed, so during long
+  tool-running phases (e.g. coding tasks) there was no sign the LLM was still going.
+  Now an animated-dots indicator stays pinned at the bottom of the chat from send until
+  the reply/ error completes, showing what it's doing (`running <tool>…`, `responding…`,
+  `working…`) and a live elapsed timer (Ns). Frontend only (`app/public/app.js` +
+  `style.css`, with a prefers-reduced-motion fallback) — refresh the browser to get it.
+
+- 2026-06-29: Tasks now flag "no effective result." The scheduler detects when a run
+  accomplished nothing useful — no tools called, every tool errored, or data-producing
+  tools (run_shell/fetch_url/web_search) returned empty (e.g. a dead API) — marks the
+  run `⚠ no effective result`, and notifies the user (once, until it recovers, for
+  recurring tasks; one-shots surface it as a warn-level completion). Catches silently
+  broken tasks instead of letting them log nothing forever. Verified on a no-op task.
+- 2026-06-29: Grew the eval suite into a per-capability regression set under
+  `data/evals/` (reasoning, memory store/recall, file write/read + append_log,
+  shell + write_workbench_file→run→verify, internet + tasks), with a README. `--eval`
+  runs them through the live model; verified 10/10 pass.
+- 2026-06-29: Added `--backup-workspace` / `--restore-workspace` to JARVIS.sh (mirrors
+  the memory backup): tar the workbench `/workspace` volume to
+  backups/jarvis-workspace-<ts>.tgz and restore it (or reset to empty). Verified.
+
 ### Notes
 - The LLM intentionally has root in the workbench container, open internet access,
   and computer-use control of the desktop; structured data lives in workbench

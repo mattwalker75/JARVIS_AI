@@ -23,11 +23,22 @@ function systemPrompt() {
   return sp.replace(/\{assistant_name\}/g, assistantName());
 }
 
-// Resolve a model for a task tier (chat | cheap | vision | smart). Each tier can
-// name ANY model the gateway knows (configured under llm.models); falls back to the
-// chat tier and then the legacy llm.model.
+// "single" => every task tier uses llm.model (the models block is ignored).
+// "multi"  => use the per-task tiers (with fallback). If unset, infer: multi when a
+// non-empty models block is present, else single.
+function modelMode() {
+  const llm = config.llm || {};
+  const mode = String(llm.model_mode || "").toLowerCase();
+  if (mode === "single" || mode === "multi") return mode;
+  return llm.models && Object.keys(llm.models).length ? "multi" : "single";
+}
+
+// Resolve a model for a task tier (chat | cheap | vision | smart). In multi-model
+// mode each tier can name ANY model the gateway knows (under llm.models), falling
+// back to the chat tier then llm.model. In single-model mode all tiers use llm.model.
 function modelFor(tier) {
   const llm = config.llm || {};
+  if (modelMode() === "single") return llm.model || "gpt-4o-mini";
   const m = llm.models || {};
   return m[tier] || m.chat || llm.model || "gpt-4o-mini";
 }
@@ -41,7 +52,8 @@ function publicConfig() {
     title: name,
     provider: llm.provider || "",
     model: modelFor("chat"),
-    models: llm.models || {},
+    model_mode: modelMode(),
+    models: modelMode() === "multi" ? (llm.models || {}) : {},
     voice: {
       enabled: v.enabled !== false,
       tts: v.tts !== false,
@@ -80,4 +92,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt };
+module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt };

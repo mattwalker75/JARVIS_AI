@@ -1,0 +1,12 @@
+[
+  {
+    "name": "internet-fetch",
+    "messages": [{ "role": "user", "content": "Fetch https://api.ipify.org?format=json and tell me the name of the single JSON field it returns." }],
+    "expect": { "tools_used": ["fetch_url"], "contains": ["ip"], "max_ms": 40000, "max_cost_usd": 0.03 }
+  },
+  {
+    "name": "tasks-list",
+    "messages": [{ "role": "user", "content": "List my currently scheduled tasks." }],
+    "expect": { "tools_used": ["list_tasks"], "max_cost_usd": 0.03 }
+  }
+]

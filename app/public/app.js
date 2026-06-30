@@ -8,7 +8,8 @@ const audioToggle = $("audio-toggle"), audioIc = $("audio-ic");
 const desktop = $("desktop"), desktopLink = $("desktop-link");
 
 const history = [];
-let cfg = null, ws = null, typingEl = null;
+let cfg = null, ws = null;
+let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let streamBubble = null, streamText = "";   // the assistant bubble being streamed into
 
 const esc = (s) => (s || "").replace(/[&<>"']/g, (c) =>
@@ -20,12 +21,34 @@ function addMessage(role, text, cls) {
   b.innerHTML = esc(text); wrap.appendChild(b);
   messagesEl.appendChild(wrap); messagesEl.scrollTop = messagesEl.scrollHeight; return b;
 }
-function showTyping() {
-  const w = document.createElement("div"); w.className = "msg assistant";
-  w.innerHTML = '<div class="bubble typing">…</div>';
-  messagesEl.appendChild(w); messagesEl.scrollTop = messagesEl.scrollHeight; return w;
+// Persistent "JARVIS is still working" indicator: animated dots + what it's doing +
+// a live elapsed timer. Stays pinned at the bottom of the chat until the reply
+// completes (or errors), so you can always tell whether it's still going.
+function showWorking(label) {
+  if (!workingEl) {
+    const w = document.createElement("div"); w.className = "msg assistant working-msg";
+    w.innerHTML = '<div class="bubble working"><span class="dots"><span></span><span></span><span></span></span>' +
+      '<span class="wlabel"></span><span class="wtime"></span></div>';
+    messagesEl.appendChild(w);
+    workingEl = w; workingStart = Date.now();
+    workingTimer = setInterval(() => {
+      const t = workingEl && workingEl.querySelector(".wtime");
+      if (t) t.textContent = Math.round((Date.now() - workingStart) / 1000) + "s";
+    }, 1000);
+  }
+  if (label != null) { const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = label; }
+  messagesEl.appendChild(workingEl);                 // keep it pinned to the bottom
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
-function removeTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
+function labelWorking(text) {
+  if (!workingEl) return;
+  const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = text;
+}
+function pinWorking() { if (workingEl) messagesEl.appendChild(workingEl); } // keep below streamed text
+function hideWorking() {
+  if (workingTimer) { clearInterval(workingTimer); workingTimer = null; }
+  if (workingEl) { workingEl.remove(); workingEl = null; }
+}
 
 function addActivity(tool, input, output) {
   const hint = activityEl.querySelector(".hint"); if (hint) hint.remove();
@@ -41,17 +64,16 @@ function connectWS() {
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (ev) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
-    if (d.type === "tool") addActivity(d.tool, d.input);
-    else if (d.type === "tool_result") addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output);
+    if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
+    else if (d.type === "tool_result") { addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
     else if (d.type === "usage") addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
     else if (d.type === "token") {
-      removeTyping();
-      if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; }
+      if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; labelWorking("responding…"); pinWorking(); }
       streamText += d.text;
       streamBubble.innerHTML = esc(streamText);
       messagesEl.scrollTop = messagesEl.scrollHeight;
     } else if (d.type === "reply") {
-      removeTyping();
+      hideWorking();
       const t = d.text || "";
       const finalText = streamBubble ? (streamText || t) : t;
       if (streamBubble) streamBubble.innerHTML = esc(finalText);
@@ -60,7 +82,7 @@ function connectWS() {
       if (window.JarvisVoice) JarvisVoice.speak(t || finalText);
       streamBubble = null; streamText = "";
     } else if (d.type === "error") {
-      removeTyping(); streamBubble = null; streamText = "";
+      hideWorking(); streamBubble = null; streamText = "";
       addMessage("assistant", "Error: " + d.error, "error");
     } else if (d.type === "notification") {
       showNotification(d.note);
@@ -89,7 +111,7 @@ function send(text) {
   text = (text || "").trim(); if (!text) return;
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Connecting… try again in a moment.", "error"); return; }
   addMessage("user", text); history.push({ role: "user", content: text });
-  inputEl.value = ""; autoGrow(); typingEl = showTyping();
+  inputEl.value = ""; autoGrow(); showWorking("working…");
   ws.send(JSON.stringify({ type: "chat", messages: history }));
 }
 
