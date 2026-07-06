@@ -13,9 +13,11 @@
       <div>
         <div class="title" id="brand-title">JARVIS</div>
         <div class="model" id="model-badge">—</div>
+        <div class="usage" id="session-usage"></div>
       </div>
     </div>
     <div class="controls">
+      <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
       <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
       <span class="mic" id="mic-state" title="voice state">voice off</span>
       <span class="ctl-ic" title="Microphone mode">🎙️</span>
@@ -54,9 +56,11 @@
           <strong>"Jarvis"</strong> to start talking.
         </div></div>
       </div>
+      <button id="jump-bottom" class="jump-btn" title="Jump to latest" hidden>↓ Latest</button>
       <form class="composer" id="composer">
         <textarea id="input" rows="1" autocomplete="off" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
         <button id="send" type="submit">Send</button>
+        <button id="stop" type="button" class="stop-btn" title="Stop processing (Esc)" hidden>⏹ Stop</button>
       </form>
     </section>
 
@@ -64,6 +68,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="activity">Activity</button>
         <button class="tab" data-tab="tasks">Tasks</button>
+        <button class="tab" data-tab="memory">Memory</button>
         <button class="tab" data-tab="workbench">Workbench</button>
       </div>
       <div class="panel active" id="panel-activity">
@@ -76,9 +81,27 @@
           <div class="tasks-head">
             <h4>Scheduled tasks</h4><button id="tasks-refresh" class="ghost">↻</button>
           </div>
+          <div class="quick-add">
+            <input id="qa-prompt" placeholder="Quick task, e.g. remind me to stretch" autocomplete="off">
+            <div class="qa-row">
+              <select id="qa-mode"><option value="in">in</option><option value="every">every</option></select>
+              <input id="qa-num" type="number" min="1" value="5">
+              <span>min</span>
+              <button id="qa-add" class="ghost">Add</button>
+            </div>
+          </div>
           <div id="tasks-list"><div class="hint">No scheduled tasks.</div></div>
-          <h4>Recent notifications</h4>
+          <div class="tasks-head"><h4>Recent notifications</h4><button id="notes-clear" class="ghost">Clear</button></div>
           <div id="notes-list"><div class="hint">No notifications yet.</div></div>
+        </div>
+      </div>
+      <div class="panel" id="panel-memory">
+        <div class="tasks-pane">
+          <div class="tasks-head">
+            <h4>Long-term memory</h4><button id="mem-refresh" class="ghost">↻</button>
+          </div>
+          <input id="mem-search" class="mem-search" placeholder="Filter memories…" autocomplete="off">
+          <div id="mem-list"><div class="hint">Semantic memories JARVIS has saved about you.</div></div>
         </div>
       </div>
       <div class="panel" id="panel-workbench">

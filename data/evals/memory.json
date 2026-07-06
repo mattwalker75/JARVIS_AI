@@ -1,12 +1,37 @@
 [
   {
     "name": "memory-store",
-    "messages": [{ "role": "user", "content": "Remember this exact detail: my eval test code is XYZZY-42." }],
-    "expect": { "tools_used": ["add_memory"], "max_cost_usd": 0.03 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "Remember this exact detail: my eval test code is XYZZY-42."
+      }
+    ],
+    "expect": {
+      "tools_used": [
+        "add_memory"
+      ],
+      "max_cost_usd": 0.03,
+      "max_ms": 120000
+    }
   },
   {
     "name": "memory-recall",
-    "messages": [{ "role": "user", "content": "Search your memory and tell me my eval test code." }],
-    "expect": { "tools_used": ["search_memory"], "contains": ["XYZZY-42"], "max_cost_usd": 0.03 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "Search your memory and tell me my eval test code."
+      }
+    ],
+    "expect": {
+      "tools_used": [
+        "search_memory"
+      ],
+      "contains": [
+        "XYZZY-42"
+      ],
+      "max_cost_usd": 0.03,
+      "max_ms": 120000
+    }
   }
 ]

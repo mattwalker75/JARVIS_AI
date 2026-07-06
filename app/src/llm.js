@@ -25,13 +25,15 @@ function estimateCost(model, u) {
   return +(((u.prompt_tokens || 0) / 1000) * pi + ((u.completion_tokens || 0) / 1000) * po).toFixed(6);
 }
 
-async function chat({ messages, emit, tier }) {
+async function chat({ messages, emit, tier, excludeTools, signal }) {
   const llm = config.llm || {};
   if ((llm.provider || "").toLowerCase() === "mock") return mockChat(messages);
-  return await openaiCompatibleChat(messages, emit, tier || "chat");
+  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal);
 }
 
-async function openaiCompatibleChat(messages, emit, tier = "chat") {
+async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal) {
+  const excluded = new Set(excludeTools || []);
+  const toolset = excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs;
   const llm = config.llm || {};
   const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = base + "/chat/completions";
@@ -55,19 +57,20 @@ async function openaiCompatibleChat(messages, emit, tier = "chat") {
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
 
   for (let i = 0; i <= maxIter; i++) {
-    // Per-task routing: a vision model when the context contains images, else the tier's model.
-    const hasImages = convo.some((m) => Array.isArray(m.content) && m.content.some((c) => c && c.type === "image_url"));
-    lastModel = hasImages ? modelFor("vision") : modelFor(tier);
+    if (signal && signal.aborted) return "⏹ Stopped.";
+    // Vision routing happens inside the look-step (analyzeImage), not here — raw images
+    // are never placed in `convo`, so the tier model always drives the tool loop.
+    lastModel = modelFor(tier);
     const body = {
       model: lastModel,
       messages: convo,
       temperature: llm.temperature ?? 0.4,
       max_tokens: llm.max_tokens ?? 1200,
-      tools: tools.toolDefs,
+      tools: toolset,
       tool_choice: "auto",
       stream_options: { include_usage: true },
     };
-    const { message: msg, usage: turnUsage } = await streamChatCompletion(url, headers, body, emit);
+    const { message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal);
     addUsage(turnUsage);
     convo.push(msg);
 
@@ -81,28 +84,34 @@ async function openaiCompatibleChat(messages, emit, tier = "chat") {
         let result;
         try { result = await execWithRetry(tc.function.name, args); }
         catch (e) { result = { error: e.message }; }
-        let image = null, summarized = result;
+        let summarized = result;
         if (result && result.__image__) {
+          // Vision "look" step: hand the screenshot to the vision model IN ISOLATION and
+          // fold its TEXT analysis back into the tool result. We do NOT inject the raw image
+          // into this conversation — the tool-driving model is text-only, and vision models
+          // reject a `tools` payload, so the two can't be mixed in one call.
           const { __image__, ...rest } = result;
-          summarized = { note: "screenshot captured", ...rest };
-          image = __image__;
+          if (emit) emit({ type: "tool", tool: "vision:look", input: { model: modelFor("vision"), question: args.question || "(general)" } });
+          let visual_analysis;
+          try { visual_analysis = await analyzeImage(__image__, args.question, signal); }
+          catch (e) { visual_analysis = `(vision analysis failed: ${e.message})`; }
+          summarized = { note: "screenshot captured; analyzed by the vision model", ...rest, visual_analysis };
+          if (emit) emit({ type: "tool_result", tool: "vision:look", output: clip(visual_analysis, 4000), ms: Date.now() - started });
         }
         if (emit) emit({ type: "tool_result", tool: tc.function.name, output: clip(summarized, 4000), ms: Date.now() - started });
-        return { tc, summarized, image };
+        return { tc, summarized };
       }));
 
-      const pendingImages = [];
-      for (const s of settled) {
-        const v = s.status === "fulfilled" ? s.value : { tc: { id: "unknown" }, summarized: { error: String(s.reason) } };
-        convo.push({ role: "tool", tool_call_id: v.tc.id, content: clip(v.summarized, 12000) });
-        if (v.image) pendingImages.push(v.image);
-      }
-      for (const img of pendingImages) {
-        convo.push({ role: "user", content: [
-          { type: "text", text: "Current screenshot of the desktop:" },
-          { type: "image_url", image_url: { url: img } },
-        ] });
-      }
+      // Push exactly one tool result per tool_call, ALWAYS keyed to the real tool_call_id
+      // (order is preserved by allSettled) — an unmatched/placeholder id makes many
+      // backends 400 the next turn.
+      msg.tool_calls.forEach((tc, i) => {
+        const s = settled[i];
+        const summarized = (s && s.status === "fulfilled" && s.value)
+          ? s.value.summarized
+          : { error: s && s.reason ? String(s.reason) : "tool execution failed" };
+        convo.push({ role: "tool", tool_call_id: tc.id, content: clip(summarized, 12000) });
+      });
 
       // No-progress guard: if the model repeats the same tool calls, nudge it.
       const fp = msg.tool_calls.map((tc) => tc.function.name + ":" + (tc.function.arguments || "")).sort().join("|");
@@ -114,7 +123,16 @@ async function openaiCompatibleChat(messages, emit, tier = "chat") {
     }
 
     emitUsage();
-    return msg.content || "";
+    // Never leave the user hanging with a blank reply. If the turn produced no answer
+    // and no tool call, always say SOMETHING — and if it was cut off by the token cap,
+    // say that specifically.
+    if (!msg.content) {
+      if (finish === "length") {
+        return `⚠️ Ran out of tokens trying to process the request (max_tokens = ${llm.max_tokens ?? 1200}). The model spent its whole budget thinking before it could finish. Please try again, or raise "llm.max_tokens" in JARVIS_CONFIG.json.`;
+      }
+      return "⚠️ I wasn't able to produce a response to that. Please try again, or rephrase the request.";
+    }
+    return msg.content;
   }
   emitUsage();
   return "(Stopped after the maximum number of tool steps.)";
@@ -149,6 +167,8 @@ async function fetchWithRetry(url, options, tries = 4) {
       return resp;
     } catch (e) {
       lastErr = e;
+      // A user-initiated abort is final — do not retry it.
+      if (e.name === "AbortError" || (options.signal && options.signal.aborted)) throw e;
       if (a === tries - 1) throw e;
       await sleep(Math.min(30000, 1000 * 2 ** a) + Math.random() * 1000);
     }
@@ -158,19 +178,29 @@ async function fetchWithRetry(url, options, tries = 4) {
 
 // One streamed /chat/completions call. Emits {type:"token"} per content delta,
 // assembles streamed tool-call deltas, captures usage. Returns {message, usage}.
-async function streamChatCompletion(url, headers, body, emit) {
-  const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify({ ...body, stream: true }) });
+async function streamChatCompletion(url, headers, body, emit, signal) {
+  const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify({ ...body, stream: true }), signal });
   if (!resp.ok || !resp.body) {
     const t = resp.body ? await resp.text() : "";
-    throw new Error(`LLM ${resp.status}: ${t.slice(0, 400)}`);
+    throw new Error(`LLM ${resp.status} (model ${body.model}): ${t.slice(0, 400)}`);
   }
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
-  let buf = "", content = "", usage = null;
+  let buf = "", content = "", reasoning = "", usage = null, finish = null;
   const toolCalls = [];
   let done = false;
+  // Idle watchdog: if the model sends NO data for this long, treat the stream as stalled
+  // and abort (a healthy stream — even a slow reasoning model — sends tokens continuously).
+  const IDLE_MS = (config.llm && config.llm.idle_timeout_ms) || 120000;
+  async function readWithIdle() {
+    let timer;
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`stream idle >${Math.round(IDLE_MS / 1000)}s — the model stopped sending data`)), IDLE_MS); });
+    try { return await Promise.race([reader.read(), timeout]); } finally { clearTimeout(timer); }
+  }
   while (!done) {
-    const r = await reader.read();
+    let r;
+    try { r = await readWithIdle(); }
+    catch (e) { try { await reader.cancel(); } catch (_) {} throw e; }
     if (r.done) break;
     buf += decoder.decode(r.value, { stream: true });
     let nl;
@@ -183,8 +213,13 @@ async function streamChatCompletion(url, headers, body, emit) {
       let json; try { json = JSON.parse(payload); } catch { continue; }
       if (json.usage) usage = json.usage;
       const choice = json.choices && json.choices[0];
+      if (choice && choice.finish_reason) finish = choice.finish_reason;
       const delta = choice && choice.delta;
       if (!delta) continue;
+      // Reasoning models (e.g. qwen3-next) stream their chain-of-thought in a separate
+      // `reasoning`/`reasoning_content` field. Surface it so the UI can show live thinking.
+      const rz = delta.reasoning || delta.reasoning_content;
+      if (rz) { reasoning += rz; if (emit) emit({ type: "reasoning", text: rz }); }
       if (delta.content) { content += delta.content; if (emit) emit({ type: "token", text: delta.content }); }
       if (delta.tool_calls) {
         for (const d of delta.tool_calls) {
@@ -198,7 +233,42 @@ async function streamChatCompletion(url, headers, body, emit) {
     }
   }
   const tc = toolCalls.filter(Boolean);
-  return { message: { role: "assistant", content: content || null, tool_calls: tc.length ? tc : undefined }, usage };
+  return { message: { role: "assistant", content: content || null, tool_calls: tc.length ? tc : undefined }, usage, finish, reasoning };
+}
+
+// The "look" step for computer-use: send a screenshot to the vision model on its own
+// (image + question, NO tools) and return its text description + element coordinates.
+// This is how a text-only tool-driver model (e.g. qwen3-next) "sees" — and it avoids the
+// "<vision model> does not support tools" 400, since we never attach tools to this call.
+async function analyzeImage(dataUrl, question, signal) {
+  const llm = config.llm || {};
+  const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
+  const url = base + "/chat/completions";
+  const headers = { "Content-Type": "application/json" };
+  if (llm.api_key && (llm.provider || "").toLowerCase() !== "ollama") headers["Authorization"] = "Bearer " + llm.api_key;
+  const q = question && String(question).trim();
+  const prompt = "You are the eyes of a desktop automation agent. Look at this screenshot of a " +
+    "1024x768 screen and report exactly what is visible. List the interactive elements (buttons, links, " +
+    "text fields, icons, tabs, menu items) with their visible label and their approximate CENTER pixel " +
+    "coordinate as (x, y) measured from the top-left corner. Note which window is focused, the address/URL " +
+    "bar contents if a browser is open, and the overall state. Be concise but complete and accurate about positions." +
+    (q ? ` The agent specifically needs to know: ${q}` : "");
+  const body = {
+    model: modelFor("vision"),
+    messages: [{ role: "user", content: [
+      { type: "text", text: prompt },
+      { type: "image_url", image_url: { url: dataUrl } },
+    ] }],
+    temperature: 0,
+    max_tokens: llm.max_tokens ?? 1200,
+    stream: false,
+    // NOTE: deliberately NO `tools` — vision models (qwen2.5vl) reject a tools payload.
+  };
+  const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  if (!resp.ok) throw new Error(`vision ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+  const d = await resp.json();
+  const m = d.choices && d.choices[0] && d.choices[0].message;
+  return (m && (m.content || m.reasoning)) || "(vision model returned no description)";
 }
 
 function clip(value, n) {

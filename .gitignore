@@ -29,3 +29,6 @@ READ_WRITE_FILES/*
 READ_ONLY_FILES/*
 !READ_ONLY_FILES/.gitkeep
 !READ_ONLY_FILES/README.txt
+
+# local config backup (contains a real key)
+JARVIS_CONFIG.*backup*.json

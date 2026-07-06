@@ -220,6 +220,25 @@ async function openApp(command) {
   if (!command) throw new Error("no command");
   return runShell(`nohup ${command} >/dev/null 2>&1 & disown; echo launched`);
 }
+// Run a SEQUENCE of desktop actions in one tool call (one LLM turn) instead of many.
+async function uiActions(actions) {
+  if (!Array.isArray(actions) || !actions.length) throw new Error("actions must be a non-empty array of {action, ...} steps");
+  const performed = [];
+  for (const a of actions) {
+    const act = a && a.action;
+    if (act === "click") { await clickAt(a.x, a.y, a.button || 1); performed.push(`click(${px(a.x)},${px(a.y)})`); }
+    else if (act === "double_click") { await doubleClick(a.x, a.y); performed.push(`double_click(${px(a.x)},${px(a.y)})`); }
+    else if (act === "move") { await moveMouse(a.x, a.y); performed.push(`move(${px(a.x)},${px(a.y)})`); }
+    else if (act === "type") { await typeText(a.text); performed.push(`type(${String(a.text || "").slice(0, 24)})`); }
+    else if (act === "key") { await pressKey(a.keys); performed.push(`key(${a.keys})`); }
+    else if (act === "scroll") { await scrollWheel(a.direction, a.amount || 3); performed.push(`scroll(${a.direction})`); }
+    else if (act === "sleep") { await new Promise((r) => setTimeout(r, Math.min(5000, Number(a.ms) || 0))); performed.push(`sleep(${a.ms}ms)`); continue; }
+    else { performed.push(`(skipped unknown action: ${act})`); continue; }
+    // brief settle delay so the UI can react between steps
+    await new Promise((r) => setTimeout(r, Math.min(2000, a.after_ms != null ? Number(a.after_ms) : 120)));
+  }
+  return { performed };
+}
 
 // --- credential vault (the user's OWN accounts) ---
 function listSecrets() {
@@ -340,8 +359,11 @@ const toolDefs = [
     parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
 
   { type: "function", function: { name: "screenshot",
-    description: "Capture the current desktop screen and return the image so you can SEE what is on screen. Coordinates are pixels from the top-left. Take a screenshot before clicking to locate elements, and again after an action to verify the result.",
-    parameters: { type: "object", properties: {}, required: [] } } },
+    description: "Look at the current desktop screen. This captures the screen and returns a TEXT analysis from a vision model: a description of what is visible plus the interactive elements (buttons, links, fields, icons, tabs) with their approximate CENTER pixel coordinates (x, y from the top-left). Use those coordinates with click/type/move_mouse to act. Optionally pass 'question' to focus the analysis (e.g. 'where is the address bar?', 'what are the search results?'). Take a screenshot to locate elements before acting, and again afterward to verify the result. The screen is 1024x768.",
+    parameters: { type: "object", properties: { question: { type: "string", description: "Optional: focus the visual analysis on a specific question about the screen." } }, required: [] } } },
+  { type: "function", function: { name: "ui_actions",
+    description: "Perform a SEQUENCE of desktop UI actions in ONE call — far fewer round-trips than separate click/type/key calls. After a screenshot gives you element coordinates, use this to run the whole plan at once, e.g. click a field → type text → press Enter. A short settle delay runs between steps. Screen is 1024x768; screenshot again afterward to verify. Each step is one of: {action:'click'|'double_click'|'move', x, y} , {action:'type', text} , {action:'key', keys:'Return'} , {action:'scroll', direction:'up'|'down', amount} , {action:'sleep', ms}.",
+    parameters: { type: "object", properties: { actions: { type: "array", items: { type: "object" }, description: "Ordered list of action steps to perform in sequence." } }, required: ["actions"] } } },
   { type: "function", function: { name: "open_url",
     description: "Open a URL in the Chromium browser on the desktop.",
     parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } } },
@@ -384,7 +406,7 @@ const toolDefs = [
     parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } },
 
   { type: "function", function: { name: "schedule_task",
-    description: "Schedule a task to run later. Provide the task as a 'prompt' (what JARVIS should do when it runs). Use IN_SECONDS for a delay (e.g. 'in 10 minutes' -> 600), AT for an absolute ISO time (e.g. 'at 5pm' -> compute today's ISO datetime from the current time you were given), or EVERY_SECONDS for a recurring task (e.g. 'every 5 minutes' -> 300) with an optional natural-language 'until' stop condition. The current date/time is provided to you in context. IMPORTANT: the prompt is run by the model THROUGH ITS TOOLS at run time (it is NOT executed as literal code). Write a clear, concrete, VERIFIABLE instruction — name the exact tool/command and the exact file path. For deterministic jobs (data fetch + log to a file), prefer a single explicit run_shell command, e.g. 'Run exactly this with run_shell and report its output: <shell command using >> to append>'. Use real API ids/paths. Each run is a fresh, stateless conversation, so the prompt must be self-contained.",
+    description: "Schedule a task to run later. Provide the task as a 'prompt' (what JARVIS should do when it runs). Use IN_SECONDS for a delay (e.g. 'in 10 minutes' -> 600), AT for an absolute ISO time (e.g. 'at 5pm' -> compute today's ISO datetime from the current time you were given), or EVERY_SECONDS for a recurring task (e.g. 'every 5 minutes' -> 300) with an optional natural-language 'until' stop condition. The current date/time is provided to you in context. IMPORTANT: the prompt is run by the model THROUGH ITS TOOLS at run time (it is NOT executed as literal code). Write a clear, concrete, VERIFIABLE instruction — name the exact tool/command and the exact file path. For deterministic jobs (data fetch + log to a file), prefer a single explicit run_shell command, e.g. 'Run exactly this with run_shell and report its output: <shell command using >> to append>'. Use real API ids/paths. Each run is a fresh, stateless conversation, so the prompt must be self-contained. A task CAN see the live conversation via read_recent_chat — e.g. to check whether the user has replied (roles:[\"user\"]) so it can escalate an unanswered prompt, or to review its own recent posts to avoid repeating itself — so requests like 'notice if I'm not answering and escalate' ARE doable; author the prompt to use read_recent_chat, don't refuse them.",
     parameters: { type: "object", properties: {
       prompt: { type: "string", description: "What to do when the task runs — a clear, concrete, self-contained instruction (the model executes it via its tools, not as literal code)." },
       in_seconds: { type: "number", description: "Run once after this many seconds." },
@@ -417,6 +439,13 @@ const toolDefs = [
   { type: "function", function: { name: "post_to_chat",
     description: "Post a message directly into the user's live chat conversation window (it appears as a message from you in the web chat). Use this when a task should speak up in the conversation, e.g. to report an outcome or ask a follow-up. For a passive alert/badge instead, use notify_user.",
     parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } },
+  { type: "function", function: { name: "read_recent_chat",
+    description: "Read recent messages from the user's live chat conversation (oldest→newest, each with an ISO timestamp). This is how a scheduled/background task can SEE the conversation it otherwise can't: use roles:[\"user\"] to check whether the USER has replied lately (e.g. to decide whether to escalate an unanswered prompt), or look at your own recent role:\"task\"/\"assistant\" posts to avoid repeating yourself. Returns [{at, role, text}]. Roles are \"user\", \"assistant\", \"task\".",
+    parameters: { type: "object", properties: {
+      since_minutes: { type: "number", description: "Only return messages from the last N minutes (omit for the most recent regardless of age)." },
+      roles: { type: "array", items: { type: "string" }, description: "Filter to these roles, e.g. [\"user\"] to see only the user's replies." },
+      limit: { type: "number", description: "Max messages to return (default 30)." }
+    }, required: [] } } },
 
   { type: "function", function: { name: "list_skills",
     description: "List your available skill playbooks (name + category + summary). Skills are detailed how-to guides for your capabilities and common workflows.",
@@ -464,6 +493,7 @@ async function _execTool(name, args) {
     case "fetch_url": return await fetchUrl(args.url, { method: args.method });
     case "web_search": return await webSearch(args.query);
     case "screenshot": return await screenshot();
+    case "ui_actions": return await uiActions(args.actions);
     case "open_url": return await openUrl(args.url);
     case "open_app": return await openApp(args.command);
     case "click": return await clickAt(args.x, args.y, 1);
@@ -481,6 +511,7 @@ async function _execTool(name, args) {
     case "cancel_task": return require("./scheduler").cancel(args.id);
     case "notify_user": return require("./scheduler").pushNotification({ message: args.message, level: args.level });
     case "post_to_chat": return require("./scheduler").postToChat(args.message);
+    case "read_recent_chat": return require("./chatlog").recent(args);
     case "list_skills": return require("./skills").list();
     case "get_skill": return require("./skills").get(args.name);
     case "set_secret": {
@@ -493,4 +524,5 @@ async function _execTool(name, args) {
   }
 }
 
-module.exports = { toolDefs, execTool, addMemory, searchMemory, runShell, listDir, readFile, writeFile, fetchUrl, webSearch, screenshot };
+// Only what's imported elsewhere is exported; everything else is reached via execTool.
+module.exports = { toolDefs, execTool, searchMemory, runShell, listDir, fetchUrl };

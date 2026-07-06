@@ -9,6 +9,106 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-06: Chat UX upgrades. Richer markdown in assistant replies — fenced code
+  blocks (with a copy button), bullet/numbered lists, and clickable links, on top of
+  the existing inline formatting (all still HTML-escaped first, so XSS-safe). A
+  visible "＋ New chat" button and a running per-session token/cost total in the
+  header. Drag-and-drop a file into the chat to upload it to the shared folder for
+  the LLM to read (`POST /api/upload`). A filter box in the Memory tab. And a
+  quick-add form in the Tasks tab to schedule a one-shot or recurring task without
+  chatting (`POST /api/tasks/add`).
+- 2026-07-06: Notifications can now be cleared — a "Clear" button in the Tasks
+  tab's Recent notifications header (`POST /api/notifications/clear`) and a per-item
+  dismiss (`DELETE /api/notifications/:id`).
+- 2026-07-02: More post-review improvements. Performance: server-side history cap
+  (last 40 turns) so context sent to the model stays bounded; a stream idle-timeout
+  (`llm.idle_timeout_ms`, default 120s) so a stalled model can't hang forever.
+  Usability: a Retry button on failed messages (re-sends without duplicating the
+  turn); keyboard shortcuts (Cmd/Ctrl+K focus, ↑ to recall last message); a Memory
+  tab that browses and deletes Mem0 long-term memories (`GET/DELETE /api/memories`);
+  and a `ui_actions` tool that runs a whole desktop sequence (click → type → key) in
+  ONE call/turn instead of many. Behavior: a system-prompt nudge to prefer the
+  simplest interpretation — play/answer/quiz in the chat rather than reflexively
+  building an app. Cleanup: trimmed dead `tools.js` exports and removed stale
+  MySQL-era dirs (`db/`, `shared_ro/`, `shared_rw/`). Testing: added a vision eval.
+  Verified live: computer-use end-to-end (open browser → screenshot → vision
+  look-step → accurate description) and the backup→restore round-trip for memory.
+
+### Changed
+- 2026-07-02: Post-review hardening pass (correctness, performance, usability).
+  Correctness/data-integrity: all JSON state (tasks, chatlog, sessions) now writes
+  ATOMICALLY via a shared `persist.js` (temp-file + rename) so a crash can't corrupt
+  it into empty state, with flush-on-exit; the scheduler was rebuilt on in-memory
+  state with debounced atomic saves (no more read-modify-write races), runs tasks
+  concurrently instead of serially (one slow task no longer blocks all others),
+  advances recurring runs from the scheduled slot (no drift) collapsing missed runs,
+  and recovers stale "running" tasks on restart. The server now rejects a second
+  in-flight chat per connection (was silently overwriting the AbortController and
+  interleaving tokens), and each tool result is keyed to its real tool_call_id (an
+  "unknown" id could 400 the next turn). Performance: streaming re-renders are
+  coalesced to one per animation frame (was an O(n^2) full-bubble rebuild per token);
+  message + activity DOM growth is capped. Usability: the WebSocket now reconnects
+  with exponential backoff, clears a stuck spinner on drop, and shows a
+  lost/reconnected notice; the conversation persists across browser reloads
+  (localStorage); assistant replies have a hover copy button; LLM error messages
+  include the model. Cleanup: removed dead vision-tier routing (obsoleted by the
+  look-step) and fixed a "warn"/"warning" notification-level mismatch.
+- 2026-07-01: Computer-use "look" step so vision works with tool-calling. Local
+  models split the job — the tool-driver (qwen3-next) is text-only, and the vision
+  model (qwen2.5vl) rejects a `tools` payload ("does not support tools" 400). Now a
+  screenshot is no longer injected as a raw image into the orchestrator's context;
+  instead it's sent to the vision model IN ISOLATION (image + optional question, no
+  tools), and that model's TEXT analysis — a description plus interactive-element
+  pixel coordinates — is folded back into the tool result. qwen3-next then acts on
+  those coordinates. The `screenshot` tool gained an optional `question` to focus
+  the analysis, and the system prompt was updated to match.
+- 2026-07-01: Local vision support. Pulled Qwen2.5-VL (7b + 32b) and switched the
+  config to multi-model mode with the `vision` tier on a local VL model, so the
+  screenshot/computer-use path works offline (chat/cheap/smart stay on
+  qwen3-next:80b). The vision tier is qwen2.5vl:32b. NOTE: this requires Ollama
+  0.31.1+ — on 0.30.10 the 32b failed to load its CLIP/vision projector ("Key not
+  found: clip.vision.n_wa_pattern"); updating Ollama to 0.31.1 resolved it. The 7b
+  also works and can be selected via models.vision for faster per-screenshot speed.
+- 2026-07-01: Chat UX — scroll override and interrupt. The message list now
+  auto-follows streaming output ONLY when you're already at the bottom; scroll up
+  to read and it stops yanking you down, re-engaging when you return. Added a Stop
+  button (and the Escape key) to interrupt in-flight processing: the server aborts
+  the LLM request via an AbortController and replies "⏹ Stopped." — useful if the
+  model gets stuck in a tool loop.
+- 2026-07-01: Chat-awareness for background tasks. A persisted ring buffer
+  (`data/chatlog.json`) records recent chat messages (user / assistant / task
+  posts), exposed to the model via a new `read_recent_chat` tool. This lets a
+  scheduled task SEE the live conversation it otherwise can't — e.g. check
+  whether the user has replied (`roles:["user"]`) to escalate an unanswered
+  prompt, or review its own recent posts to avoid repeating itself. The
+  `schedule_task` and scheduled-run prompts now point the model at this tool so
+  requests like "notice if I'm not answering and escalate" are handled instead
+  of refused.
+- 2026-07-01: Reasoning-model support. The streaming parser now surfaces the
+  `reasoning`/`reasoning_content` field (qwen3-next et al.) as a live,
+  collapsible "Thinking" panel above each answer, and `llm.max_tokens` is a
+  documented config parameter (raised to 12000) so long chains of thought no
+  longer exhaust the budget before the model can answer or call a tool. Added an
+  always-respond guard: a turn that ends empty (e.g. hit the token cap) now
+  replies with a plain "ran out of tokens…" message instead of stopping silently.
+- 2026-06-30: Expanded the workbench toolchain with application frameworks and
+  extra language tooling so common stacks work offline: Java build tools (Maven,
+  Gradle); Python web frameworks (Flask, FastAPI + uvicorn/gunicorn, Django +
+  DRF, Starlette, Celery, Streamlit, SQLModel, Jinja2); a Node/TypeScript global
+  toolchain (typescript, ts-node, tsx, yarn, pnpm, eslint, prettier, vite,
+  http-server, serve, nodemon, npm-check-updates); the Rust toolchain (rustup +
+  cargo); Go dev tools (golangci-lint, air); and CLI helpers (direnv,
+  universal-ctags). Everything installs outside the `/config` and `/workspace`
+  runtime volumes so it survives at runtime. Rebuild with
+  `docker compose build jarvis-workbench && docker compose up -d jarvis-workbench`.
+- 2026-06-30: Added a Python "batteries" library set to the workbench: dev tooling
+  (pytest + pytest-asyncio/-cov, coverage, tox, ruff, black, isort, mypy, flake8,
+  pylint, bandit, pre-commit), database drivers (psycopg2-binary, pymysql,
+  pymongo), app plumbing (python-dotenv, pydantic-settings, click, typer, tenacity,
+  loguru, tqdm, faker, orjson, arrow), extra plotting (seaborn, plotly), and NLP/CV
+  (nltk, spacy, opencv-python-headless); plus global Node CLIs (pm2, concurrently,
+  npm-run-all). Heavy ML stacks (torch/transformers) are intentionally excluded —
+  they are CPU-only in-container and inference runs via Ollama on the host.
 - 2026-06-27: Initial JARVIS AI enablement stack. A multi-container application
   (docker compose, localhost only): `jarvis-app` (Node.js backend + JavaScript
   frontend), `jarvis-db` (MySQL 8 the LLM uses as memory with full admin), and
@@ -328,6 +428,43 @@ infrastructure, security, documentation, or test-policy changes.
 - 2026-06-29: Added `--backup-workspace` / `--restore-workspace` to JARVIS.sh (mirrors
   the memory backup): tar the workbench `/workspace` volume to
   backups/jarvis-workspace-<ts>.tgz and restore it (or reset to empty). Verified.
+
+- 2026-06-30: Fixed runaway task duplication. A recurring task whose prompt mentioned
+  a schedule ("…every 5 minutes") made the model call schedule_task on each run, spawning
+  a new task every run (one user request -> dozens of tasks). Now scheduling tools
+  (schedule_task/update_task/cancel_task) are EXCLUDED from a task's own toolset
+  (`llm.chat({ excludeTools })` filters `toolDefs`), and the task-runner prompt states it
+  is one execution of an already-scheduled task and must not create/modify/cancel tasks
+  (an "every N minutes" phrase describes the existing schedule, not an instruction).
+  Interactive chat is unaffected (it can still create tasks). Verified a task can no
+  longer call schedule_task.
+
+- 2026-06-30: Chat readability + LLM-controlled emphasis. User bubbles are now a
+  distinct indigo (clearly different from the assistant's teal). Assistant messages
+  render a safe markdown subset (**bold**, *italic*, __underline__, `code`, ~~strike~~;
+  HTML escaped first, so no XSS). The LLM can flag a message's importance by starting it
+  with `[importance: info|success|attention|emergency]` — attention shows a yellow
+  border + a brief chat-window flash, emergency a red border + pulse — and it works for
+  task post_to_chat messages too. System prompt documents the convention; verified the
+  model uses it. Frontend-only (app/public) plus the prompt; refresh the browser.
+
+- 2026-06-30: Fixed semantic memory for local models and made it fully-offline capable
+  (memory/server.py). Chain of issues fixed: (1) Mem0 reused `llm.model` for its OpenAI
+  extraction call, so a LOCAL chat model name broke it — it now MIRRORS the app's LLM
+  endpoint (base_url + model) via the OpenAI-compatible API, overridable with
+  `mem0.llm_model`/`mem0.llm_base_url`. (2) Mem0's multi-stage LLM inference (extract →
+  decide) is unreliable on reasoning models (qwen3-next), which return empty — so add
+  now defaults to `infer=false` (`mem0.infer`), storing the fact directly; the JARVIS
+  chat model already decides WHAT to remember, so Mem0's re-extraction was redundant.
+  (3) The embedder uses the OpenAI-compatible API so it works against a local Ollama
+  endpoint (`/v1/embeddings`) — set `mem0.embed_base_url` + `mem0.embed_model` (e.g.
+  `nomic-embed-text`) for FULLY-LOCAL memory (no cloud). Verified local store + recall.
+  Also bumped the local setup's `max_tokens` to 4000 — reasoning models can spend ~900
+  tokens thinking before answering, so a low cap truncated replies after a tool call.
+- 2026-06-30: Validated JARVIS on local models via Ollama — qwen3:8b scored 10/10 on
+  the eval suite and qwen3-next:80b passes all capabilities (tool-calling, code, files,
+  shell, internet, tasks; memory once the fix above is in). Chat/tools run fully local;
+  only Mem0 embeddings use OpenAI unless configured otherwise.
 
 ### Notes
 - The LLM intentionally has root in the workbench container, open internet access,

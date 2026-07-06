@@ -4,6 +4,7 @@
 // you left off and to iterate on the model/prompt against a fixed conversation.
 const fs = require("fs");
 const path = require("path");
+const persist = require("./persist");
 
 const DIR = process.env.JARVIS_SESSIONS_DIR || "/data/sessions";
 
@@ -30,7 +31,7 @@ function save({ id, name, messages }) {
     created_at: created, updated_at: now,
     messages: sanitize(messages),
   };
-  fs.writeFileSync(fp, JSON.stringify(doc, null, 2));
+  persist.writeJsonAtomic(fp, doc, true);
   return { id: sid, name: doc.name, updated_at: doc.updated_at, count: doc.messages.length };
 }
 

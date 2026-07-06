@@ -23,28 +23,52 @@ CHROMA_PATH = os.environ.get("MEM0_CHROMA_PATH", "/data/chroma")
 DEFAULT_USER = os.environ.get("MEM0_USER_ID", "default")
 
 
-def load_llm_cfg():
+def load_cfg():
     try:
         with open(CONFIG_FILE) as f:
-            return (json.load(f) or {}).get("llm", {}) or {}
+            return json.load(f) or {}
     except Exception:
         return {}
 
 
 def build_memory():
-    llm = load_llm_cfg()
+    cfg_all = load_cfg()
+    llm = cfg_all.get("llm", {}) or {}
+    mem = cfg_all.get("mem0", {}) or {}
     api_key = llm.get("api_key") or os.environ.get("OPENAI_API_KEY", "")
-    model = llm.get("model", "gpt-4o-mini")
-    # Mem0 reads OPENAI_API_KEY from the environment for both llm + embedder.
     if api_key:
         os.environ["OPENAI_API_KEY"] = api_key
+
+    # --- Extraction LLM: mirror the app's LLM so Mem0 uses WHATEVER model is in use
+    # (local via Ollama, the gateway, or OpenAI). Ollama exposes an OpenAI-compatible
+    # /v1, so the "openai" provider + a base_url works for all three. Override with
+    # mem0.llm_model / mem0.llm_base_url. ---
+    app_base = llm.get("base_url") or "https://api.openai.com/v1"
+    llm_model = mem.get("llm_model") or llm.get("model") or "gpt-4o-mini"
+    llm_base = mem.get("llm_base_url") or app_base
+    llm_cfg = {"provider": "openai", "config": {
+        "model": llm_model, "openai_base_url": llm_base,
+        "api_key": api_key or "local", "temperature": 0.1,
+    }}
+
+    # --- Embedder: a chat model can't produce embeddings, so this is a SEPARATE model.
+    # Uses the OpenAI-compatible API, which works for OpenAI OR a local Ollama endpoint
+    # (Ollama serves /v1/embeddings). Default = OpenAI text-embedding-3-small (needs the
+    # key). For a FULLY-LOCAL stack, set mem0.embed_base_url to your Ollama /v1 and
+    # mem0.embed_model to a pulled embed model (e.g. nomic-embed-text). ---
+    embed_cfg = {"provider": "openai", "config": {
+        "model": mem.get("embed_model") or "text-embedding-3-small",
+        "openai_base_url": mem.get("embed_base_url") or "https://api.openai.com/v1",
+        "api_key": api_key or "local",
+    }}
+
     cfg = {
         "vector_store": {
             "provider": "chroma",
             "config": {"collection_name": "jarvis", "path": CHROMA_PATH},
         },
-        "llm": {"provider": "openai", "config": {"model": model, "temperature": 0.1}},
-        "embedder": {"provider": "openai", "config": {"model": "text-embedding-3-small"}},
+        "llm": llm_cfg,
+        "embedder": embed_cfg,
     }
     return Memory.from_config(cfg)
 
@@ -87,10 +111,17 @@ def healthz():
 
 @app.post("/add")
 def add(body: AddBody):
+    # infer=False (default) stores the fact DIRECTLY (just embed it) — reliable and fast,
+    # and it works with any local model since it skips Mem0's LLM extraction/decision
+    # stages (which break on reasoning models). The JARVIS chat model already decides
+    # WHAT to remember before calling add_memory. Set mem0.infer=true to re-enable Mem0's
+    # own LLM inference (dedup/merge) if your extraction model handles it well.
+    infer = bool((load_cfg().get("mem0", {}) or {}).get("infer", False))
     res = memory().add(
         body.text,
         user_id=body.user_id or DEFAULT_USER,
         metadata=body.metadata or {},
+        infer=infer,
     )
     return {"results": res}
 

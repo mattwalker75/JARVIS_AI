@@ -2,15 +2,17 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
 const { config, loadError, publicConfig, systemPrompt } = require("./src/config");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
+const chatlog = require("./src/chatlog");
 
 const app = express();
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uploads
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/healthz", (_req, res) => res.type("text").send("ok"));
@@ -41,8 +43,42 @@ app.get("/api/selftest", async (_req, res) => {
 });
 
 app.get("/api/notifications", (_req, res) => res.json(scheduler.recentNotifications(50)));
+app.post("/api/notifications/clear", (_req, res) => res.json(scheduler.clearNotifications()));
+app.delete("/api/notifications/:id", (req, res) => res.json(scheduler.dismissNotification(req.params.id)));
 app.get("/api/tasks", (_req, res) => res.json(scheduler.list()));
 app.post("/api/tasks/cancel", (req, res) => res.json(scheduler.cancel((req.body || {}).id)));
+app.post("/api/tasks/add", (req, res) => {
+  try { res.json(scheduler.schedule(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Memory viewer: browse + prune the Mem0 long-term memories from the UI.
+app.get("/api/memories", async (_req, res) => {
+  try { res.json(await tools.execTool("list_memories", {})); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/api/memories/:id", async (req, res) => {
+  try { res.json(await tools.execTool("delete_memory", { id: req.params.id })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// File drop: save an uploaded file into the read-write shared folder so the LLM can read it.
+app.post("/api/upload", (req, res) => {
+  try {
+    const { name, dataUrl } = req.body || {};
+    if (!name || !dataUrl) return res.status(400).json({ error: "name and dataUrl are required" });
+    const m = /^data:[^;,]*;base64,(.*)$/s.exec(String(dataUrl));
+    if (!m) return res.status(400).json({ error: "expected a base64 data URL" });
+    const buf = Buffer.from(m[1], "base64");
+    if (buf.length > 20 * 1024 * 1024) return res.status(413).json({ error: "file too large (20MB max)" });
+    const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, "_") || "file";
+    const rw = (config.shared && config.shared.read_write_dir) || "/READ_WRITE_FILES";
+    const dir = path.join(rw, "uploads");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, safe), buf);
+    res.json({ path: "/READ_WRITE_FILES/uploads/" + safe, bytes: buf.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 const sessions = require("./src/sessions");
 app.get("/api/sessions", (_req, res) => res.json(sessions.list()));
@@ -73,20 +109,34 @@ wss.on("connection", (ws) => {
   ws.on("message", async (raw) => {
     let data;
     try { data = JSON.parse(raw); } catch { return; }
+    // Interrupt the in-flight request for this connection (Stop button / Escape key).
+    if (data.type === "cancel") { if (ws._abort) { try { ws._abort.abort(); } catch (_) {} } return; }
     if (data.type !== "chat") return;
 
-    const history = Array.isArray(data.messages)
+    const all = Array.isArray(data.messages)
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       : [];
+    const history = all.slice(-40);   // cap the context sent to the model (unbounded history = cost + latency)
     const messages = [{ role: "system", content: SYSTEM }, ...history];
     const emit = (ev) => { try { ws.send(JSON.stringify(ev)); } catch (_) {} };
 
+    // One in-flight request per connection: don't overwrite an active AbortController
+    // (that would make the first request uncancelable and interleave tokens on the socket).
+    if (ws._abort) { emit({ type: "error", error: "I'm still working on your previous message — press Stop (Esc) to interrupt it first." }); return; }
+
+    // Record the new user turn so background tasks can tell whether the user is active.
+    const lastUser = [...history].reverse().find((m) => m.role === "user");
+    if (lastUser) chatlog.record("user", lastUser.content);
+
+    const ac = new AbortController(); ws._abort = ac;
     try {
-      const reply = await llm.chat({ messages, emit });
+      const reply = await llm.chat({ messages, emit, signal: ac.signal });
+      chatlog.record("assistant", reply);
       emit({ type: "reply", text: reply });
     } catch (e) {
-      emit({ type: "error", error: e.message });
-    }
+      if (ac.signal.aborted) emit({ type: "reply", text: "⏹ Stopped." });
+      else emit({ type: "error", error: e.message });
+    } finally { ws._abort = null; }
   });
 });
 

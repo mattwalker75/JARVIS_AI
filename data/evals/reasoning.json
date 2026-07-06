@@ -1,12 +1,34 @@
 [
   {
     "name": "reasoning-math",
-    "messages": [{ "role": "user", "content": "What is 17 * 23? Reply with just the number." }],
-    "expect": { "contains": ["391"], "max_ms": 40000, "max_cost_usd": 0.02 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 17 * 23? Reply with just the number."
+      }
+    ],
+    "expect": {
+      "contains": [
+        "391"
+      ],
+      "max_ms": 120000,
+      "max_cost_usd": 0.02
+    }
   },
   {
     "name": "identity-name",
-    "messages": [{ "role": "user", "content": "What is your name? Answer in one word." }],
-    "expect": { "contains": ["JARVIS"], "max_cost_usd": 0.02 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is your name? Answer in one word."
+      }
+    ],
+    "expect": {
+      "contains": [
+        "JARVIS"
+      ],
+      "max_cost_usd": 0.02,
+      "max_ms": 120000
+    }
   }
 ]

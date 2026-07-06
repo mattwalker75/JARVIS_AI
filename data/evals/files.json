@@ -1,12 +1,38 @@
 [
   {
     "name": "files-write-read",
-    "messages": [{ "role": "user", "content": "Write the exact text eval-marker-7 to a file named eval_probe.txt in the shared read-write folder, then read it back and tell me its contents." }],
-    "expect": { "tools_used": ["write_file", "read_file"], "contains": ["eval-marker-7"], "max_cost_usd": 0.03 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write the exact text eval-marker-7 to a file named eval_probe.txt in the shared read-write folder, then read it back and tell me its contents."
+      }
+    ],
+    "expect": {
+      "tools_used": [
+        "write_file",
+        "read_file"
+      ],
+      "contains": [
+        "eval-marker-7"
+      ],
+      "max_cost_usd": 0.03,
+      "max_ms": 120000
+    }
   },
   {
     "name": "files-append-log",
-    "messages": [{ "role": "user", "content": "Append a log entry with the message 'eval check ok' to a log file named eval_probe.log using your logging tool." }],
-    "expect": { "tools_used": ["append_log"], "max_cost_usd": 0.03 }
+    "messages": [
+      {
+        "role": "user",
+        "content": "Append a log entry with the message 'eval check ok' to a log file named eval_probe.log using your logging tool."
+      }
+    ],
+    "expect": {
+      "tools_used": [
+        "append_log"
+      ],
+      "max_cost_usd": 0.03,
+      "max_ms": 120000
+    }
   }
 ]

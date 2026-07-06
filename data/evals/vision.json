@@ -1,0 +1,18 @@
+[
+  {
+    "name": "vision-screenshot-look",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Take a screenshot of the desktop and tell me in one sentence what is currently visible on the screen."
+      }
+    ],
+    "expect": {
+      "tools_used": [
+        "screenshot"
+      ],
+      "max_ms": 90000,
+      "max_cost_usd": 0.05
+    }
+  }
+]

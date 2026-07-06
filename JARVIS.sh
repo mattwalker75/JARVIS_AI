@@ -22,6 +22,7 @@
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
 #   -p, --prompt <text>  Run one prompt and print the answer; supports piping stdin in.
 #   -e, --eval         Replay data/evals/*.json through the model and report pass/fail.
+#       --probe-context   Measure the current model's usable context window (needle test).
 #   -i, --status       Show whether the containers are running.
 #   -x, --stop         Stop the stack (keeps data volumes).
 #   -d, --delete       Remove containers, network, and ALL data volumes.
@@ -199,6 +200,13 @@ cmd_eval() {
   docker exec "$APP_CONTAINER" node eval.js
 }
 
+cmd_probe_context() {
+  require_daemon
+  container_running "$APP_CONTAINER" || { err "JARVIS app is not running. Start it: ./JARVIS.sh --start"; return 1; }
+  info "CONTEXT PROBE: measuring the current model's usable context window (needle-in-haystack)..."
+  docker exec "$APP_CONTAINER" node probe_context.js
+}
+
 cmd_prompt() {
   require_daemon
   container_running "$APP_CONTAINER" || { err "JARVIS app is not running. Start it: ./JARVIS.sh --start"; return 1; }
@@ -327,6 +335,7 @@ main() {
       -r|--reload)  cmd_reload || rc=$? ;;
       -t|--terminal) cmd_terminal || rc=$? ;;
       -e|--eval)    cmd_eval   || rc=$? ;;
+      --probe-context) cmd_probe_context || rc=$? ;;
       -p|--prompt)
         if [[ -z "${2:-}" ]]; then err "--prompt requires a prompt string"; echo; usage; rc=2;
         else cmd_prompt "$2" || rc=$?; shift; fi

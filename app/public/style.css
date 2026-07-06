@@ -6,7 +6,7 @@
   --muted: #8fb3c7;
   --accent: #36d3ff;
   --gold: #ffcf5a;
-  --user: #11313f;
+  --user: #1e2a4a;
   --danger: #ff6b6b;
   --font: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
@@ -20,6 +20,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 @keyframes pulse { 0%,100% { box-shadow: 0 0 8px var(--accent); } 50% { box-shadow: 0 0 18px var(--accent); } }
 .title { font-weight: 800; letter-spacing: 2px; }
 .model { font-size: .75rem; color: var(--muted); }
+.usage { font-size: .68rem; color: var(--muted); opacity: .75; }
 .controls { display: flex; align-items: center; gap: 12px; }
 .mic { font-size: .78rem; color: var(--muted); min-width: 78px; text-align: right; }
 .ctl-ic { font-size: 1.05rem; line-height: 1; cursor: default; }
@@ -55,13 +56,79 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .layout { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 0; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
 
-.chat { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--edge); }
-.messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-.msg { display: flex; }
+.chat { position: relative; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--edge); }
+.chat.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; }
+.messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.msg { display: flex; min-width: 0; }
+.jump-btn { position: absolute; right: 18px; bottom: 84px; z-index: 20; background: var(--accent); color: #042027; border: none; border-radius: 20px; padding: 6px 14px; font-size: .8rem; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.jump-btn:hover { filter: brightness(1.05); }
 .msg.user { justify-content: flex-end; }
-.bubble { max-width: 84%; padding: 10px 14px; border-radius: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; }
+.bubble { max-width: 84%; min-width: 0; padding: 10px 14px; border-radius: 14px; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
 .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--edge); border-top-left-radius: 4px; }
-.msg.user .bubble { background: var(--user); border: 1px solid var(--edge); border-top-right-radius: 4px; }
+.msg.user .bubble { background: var(--user); border: 1px solid #3a4c82; border-top-right-radius: 4px; }
+.msg.assistant .copy-btn { align-self: flex-end; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; opacity: 0; transition: opacity .15s; padding: 2px 6px; }
+.msg.assistant:hover .copy-btn { opacity: .55; }
+.msg.assistant .copy-btn:hover { opacity: 1; }
+.retry-btn { background: transparent; border: 1px solid var(--edge); color: var(--muted); border-radius: 8px; padding: 4px 10px; cursor: pointer; font-size: .8rem; }
+.retry-btn:hover { color: var(--text); border-color: var(--accent); }
+.mem-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border: 1px solid var(--edge); border-radius: 8px; margin-bottom: 6px; }
+.mem-text { flex: 1; font-size: .82rem; line-height: 1.35; word-break: break-word; }
+.mem-item button { flex-shrink: 0; padding: 2px 7px; }
+.mem-search { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 9px; border: 1px solid var(--edge); background: var(--bg); color: var(--text); border-radius: 8px; font: inherit; font-size: .82rem; }
+.mem-search:focus { outline: none; border-color: var(--accent); }
+.quick-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.quick-add input, .quick-add select { padding: 6px 8px; border: 1px solid var(--edge); background: var(--bg); color: var(--text); border-radius: 8px; font: inherit; font-size: .82rem; }
+.quick-add input:focus, .quick-add select:focus { outline: none; border-color: var(--accent); }
+.qa-row { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--muted); }
+.qa-row #qa-num { width: 58px; }
+.qa-row #qa-add { margin-left: auto; }
+.note { position: relative; }
+.n-dismiss { position: absolute; top: 4px; right: 5px; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 1.05rem; line-height: 1; opacity: .45; padding: 0 4px; }
+.n-dismiss:hover { opacity: 1; color: var(--text); }
+
+/* Collapsible "Thinking" panel — the reasoning model's chain-of-thought, shown above the answer. */
+.msg.assistant details.think { max-width: 84%; margin: 0 0 5px; background: rgba(143,179,199,.06);
+  border: 1px solid var(--edge); border-radius: 10px; padding: 5px 11px; font-size: .8rem; color: var(--muted); }
+.msg.assistant details.think summary { cursor: pointer; user-select: none; opacity: .85; list-style: none; }
+.msg.assistant details.think summary::-webkit-details-marker { display: none; }
+.msg.assistant details.think[open] summary { margin-bottom: 5px; }
+.msg.assistant details.think pre { margin: 0; white-space: pre-wrap; word-break: break-word;
+  font-family: inherit; font-size: .78rem; line-height: 1.45; color: var(--muted); opacity: .9;
+  max-height: 260px; overflow-y: auto; }
+
+/* Inline markdown the LLM can use to emphasize things in chat. */
+.bubble strong { font-weight: 700; color: #fff; }
+.bubble em { font-style: italic; }
+.bubble u { text-decoration: underline; }
+.bubble s { opacity: .7; }
+.bubble code { background: rgba(54,211,255,.12); border: 1px solid var(--edge); border-radius: 5px; padding: 0 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; }
+/* Fenced code blocks, lists, and links in assistant markdown. */
+.bubble .code-wrap { position: relative; margin: 7px 0; }
+.bubble pre { background: #071019; border: 1px solid var(--edge); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0; }
+.bubble pre code { background: transparent; border: none; padding: 0; font-size: .82rem; line-height: 1.45; white-space: pre; color: #cfe6f2; }
+.code-copy { position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,.06); border: 1px solid var(--edge); color: var(--muted); border-radius: 6px; cursor: pointer; font-size: .8rem; padding: 2px 7px; opacity: 0; transition: opacity .15s; }
+.code-wrap:hover .code-copy { opacity: .8; }
+.code-copy:hover { opacity: 1; color: var(--text); }
+.bubble ul, .bubble ol { margin: 5px 0; padding-left: 22px; }
+.bubble li { margin: 2px 0; }
+.bubble a { color: var(--accent); text-decoration: underline; }
+
+/* Importance the LLM can set on a message: [importance: attention|emergency|info|success]. */
+.msg.assistant .bubble.imp-attention { border-color: var(--gold); border-left: 3px solid var(--gold); }
+.msg.assistant .bubble.imp-emergency { border-color: var(--danger); border-left: 3px solid var(--danger); background: #2a1414; }
+.msg.assistant .bubble.imp-info { border-color: var(--accent); border-left: 3px solid var(--accent); }
+.msg.assistant .bubble.imp-success { border-color: #4fd18b; border-left: 3px solid #4fd18b; }
+.imp-tag { display: inline-block; font-size: .68rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 6px; margin-bottom: 6px; }
+.imp-attention .imp-tag { background: var(--gold); color: #2a2200; }
+.imp-emergency .imp-tag { background: var(--danger); color: #2a0000; }
+.imp-info .imp-tag { background: var(--accent); color: #042027; }
+.imp-success .imp-tag { background: #4fd18b; color: #042a18; }
+
+/* The whole chat window flashes when an important/emergency message arrives. */
+.chat.flash-attention { animation: flashY 2.4s ease 1; }
+.chat.flash-emergency { animation: flashR 0.9s ease 4; }
+@keyframes flashY { 0%,100% { box-shadow: inset 0 0 0 0 transparent; } 35% { box-shadow: inset 0 0 0 3px var(--gold); } }
+@keyframes flashR { 0%,100% { box-shadow: inset 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 4px var(--danger); } }
 .bubble.error { border-color: var(--danger); color: #ffd7d7; }
 .bubble.notice { border-color: var(--gold); background: #1a2417; color: #fff3d6; }
 .bubble.typing { color: var(--muted); font-style: italic; }
@@ -89,6 +156,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .composer textarea { flex: 1; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--edge); background: var(--bg); color: var(--text); font: inherit; font-size: 1rem; line-height: 1.4; resize: none; max-height: 160px; overflow-y: auto; }
 .composer textarea:focus { outline: none; border-color: var(--accent); }
 .composer button { align-self: stretch; padding: 0 18px; border: none; border-radius: 12px; background: var(--accent); color: #042027; font-weight: 700; cursor: pointer; }
+.composer button.stop-btn { background: var(--danger); color: #2a0b0b; }
+.composer button.stop-btn:hover { filter: brightness(1.08); }
 
 .side { display: flex; flex-direction: column; min-height: 0; }
 .tabs { display: flex; gap: 4px; padding: 8px 8px 0; background: var(--panel); border-bottom: 1px solid var(--edge); }

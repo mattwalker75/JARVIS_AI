@@ -1,6 +1,24 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input");
+const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input"), stopBtn = $("stop");
+
+// Auto-scroll only when the user is already at the bottom. If they scroll up to read
+// while the AI is streaming, stop yanking them back down; re-engage when they return.
+let stickBottom = true;
+function scrollDown() { if (stickBottom) messagesEl.scrollTop = messagesEl.scrollHeight; }
+messagesEl.addEventListener("scroll", () => {
+  stickBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+  const jb = document.getElementById("jump-bottom"); if (jb) jb.hidden = stickBottom;
+});
+// Copy button on code blocks (delegated so it survives streaming re-renders).
+messagesEl.addEventListener("click", (e) => {
+  const btn = e.target.closest && e.target.closest(".code-copy");
+  if (!btn) return;
+  const pre = btn.parentElement.querySelector("pre");
+  const txt = pre ? pre.innerText : "";
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+    .then(() => { btn.textContent = "✓"; setTimeout(() => (btn.textContent = "⧉"), 1200); }).catch(() => {});
+});
 const activityEl = $("activity"), modelBadge = $("model-badge");
 const micMode = $("mic-mode"), micState = $("mic-state"), selftestBtn = $("selftest-btn");
 const micBtn = $("mic-btn");
@@ -8,18 +26,155 @@ const audioToggle = $("audio-toggle"), audioIc = $("audio-ic");
 const desktop = $("desktop"), desktopLink = $("desktop-link");
 
 const history = [];
+// Persist the conversation so a browser refresh doesn't lose it.
+const HISTORY_KEY = "jarvis_history";
+function saveHistory() { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-100))); } catch (_) {} }
+function restoreHistory() {
+  let saved; try { saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch (_) { saved = []; }
+  if (!Array.isArray(saved) || !saved.length) return;
+  for (const m of saved) {
+    if (m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string") { addMessage(m.role, m.content); history.push(m); }
+  }
+}
 let cfg = null, ws = null;
+// Running per-session token/cost total (accumulated from usage events).
+let sessTokens = 0, sessCost = 0;
+function updateSessUsage() {
+  const el = $("session-usage"); if (!el) return;
+  if (!sessTokens) { el.textContent = ""; return; }
+  const k = sessTokens >= 1000 ? (sessTokens / 1000).toFixed(1) + "k" : String(sessTokens);
+  el.textContent = `session: ${k} tok` + (sessCost > 0 ? ` · ~$${sessCost.toFixed(3)}` : "");
+}
+function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let streamBubble = null, streamText = "";   // the assistant bubble being streamed into
+let streamThink = null;                      // the <pre> of the live "Thinking" panel, if any
+
+// Reasoning models stream their thoughts before the answer. Show them in a collapsible
+// panel ABOVE the answer bubble (kept separate so re-rendering the bubble never wipes it).
+function ensureThink() {
+  if (!streamThink) {
+    // Its OWN message row, appended before the answer bubble is created — so thinking
+    // always sits ABOVE the answer (not beside it, since .msg is a flex row).
+    const wrap = document.createElement("div"); wrap.className = "msg assistant think-msg";
+    const det = document.createElement("details");
+    det.className = "think"; det.open = true;
+    det.innerHTML = '<summary>💭 Thinking…</summary><pre></pre>';
+    wrap.appendChild(det);
+    messagesEl.appendChild(wrap);
+    streamThink = det.querySelector("pre"); streamThink._det = det;
+  }
+  return streamThink;
+}
+// Once the real answer starts (or the turn ends), collapse the panel and relabel it.
+function finalizeThink() {
+  if (streamThink && streamThink._det) {
+    streamThink._det.open = false;
+    const s = streamThink._det.querySelector("summary"); if (s) s.textContent = "💭 Thoughts";
+  }
+  streamThink = null;
+}
+// Coalesce streaming re-renders to one per animation frame — avoids O(n^2) DOM rebuilds
+// when tokens arrive faster than the screen refreshes.
+let renderScheduled = false;
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    if (streamBubble) { renderAssistant(streamBubble, streamText); scrollDown(); }
+  });
+}
 
 const esc = (s) => (s || "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Render a SAFE subset of markdown the LLM can use to emphasize things:
+// **bold**, __underline__, *italic*, `code`, ~~strike~~. HTML is escaped first, so
+// only these known tags get injected (no XSS).
+// Group consecutive "- "/"* "/"1. " lines into <ul>/<ol>. Runs after inline formatting.
+function renderLists(s) {
+  const out = []; let list = null;
+  const flush = () => { if (list) { out.push(`<${list.type}>` + list.items.map((li) => `<li>${li}</li>`).join("") + `</${list.type}>`); list = null; } };
+  for (const line of s.split("\n")) {
+    const ul = line.match(/^\s*[-*]\s+(.*)$/), ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (ul) { if (!list || list.type !== "ul") { flush(); list = { type: "ul", items: [] }; } list.items.push(ul[1]); }
+    else if (ol) { if (!list || list.type !== "ol") { flush(); list = { type: "ol", items: [] }; } list.items.push(ol[1]); }
+    else { flush(); out.push(line); }
+  }
+  flush();
+  return out.join("\n");
+}
+function fmt(s) {
+  s = s || "";
+  // 1) Pull out fenced code blocks first so their contents aren't touched by other rules
+  //    (handles an unterminated fence gracefully while streaming).
+  const blocks = [];
+  s = s.replace(/```[a-zA-Z0-9_+-]*\n?([\s\S]*?)```/g, (m, code) => { blocks.push(code.replace(/\n$/, "")); return `\u0000C${blocks.length - 1}\u0000`; });
+  s = s.replace(/```[a-zA-Z0-9_+-]*\n?([\s\S]*)$/g, (m, code) => { blocks.push(code); return `\u0000C${blocks.length - 1}\u0000`; });
+  // 2) Escape, then apply the safe inline + link subset (only known tags get injected).
+  s = esc(s);
+  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*|mailto:[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<u>$1</u>");
+  s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+  s = s.replace(/~~([^~]+)~~/g, "<s>$1</s>");
+  s = renderLists(s);
+  // 3) Restore code blocks (content re-escaped) with a copy button.
+  s = s.replace(/\u0000C(\d+)\u0000/g, (m, i) => `<div class="code-wrap"><button class="code-copy" title="Copy code">⧉</button><pre><code>${esc(blocks[Number(i)] || "")}</code></pre></div>`);
+  return s;
+}
+const IMP = ["attention", "emergency", "info", "success"];
+// A message may start with [importance: <level>] to flag how important it is.
+function parseImp(text) {
+  const m = (text || "").match(/^\s*\[importance:\s*(attention|emergency|info|success)\]\s*/i);
+  return m ? { level: m[1].toLowerCase(), text: text.slice(m[0].length) } : { level: null, text: text || "" };
+}
+function plain(s) { return parseImp(s).text.replace(/[*_~`]/g, ""); } // for TTS
+const chatEl = document.querySelector(".chat");
+function flashChat(level) {
+  if (!chatEl || (level !== "attention" && level !== "emergency")) return;
+  chatEl.classList.remove("flash-attention", "flash-emergency");
+  void chatEl.offsetWidth; // restart the animation
+  chatEl.classList.add("flash-" + level);
+  setTimeout(() => chatEl.classList.remove("flash-" + level), 4000);
+}
+// Render an assistant bubble with markdown + an optional importance border; returns the level.
+function renderAssistant(b, text) {
+  const { level, text: body } = parseImp(text);
+  IMP.forEach((l) => b.classList.remove("imp-" + l));
+  let prefix = "";
+  if (level) { b.classList.add("imp-" + level); prefix = `<span class="imp-tag">${level}</span>`; }
+  b.innerHTML = prefix + fmt(body);
+  return level;
+}
+
 function addMessage(role, text, cls) {
   const wrap = document.createElement("div"); wrap.className = "msg " + role;
   const b = document.createElement("div"); b.className = "bubble" + (cls ? " " + cls : "");
-  b.innerHTML = esc(text); wrap.appendChild(b);
-  messagesEl.appendChild(wrap); messagesEl.scrollTop = messagesEl.scrollHeight; return b;
+  if (role === "assistant" && !cls) {            // rich-render normal assistant messages
+    const level = renderAssistant(b, text);
+    if (level) flashChat(level);
+  } else {
+    b.innerHTML = esc(text);                       // user / error / notice stay plain
+  }
+  wrap.appendChild(b);
+  if (role === "assistant") {   // hover-to-copy on assistant replies
+    const copy = document.createElement("button");
+    copy.className = "copy-btn"; copy.title = "Copy"; copy.textContent = "⧉";
+    copy.addEventListener("click", () => {
+      const txt = b.textContent || "";
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
+        .then(() => { copy.textContent = "✓"; setTimeout(() => (copy.textContent = "⧉"), 1200); }).catch(() => {});
+    });
+    wrap.appendChild(copy);
+  }
+  messagesEl.appendChild(wrap); scrollDown();
+  // Trim old nodes ONLY when the user is at the bottom — never delete the messages they're
+  // reading or yank their scroll position while they've scrolled up through history.
+  if (stickBottom) { while (messagesEl.children.length > 400) messagesEl.removeChild(messagesEl.firstChild); }
+  return b;
 }
 // Persistent "JARVIS is still working" indicator: animated dots + what it's doing +
 // a live elapsed timer. Stays pinned at the bottom of the chat until the reply
@@ -38,7 +193,8 @@ function showWorking(label) {
   }
   if (label != null) { const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = label; }
   messagesEl.appendChild(workingEl);                 // keep it pinned to the bottom
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (stopBtn) stopBtn.hidden = false;
+  scrollDown();
 }
 function labelWorking(text) {
   if (!workingEl) return;
@@ -48,6 +204,14 @@ function pinWorking() { if (workingEl) messagesEl.appendChild(workingEl); } // k
 function hideWorking() {
   if (workingTimer) { clearInterval(workingTimer); workingTimer = null; }
   if (workingEl) { workingEl.remove(); workingEl = null; }
+  if (stopBtn) stopBtn.hidden = true;
+}
+// Ask the server to abort the in-flight request (Stop button or Escape key).
+function sendCancel() {
+  if (!workingEl) return;                 // nothing is running
+  if (!ws || ws.readyState !== 1) { hideWorking(); finalizeThink(); return; }  // socket gone — just clear the UI
+  try { ws.send(JSON.stringify({ type: "cancel" })); } catch (_) {}
+  labelWorking("stopping…");
 }
 
 function addActivity(tool, input, output) {
@@ -57,33 +221,47 @@ function addActivity(tool, input, output) {
   if (input !== undefined) html += ` <span class="tin">${esc(typeof input === "string" ? input : JSON.stringify(input))}</span>`;
   if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre>`;
   e.innerHTML = html; activityEl.appendChild(e); activityEl.scrollTop = activityEl.scrollHeight;
+  while (activityEl.children.length > 200) activityEl.removeChild(activityEl.firstChild); // cap DOM growth
 }
 
+let wsBackoff = 1000, connLost = false;
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { wsBackoff = 1000; if (connLost) { connLost = false; addMessage("assistant", "🔌 Reconnected.", "notice"); } };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };   // let onclose drive the reconnect
   ws.onmessage = (ev) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
     if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
     else if (d.type === "tool_result") { addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
-    else if (d.type === "usage") addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
+    else if (d.type === "usage") {
+      addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
+      sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
+    }
+    else if (d.type === "reasoning") {
+      const pre = ensureThink();
+      pre.textContent += d.text;
+      labelWorking("thinking…"); pinWorking();
+      scrollDown();
+    }
     else if (d.type === "token") {
+      finalizeThink();   // the answer is starting — collapse the thinking panel
       if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; labelWorking("responding…"); pinWorking(); }
       streamText += d.text;
-      streamBubble.innerHTML = esc(streamText);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      scheduleRender();
     } else if (d.type === "reply") {
-      hideWorking();
+      hideWorking(); finalizeThink();
       const t = d.text || "";
       const finalText = streamBubble ? (streamText || t) : t;
-      if (streamBubble) streamBubble.innerHTML = esc(finalText);
+      if (streamBubble) { const lvl = renderAssistant(streamBubble, finalText); if (lvl) flashChat(lvl); }
       else addMessage("assistant", finalText);
-      history.push({ role: "assistant", content: finalText });
-      if (window.JarvisVoice) JarvisVoice.speak(t || finalText);
+      history.push({ role: "assistant", content: finalText }); saveHistory();
+      if (window.JarvisVoice) JarvisVoice.speak(plain(t || finalText));
       streamBubble = null; streamText = "";
     } else if (d.type === "error") {
-      hideWorking(); streamBubble = null; streamText = "";
+      hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
       addMessage("assistant", "Error: " + d.error, "error");
+      addRetry();
     } else if (d.type === "notification") {
       showNotification(d.note);
     } else if (d.type === "task_run") {
@@ -91,12 +269,54 @@ function connectWS() {
       refreshTasks();
     } else if (d.type === "chat_post") {
       addMessage("assistant", d.message);
-      history.push({ role: "assistant", content: d.message });
-      if (window.JarvisVoice) JarvisVoice.speak(d.message);
+      history.push({ role: "assistant", content: d.message }); saveHistory();
+      if (window.JarvisVoice) JarvisVoice.speak(plain(d.message));
     }
   };
-  ws.onclose = () => setTimeout(connectWS, 1500);
+  ws.onclose = () => {
+    // A request in flight when the socket dropped will never get a reply — clear the
+    // spinner and streaming state so the UI isn't stuck, and tell the user once.
+    if (workingEl || streamBubble || streamThink) {
+      hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
+      if (!connLost) { connLost = true; addMessage("assistant", "🔌 Connection lost — reconnecting…", "error"); }
+    }
+    setTimeout(connectWS, wsBackoff);
+    wsBackoff = Math.min(wsBackoff * 2, 15000);   // exponential backoff, cap 15s
+  };
 }
+
+// Memory viewer: list the Mem0 long-term memories with delete buttons.
+let memItems = [];
+async function refreshMemories() {
+  const el = $("mem-list"); if (!el) return;
+  el.innerHTML = '<div class="hint">Loading…</div>';
+  let d; try { d = await (await fetch("/api/memories")).json(); } catch { el.innerHTML = '<div class="hint">Failed to load memories.</div>'; return; }
+  if (d.error) { el.innerHTML = '<div class="hint">Memory unavailable: ' + esc(d.error) + '</div>'; return; }
+  memItems = d.results || [];
+  renderMemories(($("mem-search") && $("mem-search").value) || "");
+}
+function renderMemories(filter) {
+  const el = $("mem-list"); if (!el) return;
+  const q = (filter || "").trim().toLowerCase();
+  const items = q ? memItems.filter((m) => (m.memory || "").toLowerCase().includes(q)) : memItems;
+  if (!items.length) { el.innerHTML = '<div class="hint">' + (memItems.length ? "No matching memories." : "No memories saved yet.") + '</div>'; return; }
+  el.innerHTML = "";
+  items.forEach((m) => {
+    const row = document.createElement("div"); row.className = "mem-item";
+    const txt = document.createElement("span"); txt.className = "mem-text"; txt.textContent = m.memory || "";
+    const del = document.createElement("button"); del.className = "ghost"; del.textContent = "🗑"; del.title = "Delete this memory";
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      try { await fetch("/api/memories/" + encodeURIComponent(m.id), { method: "DELETE" }); memItems = memItems.filter((x) => x.id !== m.id); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No memories saved yet.</div>'; }
+      catch { del.disabled = false; }
+    });
+    row.appendChild(txt); row.appendChild(del); el.appendChild(row);
+  });
+}
+const memRefresh = $("mem-refresh");
+if (memRefresh) memRefresh.addEventListener("click", refreshMemories);
+const memSearch = $("mem-search");
+if (memSearch) memSearch.addEventListener("input", () => renderMemories(memSearch.value));
 
 function showNotification(note) {
   const msg = (note && note.message) || "";
@@ -107,10 +327,27 @@ function showNotification(note) {
   if (window.JarvisVoice) JarvisVoice.speak(msg); // respects the audio switch
 }
 
+// Re-send the current history (which still ends with the failed user turn) without
+// duplicating the user message — used by the Retry button after an error.
+function resend() {
+  if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected — reconnecting…", "error"); return; }
+  if (!history.length || history[history.length - 1].role !== "user") return;
+  showWorking("working…");
+  ws.send(JSON.stringify({ type: "chat", messages: history }));
+}
+function addRetry() {
+  if (!history.length || history[history.length - 1].role !== "user") return;
+  const wrap = document.createElement("div"); wrap.className = "msg assistant";
+  const btn = document.createElement("button"); btn.className = "retry-btn"; btn.textContent = "↻ Retry";
+  btn.addEventListener("click", () => { wrap.remove(); resend(); });
+  wrap.appendChild(btn); messagesEl.appendChild(wrap); scrollDown();
+}
+
 function send(text) {
   text = (text || "").trim(); if (!text) return;
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Connecting… try again in a moment.", "error"); return; }
-  addMessage("user", text); history.push({ role: "user", content: text });
+  stickBottom = true;                     // a fresh send always snaps to the bottom
+  addMessage("user", text); history.push({ role: "user", content: text }); saveHistory();
   inputEl.value = ""; autoGrow(); showWorking("working…");
   ws.send(JSON.stringify({ type: "chat", messages: history }));
 }
@@ -122,9 +359,20 @@ inputEl.addEventListener("input", autoGrow);
 // Enter sends; Shift+Enter inserts a newline (and IME composition is respected).
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(inputEl.value); }
+  else if (e.key === "ArrowUp" && inputEl.value === "") {   // recall last message to edit
+    const lastU = [...history].reverse().find((m) => m.role === "user");
+    if (lastU) { e.preventDefault(); inputEl.value = lastU.content; autoGrow(); }
+  }
 });
 
 formEl.addEventListener("submit", (e) => { e.preventDefault(); send(inputEl.value); });
+
+// Interrupt in-flight processing: the Stop button, or Escape while it's working.
+if (stopBtn) stopBtn.addEventListener("click", sendCancel);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && workingEl) { e.preventDefault(); sendCancel(); }
+  else if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); inputEl.focus(); }
+});
 
 selftestBtn.addEventListener("click", async () => {
   addActivity("selftest", "running…");
@@ -137,6 +385,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
   t.classList.add("active"); $("panel-" + t.dataset.tab).classList.add("active");
   if (t.dataset.tab === "tasks") { refreshTasks(); refreshNotes(); }
+  if (t.dataset.tab === "memory") refreshMemories();
 }));
 
 // --- Tasks panel ---
@@ -167,8 +416,21 @@ function addNoteEl(n, prepend) {
   const hint = notesList.querySelector(".hint"); if (hint) hint.remove();
   const el = document.createElement("div"); el.className = "note" + (n.level === "error" ? " error" : "");
   el.innerHTML = `<div class="n-time">${esc(new Date(n.at).toLocaleString())}</div><div class="n-msg">${esc(n.message || "")}</div>`;
+  if (n.id) {
+    const x = document.createElement("button"); x.className = "n-dismiss"; x.textContent = "×"; x.title = "Dismiss";
+    x.addEventListener("click", async () => {
+      try { await fetch("/api/notifications/" + encodeURIComponent(n.id), { method: "DELETE" }); } catch (_) {}
+      el.remove(); if (!notesList.querySelector(".note")) notesList.innerHTML = '<div class="hint">No notifications yet.</div>';
+    });
+    el.appendChild(x);
+  }
   if (prepend) notesList.insertBefore(el, notesList.firstChild); else notesList.appendChild(el);
 }
+const notesClear = $("notes-clear");
+if (notesClear) notesClear.addEventListener("click", async () => {
+  try { await fetch("/api/notifications/clear", { method: "POST" }); } catch (_) {}
+  if (notesList) notesList.innerHTML = '<div class="hint">No notifications yet.</div>';
+});
 async function refreshNotes() {
   if (!notesList) return;
   let notes = [];
@@ -183,6 +445,19 @@ if (tasksList) tasksList.addEventListener("click", async (e) => {
   refreshTasks();
 });
 if (tasksRefresh) tasksRefresh.addEventListener("click", () => { refreshTasks(); refreshNotes(); });
+const qaAdd = $("qa-add");
+if (qaAdd) qaAdd.addEventListener("click", async () => {
+  const pEl = $("qa-prompt"), prompt = (pEl.value || "").trim();
+  if (!prompt) { pEl.focus(); return; }
+  const num = Math.max(1, parseInt($("qa-num").value, 10) || 5);
+  const body = { prompt };
+  if ($("qa-mode").value === "every") body.every_seconds = num * 60; else body.in_seconds = num * 60;
+  try {
+    const r = await (await fetch("/api/tasks/add", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    if (r.error) { addMessage("assistant", "Couldn't add task: " + r.error, "error"); return; }
+    pEl.value = ""; refreshTasks();
+  } catch (e) { addMessage("assistant", "Couldn't add task: " + e, "error"); }
+});
 setInterval(() => { if ($("panel-tasks") && $("panel-tasks").classList.contains("active")) refreshTasks(); }, 15000);
 
 // --- Sessions (save / load / export / import conversations) ---
@@ -210,6 +485,7 @@ async function refreshSessions() {
 function loadConversation(messages) {
   messagesEl.innerHTML = ""; history.length = 0;
   (messages || []).forEach((m) => { addMessage(m.role, m.content); history.push({ role: m.role, content: m.content }); });
+  saveHistory(); resetSessUsage();   // keep persisted copy in sync + reset usage for the loaded convo
 }
 async function saveCurrent() {
   const name = prompt("Save conversation as:", currentSession.name || "Session " + new Date().toLocaleString());
@@ -221,8 +497,13 @@ async function saveCurrent() {
 }
 function newSession() {
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
+  saveHistory(); resetSessUsage();   // clear persisted conversation + reset the usage counter
   addMessage("assistant", "New session. JARVIS online — ask me anything.");
 }
+const newChatBtn = $("new-chat");
+if (newChatBtn) newChatBtn.addEventListener("click", newSession);
+const jumpBtn = $("jump-bottom");
+if (jumpBtn) jumpBtn.addEventListener("click", () => { stickBottom = true; messagesEl.scrollTop = messagesEl.scrollHeight; jumpBtn.hidden = true; });
 async function loadSession(id) {
   try {
     const d = await (await fetch("/api/sessions/" + encodeURIComponent(id))).json();
@@ -286,6 +567,29 @@ function onVoiceError(msg) {
   addMessage("assistant", "🎤 " + msg, "error");
 }
 
+// Drag-drop a file into the chat: upload it to the shared folder, reference it in the input.
+async function uploadFile(f) {
+  const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+  try {
+    const r = await (await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: f.name, dataUrl }) })).json();
+    if (r.error) { addMessage("assistant", "Upload failed: " + r.error, "error"); return; }
+    inputEl.value = (inputEl.value ? inputEl.value + "\n" : "") + `Attached file: ${r.path}`; autoGrow(); inputEl.focus();
+    addMessage("assistant", `📎 Uploaded **${f.name}** → \`${r.path}\` — ask me to read or work with it.`);
+  } catch (e) { addMessage("assistant", "Upload failed: " + e, "error"); }
+}
+function setupDropZone() {
+  const zone = document.querySelector(".chat") || document.body;
+  ["dragenter", "dragover"].forEach((ev) => zone.addEventListener(ev, (e) => {
+    if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { e.preventDefault(); zone.classList.add("drag-over"); }
+  }));
+  ["dragleave", "dragend"].forEach((ev) => zone.addEventListener(ev, (e) => { if (e.target === zone) zone.classList.remove("drag-over"); }));
+  zone.addEventListener("drop", async (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault(); zone.classList.remove("drag-over");
+    for (const f of [...e.dataTransfer.files]) await uploadFile(f);
+  });
+}
+
 async function init() {
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
@@ -298,7 +602,8 @@ async function init() {
     if (audioToggle) { audioToggle.checked = cfg.voice.tts !== false; applyAudio(); }
   }
   try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (_) {}
-  refreshTasks(); refreshNotes();
+  restoreHistory();   // bring back the conversation after a refresh
+  refreshTasks(); refreshNotes(); setupDropZone();
   connectWS();
   inputEl.focus();
 }
