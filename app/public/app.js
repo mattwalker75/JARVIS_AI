@@ -318,6 +318,97 @@ if (memRefresh) memRefresh.addEventListener("click", refreshMemories);
 const memSearch = $("mem-search");
 if (memSearch) memSearch.addEventListener("input", () => renderMemories(memSearch.value));
 
+// --- Files tab: browse / download / delete the shared read-write folder ---
+function fmtBytes(n) { if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(1) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
+async function refreshFiles() {
+  const el = $("files-list"); if (!el) return;
+  el.innerHTML = '<div class="hint">Loading…</div>';
+  let d; try { d = await (await fetch("/api/files?dir=rw")).json(); } catch { el.innerHTML = '<div class="hint">Failed to load files.</div>'; return; }
+  if (d.error) { el.innerHTML = '<div class="hint">Error: ' + esc(d.error) + '</div>'; return; }
+  const files = d.files || [];
+  if (!files.length) { el.innerHTML = '<div class="hint">No files yet. JARVIS saves what it makes here; drag a file into the chat to add one.</div>'; return; }
+  el.innerHTML = "";
+  files.forEach((f) => {
+    const enc = encodeURIComponent(f.path);
+    const row = document.createElement("div"); row.className = "file-item";
+    const link = document.createElement("a"); link.className = "file-name"; link.href = "/api/files/raw?dir=rw&path=" + enc; link.target = "_blank"; link.textContent = f.path; link.title = "Open / preview";
+    const meta = document.createElement("span"); meta.className = "file-meta"; meta.textContent = fmtBytes(f.size);
+    const dl = document.createElement("a"); dl.className = "ghost file-btn"; dl.href = "/api/files/raw?dir=rw&download=1&path=" + enc; dl.textContent = "⬇"; dl.title = "Download";
+    const del = document.createElement("button"); del.className = "ghost file-btn"; del.textContent = "🗑"; del.title = "Delete";
+    del.addEventListener("click", async () => { if (!confirm("Delete " + f.path + "?")) return; del.disabled = true; try { await fetch("/api/files?dir=rw&path=" + enc, { method: "DELETE" }); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No files yet.</div>'; } catch { del.disabled = false; } });
+    row.append(link, meta, dl, del); el.appendChild(row);
+  });
+}
+const filesRefresh = $("files-refresh"); if (filesRefresh) filesRefresh.addEventListener("click", refreshFiles);
+
+// --- Settings persistence + model switcher ---
+function persistSetting(p, value) { fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p, value }) }).catch(() => {}); }
+async function loadModels() {
+  const sel = $("model-select"); if (!sel) return;
+  let d; try { d = await (await fetch("/api/models")).json(); } catch { return; }
+  const models = d.models || [];
+  if (!models.length) { sel.hidden = true; return; }
+  sel.innerHTML = "";
+  models.forEach((m) => { const o = document.createElement("option"); o.value = m; o.textContent = m; sel.appendChild(o); });
+  if (d.current) sel.value = d.current;
+  sel.hidden = false;
+}
+function setModel(name) {
+  if (!name) return;
+  persistSetting((cfg && cfg.model_mode === "multi") ? "llm.models.chat" : "llm.model", name);
+  const sel = $("model-select"); if (sel) sel.value = name;
+  if (modelBadge) modelBadge.textContent = (cfg && cfg.provider ? cfg.provider + " · " : "") + name;
+  addMessage("assistant", "✅ Chat model set to **" + name + "** (saved to config).", "notice");
+}
+const modelSelect = $("model-select");
+if (modelSelect) modelSelect.addEventListener("change", () => setModel(modelSelect.value));
+
+// --- Regenerate the last response ---
+function regenerate() {
+  if (workingEl) return;
+  if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected.", "error"); return; }
+  if (history.length && history[history.length - 1].role === "assistant") {
+    history.pop(); saveHistory();
+    const bubbles = messagesEl.querySelectorAll(".msg.assistant:not(.working-msg):not(.think-msg)");
+    const last = bubbles[bubbles.length - 1]; if (last) last.remove();
+  }
+  if (!history.length || history[history.length - 1].role !== "user") { addMessage("assistant", "Nothing to regenerate yet.", "notice"); return; }
+  stickBottom = true; showWorking("working…");
+  ws.send(JSON.stringify({ type: "chat", messages: history }));
+}
+const regenBtn = $("regen"); if (regenBtn) regenBtn.addEventListener("click", regenerate);
+
+// --- Slash commands ---
+function showSlashHelp() {
+  addMessage("assistant", [
+    "**Slash commands**",
+    "- `/help` — show this menu",
+    "- `/new` or `/clear` — start a new conversation",
+    "- `/regen` or `/retry` — regenerate the last response",
+    "- `/model [name]` — switch the chat model (no name opens the picker)",
+    "- `/remember <fact>` — save a fact to long-term memory",
+    "- `/files`, `/tasks`, `/memory`, `/activity`, `/workbench` — open that side panel",
+  ].join("\n"));
+}
+function handleSlash(text) {
+  const parts = text.slice(1).split(/\s+/); const cmd = (parts.shift() || "").toLowerCase(); const arg = parts.join(" ").trim();
+  switch (cmd) {
+    case "help": case "?": showSlashHelp(); return;
+    case "new": case "clear": newSession(); return;
+    case "regen": case "retry": regenerate(); return;
+    case "model": if (arg) setModel(arg); else { const s = $("model-select"); if (s && !s.hidden) s.focus(); else addMessage("assistant", "No model picker available.", "notice"); } return;
+    case "remember":
+      if (!arg) { addMessage("assistant", "Usage: `/remember <fact>`", "notice"); return; }
+      fetch("/api/memories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: arg }) })
+        .then(() => addMessage("assistant", "🧠 Remembered: " + arg, "notice")).catch((e) => addMessage("assistant", "Couldn't save: " + e, "error"));
+      return;
+    case "files": case "tasks": case "memory": case "activity": case "workbench": {
+      const tab = document.querySelector('.tab[data-tab="' + cmd + '"]'); if (tab) tab.click(); return;
+    }
+    default: addMessage("assistant", "Unknown command `/" + cmd + "` — type `/help` for the list.", "notice");
+  }
+}
+
 function showNotification(note) {
   const msg = (note && note.message) || "";
   addMessage("assistant", "🔔 " + msg, "notice");
@@ -345,6 +436,7 @@ function addRetry() {
 
 function send(text) {
   text = (text || "").trim(); if (!text) return;
+  if (text.startsWith("/")) { inputEl.value = ""; autoGrow(); handleSlash(text); return; }   // slash command
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Connecting… try again in a moment.", "error"); return; }
   stickBottom = true;                     // a fresh send always snaps to the bottom
   addMessage("user", text); history.push({ role: "user", content: text }); saveHistory();
@@ -386,6 +478,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   t.classList.add("active"); $("panel-" + t.dataset.tab).classList.add("active");
   if (t.dataset.tab === "tasks") { refreshTasks(); refreshNotes(); }
   if (t.dataset.tab === "memory") refreshMemories();
+  if (t.dataset.tab === "files") refreshFiles();
 }));
 
 // --- Tasks panel ---
@@ -550,6 +643,7 @@ if (micMode) micMode.addEventListener("click", (e) => {
   if (!btn || !window.JarvisVoice) return;
   setActiveMode(btn.dataset.mode);
   JarvisVoice.setMode(btn.dataset.mode);
+  persistSetting("voice.mic_mode", btn.dataset.mode);   // remember the mic mode across reboots
 });
 if (micBtn) micBtn.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });
 
@@ -558,7 +652,7 @@ function applyAudio() {
   if (window.JarvisVoice) JarvisVoice.setTts(on);
   if (audioIc) { audioIc.textContent = on ? "🔊" : "🔇"; audioIc.title = on ? "Audio on (spoken replies)" : "Audio muted"; }
 }
-if (audioToggle) audioToggle.addEventListener("change", applyAudio);
+if (audioToggle) audioToggle.addEventListener("change", () => { applyAudio(); persistSetting("voice.tts", audioToggle.checked); });
 
 let lastVoiceError = "";
 function onVoiceError(msg) {
@@ -600,10 +694,13 @@ async function init() {
     const ok = JarvisVoice.init(cfg.voice, { onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError });
     if (!ok) { setMic("unsupported"); onVoiceError(JarvisVoice.supportMessage()); }
     if (audioToggle) { audioToggle.checked = cfg.voice.tts !== false; applyAudio(); }
+    // Restore the saved mic mode (persisted to config).
+    const savedMode = cfg.voice.mic_mode || "off";
+    if (ok && savedMode !== "off") { setActiveMode(savedMode); JarvisVoice.setMode(savedMode); }
   }
   try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (_) {}
   restoreHistory();   // bring back the conversation after a refresh
-  refreshTasks(); refreshNotes(); setupDropZone();
+  refreshTasks(); refreshNotes(); setupDropZone(); loadModels();
   connectWS();
   inputEl.focus();
 }

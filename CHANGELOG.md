@@ -8,7 +8,27 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-06: Refined the "simplest interpretation" prompt nudge so it no longer
+  discourages real tool use: conversational requests are answered in chat, but tasks
+  that ask to compute/build/run/test/verify or produce a file must actually use the
+  tools and confirm the result. Full eval suite (incl. the new vision test) is 11/11.
+
 ### Added
+- 2026-07-06: Big feature batch. **Files tab** — browse, open/preview, download, and
+  delete files in the shared folder (`GET /api/files`, `/api/files/raw`,
+  `DELETE /api/files`), so JARVIS's outputs are reachable from the UI. **Image
+  analysis** — an `analyze_image` tool runs an uploaded/shared image file through the
+  vision look-step (describe / read text / answer questions). **Regenerate** button
+  (and `/regen`) re-runs the last turn. **Model switcher** in the header lists the
+  local Ollama models (`GET /api/models`) and switches the chat model on the fly.
+  **Slash commands** — `/help`, `/new`, `/regen`, `/model`, `/remember`, and
+  `/files|/tasks|/memory|/activity` to jump panels. **Settings persistence** —
+  changing TTS and the mic mode now writes back to JARVIS_CONFIG.json (via
+  `POST /api/settings`, gated by an allowlist so secrets can't be written), so they
+  survive reboots/rebuilds. NOTE: this required mounting JARVIS_CONFIG.json
+  read-write for jarvis-app; because it's a bind-mounted single file, the config is
+  written in place (a tmp+rename swap would EBUSY over the mount point).
 - 2026-07-06: Chat UX upgrades. Richer markdown in assistant replies — fenced code
   blocks (with a copy button), bullet/numbered lists, and clickable links, on top of
   the existing inline formatting (all still HTML-escaped first, so XSS-safe). A

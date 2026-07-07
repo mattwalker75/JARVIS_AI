@@ -62,6 +62,16 @@ function resolveShared(p, mustWrite) {
   return abs;
 }
 
+// Read an image file and hand it back as an inline image; the llm.js "look step" sees the
+// __image__ marker and runs it through the vision model (with the tool call's `question`).
+async function analyzeImageFile(p) {
+  if (!p) throw new Error("path to the image is required");
+  const abs = resolveShared(p, false);
+  const buf = fs.readFileSync(abs);
+  const ext = (path.extname(abs).slice(1) || "png").toLowerCase();
+  const mime = ext === "jpg" ? "jpeg" : ext;
+  return { __image__: `data:image/${mime};base64,` + buf.toString("base64"), file: path.basename(abs), bytes: buf.length };
+}
 async function listDir(p) {
   const abs = resolveShared(p, false);
   return fs.readdirSync(abs, { withFileTypes: true }).map((d) => ({
@@ -361,6 +371,12 @@ const toolDefs = [
   { type: "function", function: { name: "screenshot",
     description: "Look at the current desktop screen. This captures the screen and returns a TEXT analysis from a vision model: a description of what is visible plus the interactive elements (buttons, links, fields, icons, tabs) with their approximate CENTER pixel coordinates (x, y from the top-left). Use those coordinates with click/type/move_mouse to act. Optionally pass 'question' to focus the analysis (e.g. 'where is the address bar?', 'what are the search results?'). Take a screenshot to locate elements before acting, and again afterward to verify the result. The screen is 1024x768.",
     parameters: { type: "object", properties: { question: { type: "string", description: "Optional: focus the visual analysis on a specific question about the screen." } }, required: [] } } },
+  { type: "function", function: { name: "analyze_image",
+    description: "Look at / analyze an image FILE with the vision model — describe it, read text in it, or answer a question about it. Use this for images the user uploaded (they land in /READ_WRITE_FILES/uploads/) or any image in the shared folders. Pass the image's path and an optional question.",
+    parameters: { type: "object", properties: {
+      path: { type: "string", description: "Path to the image, e.g. /READ_WRITE_FILES/uploads/photo.jpg" },
+      question: { type: "string", description: "Optional: what to focus on or ask about the image." }
+    }, required: ["path"] } } },
   { type: "function", function: { name: "ui_actions",
     description: "Perform a SEQUENCE of desktop UI actions in ONE call — far fewer round-trips than separate click/type/key calls. After a screenshot gives you element coordinates, use this to run the whole plan at once, e.g. click a field → type text → press Enter. A short settle delay runs between steps. Screen is 1024x768; screenshot again afterward to verify. Each step is one of: {action:'click'|'double_click'|'move', x, y} , {action:'type', text} , {action:'key', keys:'Return'} , {action:'scroll', direction:'up'|'down', amount} , {action:'sleep', ms}.",
     parameters: { type: "object", properties: { actions: { type: "array", items: { type: "object" }, description: "Ordered list of action steps to perform in sequence." } }, required: ["actions"] } } },
@@ -493,6 +509,7 @@ async function _execTool(name, args) {
     case "fetch_url": return await fetchUrl(args.url, { method: args.method });
     case "web_search": return await webSearch(args.query);
     case "screenshot": return await screenshot();
+    case "analyze_image": return await analyzeImageFile(args.path);
     case "ui_actions": return await uiActions(args.actions);
     case "open_url": return await openUrl(args.url);
     case "open_app": return await openApp(args.command);

@@ -85,7 +85,7 @@ services:
     volumes:
       - ./app:/usr/src/app
       - /usr/src/app/node_modules
-      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
+      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json   # read-write: the UI persists settings here
       - ./JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
       - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
       - ./READ_WRITE_FILES:/READ_WRITE_FILES

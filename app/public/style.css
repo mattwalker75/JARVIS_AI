@@ -82,6 +82,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .qa-row { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--muted); }
 .qa-row #qa-num { width: 58px; }
 .qa-row #qa-add { margin-left: auto; }
+.model-select { max-width: 170px; font-size: .78rem; }
+.file-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--edge); border-radius: 8px; margin-bottom: 6px; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-size: .82rem; text-decoration: none; }
+.file-name:hover { text-decoration: underline; }
+.file-meta { color: var(--muted); font-size: .72rem; flex-shrink: 0; }
+.file-btn { flex-shrink: 0; padding: 2px 7px; text-decoration: none; }
+.regen-btn { padding: 0 12px; }
 .note { position: relative; }
 .n-dismiss { position: absolute; top: 4px; right: 5px; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 1.05rem; line-height: 1; opacity: .45; padding: 0 4px; }
 .n-dismiss:hover { opacity: 1; color: var(--text); }

@@ -5,7 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
-const { config, loadError, publicConfig, systemPrompt } = require("./src/config");
+const { config, loadError, publicConfig, systemPrompt, setSetting } = require("./src/config");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
@@ -57,9 +57,79 @@ app.get("/api/memories", async (_req, res) => {
   try { res.json(await tools.execTool("list_memories", {})); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post("/api/memories", async (req, res) => {
+  try { res.json(await tools.execTool("add_memory", { text: (req.body || {}).text })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.delete("/api/memories/:id", async (req, res) => {
   try { res.json(await tools.execTool("delete_memory", { id: req.params.id })); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Persist an allowlisted setting (voice, model, etc.) to JARVIS_CONFIG.json.
+app.post("/api/settings", (req, res) => {
+  try {
+    const { path: p, value } = req.body || {};
+    if (typeof p !== "string") return res.status(400).json({ error: "path (string) required" });
+    res.json(setSetting(p, value));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Available models for the header switcher — proxied from the local Ollama.
+app.get("/api/models", async (_req, res) => {
+  try {
+    const base = (config.llm && config.llm.base_url) || "";
+    const host = base.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+    if (!host) return res.json({ models: [], current: publicConfig().model });
+    const r = await fetch(host + "/api/tags", { signal: AbortSignal.timeout(5000) });
+    const d = await r.json();
+    res.json({ models: (d.models || []).map((m) => m.name).sort(), current: publicConfig().model });
+  } catch (e) { res.json({ models: [], current: publicConfig().model, error: e.message }); }
+});
+
+// Files: browse / download / delete the shared folders.
+function sharedBase(which) {
+  const s = config.shared || {};
+  return which === "ro" ? (s.read_only_dir || "/READ_ONLY_FILES") : (s.read_write_dir || "/READ_WRITE_FILES");
+}
+function safeJoin(base, rel) {
+  const abs = path.resolve(base, rel || ".");
+  if (abs !== base && !abs.startsWith(base + path.sep)) throw new Error("path escapes the folder");
+  return abs;
+}
+app.get("/api/files", (req, res) => {
+  try {
+    const which = req.query.dir === "ro" ? "ro" : "rw";
+    const base = sharedBase(which);
+    const out = [];
+    const walk = (dir, rel) => {
+      let ents = []; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+      for (const e of ents) {
+        if (e.name.startsWith(".") || out.length >= 500) continue;
+        const r = rel ? rel + "/" + e.name : e.name, full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full, r);
+        else { try { const st = fs.statSync(full); out.push({ path: r, size: st.size, mtime: st.mtimeMs }); } catch (_) {} }
+      }
+    };
+    walk(base, "");
+    out.sort((a, b) => b.mtime - a.mtime);
+    res.json({ dir: which, files: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get("/api/files/raw", (req, res) => {
+  try {
+    const which = req.query.dir === "ro" ? "ro" : "rw";
+    const abs = safeJoin(sharedBase(which), String(req.query.path || ""));
+    if (req.query.download) return res.download(abs);
+    res.sendFile(abs);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.delete("/api/files", (req, res) => {
+  try {
+    const abs = safeJoin(sharedBase("rw"), String(req.query.path || "")); // only rw is deletable
+    fs.unlinkSync(abs);
+    res.json({ deleted: req.query.path });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // File drop: save an uploaded file into the read-write shared folder so the LLM can read it.

@@ -3,6 +3,13 @@ const fs = require("fs");
 
 const CONFIG_FILE = process.env.JARVIS_CONFIG_FILE || "/cfg/JARVIS_CONFIG.json";
 
+// Settings the UI is allowed to change and persist back to JARVIS_CONFIG.json (so they
+// survive reboots/rebuilds). An allowlist — never let arbitrary or secret keys be written.
+const SETTABLE = new Set([
+  "voice.tts", "voice.stt", "voice.enabled", "voice.mic_mode", "voice.silence_timeout_seconds",
+  "llm.model", "llm.models.chat", "llm.temperature", "llm.max_tokens", "assistant_name",
+]);
+
 let config = {};
 let loadError = null;
 try {
@@ -61,9 +68,28 @@ function publicConfig() {
       wake_word: (v.wake_word || name).toLowerCase(),
       stop_phrase: (v.stop_phrase || (name + " stop listening")).toLowerCase(),
       silence_timeout_seconds: v.silence_timeout_seconds || 12,
+      mic_mode: v.mic_mode || "off",
     },
     workbench_url: (config.workbench && config.workbench.desktop_url) || "",
   };
+}
+
+// Update one allowlisted setting IN MEMORY (takes effect immediately) and persist it
+// atomically to JARVIS_CONFIG.json so it survives restarts/rebuilds.
+function setSetting(pathStr, value) {
+  if (!SETTABLE.has(pathStr)) throw new Error("setting not allowed: " + pathStr);
+  const parts = pathStr.split(".");
+  let o = config;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!o[parts[i]] || typeof o[parts[i]] !== "object") o[parts[i]] = {};
+    o = o[parts[i]];
+  }
+  o[parts[parts.length - 1]] = value;
+  // Write IN PLACE: CONFIG_FILE is a bind-mounted single file, so a tmp+rename swap fails
+  // with EBUSY (can't rename over a mount point). One writeFileSync is fine for a config
+  // that's only changed occasionally by a single user.
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  return { path: pathStr, value };
 }
 
 // --- credential vault (the user's own accounts) ---
@@ -92,4 +118,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt };
+module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt };

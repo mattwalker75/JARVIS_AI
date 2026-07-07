@@ -18,6 +18,7 @@
     </div>
     <div class="controls">
       <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
+      <select id="model-select" class="ghost model-select" title="Chat model" hidden></select>
       <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
       <span class="mic" id="mic-state" title="voice state">voice off</span>
       <span class="ctl-ic" title="Microphone mode">🎙️</span>
@@ -59,6 +60,7 @@
       <button id="jump-bottom" class="jump-btn" title="Jump to latest" hidden>↓ Latest</button>
       <form class="composer" id="composer">
         <textarea id="input" rows="1" autocomplete="off" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
+        <button id="regen" type="button" class="ghost regen-btn" title="Regenerate last response (/regen)">🔄</button>
         <button id="send" type="submit">Send</button>
         <button id="stop" type="button" class="stop-btn" title="Stop processing (Esc)" hidden>⏹ Stop</button>
       </form>
@@ -69,6 +71,7 @@
         <button class="tab active" data-tab="activity">Activity</button>
         <button class="tab" data-tab="tasks">Tasks</button>
         <button class="tab" data-tab="memory">Memory</button>
+        <button class="tab" data-tab="files">Files</button>
         <button class="tab" data-tab="workbench">Workbench</button>
       </div>
       <div class="panel active" id="panel-activity">
@@ -102,6 +105,12 @@
           </div>
           <input id="mem-search" class="mem-search" placeholder="Filter memories…" autocomplete="off">
           <div id="mem-list"><div class="hint">Semantic memories JARVIS has saved about you.</div></div>
+        </div>
+      </div>
+      <div class="panel" id="panel-files">
+        <div class="tasks-pane">
+          <div class="tasks-head"><h4>Shared files</h4><button id="files-refresh" class="ghost">↻</button></div>
+          <div id="files-list"><div class="hint">Files you and JARVIS exchange (downloads, reports, uploads).</div></div>
         </div>
       </div>
       <div class="panel" id="panel-workbench">

@@ -11,7 +11,7 @@
       "tools_used": [
         "screenshot"
       ],
-      "max_ms": 90000,
+      "max_ms": 240000,
       "max_cost_usd": 0.05
     }
   }
