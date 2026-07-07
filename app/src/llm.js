@@ -7,10 +7,8 @@ const tools = require("./tools");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Tools that are safe to retry on a transient (connection-level) error because
-// they are read-only / idempotent. Mutating tools (run_shell, sql, write_file,
-// set_secret, computer-use) are never auto-retried to avoid double-execution.
-const RETRYABLE_TOOLS = new Set(["fetch_url", "web_search", "search_memory", "list_memories", "screenshot"]);
+// Retryability is a property of each tool (see tools.isRetryable) — read-only tools
+// retry on transient errors; mutating tools never auto-retry to avoid double execution.
 const TRANSIENT = /(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|PROTOCOL_CONNECTION_LOST|ECONNREFUSED|\b(429|50\d)\b|service 5\d\d)/i;
 
 // Rough USD per 1K tokens [prompt, completion]; used only for a cost estimate in the UI.
@@ -48,6 +46,17 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   const nowNote = { role: "system", content: `Current date/time: ${new Date().toString()} (epoch ms ${Date.now()}). Shared folders: read-only = ${sh.read_only_dir || "/READ_ONLY_FILES"}, read-write = ${sh.read_write_dir || "/READ_WRITE_FILES"} (write files the user should receive into the read-write folder; a bare filename works).` };
   if (convo.length && convo[0].role === "system") convo.splice(1, 0, nowNote);
   else convo.unshift(nowNote);
+
+  // Auto-hint: nudge the model toward a relevant skill for THIS turn, placed right
+  // before the last user message (recency = salience). On by default; toggle with the
+  // skills_autohint config flag / the /hints UI command.
+  if (config.skills_autohint !== false) {
+    const lastUserIdx = convo.map((m) => m.role).lastIndexOf("user");
+    if (lastUserIdx >= 0 && typeof convo[lastUserIdx].content === "string") {
+      const h = require("./skills").hint(convo[lastUserIdx].content);
+      if (h) convo.splice(lastUserIdx, 0, { role: "system", content: h });
+    }
+  }
 
   const maxIter = llm.max_tool_iterations || 8;
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -140,7 +149,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
 
 // Execute a tool, retrying read-only/idempotent ones on transient errors.
 async function execWithRetry(name, args) {
-  const tries = RETRYABLE_TOOLS.has(name) ? 3 : 1;
+  const tries = tools.isRetryable(name) ? 3 : 1;
   let lastErr;
   for (let a = 0; a < tries; a++) {
     try { return await tools.execTool(name, args); }

@@ -33,6 +33,17 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .mic.listening { color: var(--accent); }
 .ghost { background: transparent; border: 1px solid var(--edge); color: var(--muted); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: .8rem; }
 .ghost:hover { color: var(--text); border-color: var(--accent); }
+.ghost:disabled { opacity: .38; cursor: not-allowed; }
+.ghost:disabled:hover { color: var(--muted); border-color: var(--edge); }
+#voice-chat.active { background: var(--accent); color: #042027; font-weight: 700; border-color: var(--accent); }
+
+/* Ambient voice mode: full-screen orb overlay. */
+#ambient { position: fixed; inset: 0; z-index: 1000; background: radial-gradient(circle at 50% 45%, #0a1420 0%, #05080d 70%, #02040a 100%); display: none; }
+#ambient.on { display: block; }
+#ambient-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.ambient-caption { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; color: rgba(230,245,255,.7); font-size: 1rem; letter-spacing: .06em; text-transform: lowercase; pointer-events: none; }
+.ambient-exit { position: absolute; top: 20px; right: 22px; background: rgba(255,255,255,.06); border: 1px solid var(--edge); color: var(--muted); border-radius: 20px; padding: 8px 16px; font-size: .85rem; cursor: pointer; z-index: 2; }
+.ambient-exit:hover { color: var(--text); border-color: var(--accent); }
 
 .session-menu { position: relative; }
 .session-drop { position: absolute; right: 0; top: 36px; width: 320px; max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 10px; z-index: 50; box-shadow: 0 12px 30px rgba(0,0,0,.4); }

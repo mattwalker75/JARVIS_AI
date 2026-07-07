@@ -9,6 +9,132 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-07: Voice tweaks. The **🎤 Talk** push-to-talk button is now disabled in
+  Wake/Open mic modes (they already listen — it's only useful when the mic is Off).
+  The ambient orb now **animates continuously while the AI speaks** (a synthesized
+  syllable-rate envelope + a fast surface ripple, layered with the per-word pulses),
+  so it visibly reacts when talking, not just to your voice.
+- 2026-07-07: De-cluttered the voice controls (they were redundant). The **Voice**
+  button now toggles spoken replies (text-to-speech) — it was a combined open-mic +
+  TTS shortcut. Removed the separate speaker on/off dip-switch (it did the same thing
+  as the TTS toggle). Listening is now solely the **Off/Wake/Open** mic control +
+  **🎤 Talk** push-to-talk. The wake word is configurable (`voice.wake_word`, defaults
+  to `assistant_name`) and the mic status now shows the actual wake word instead of a
+  hardcoded "Jarvis".
+
+### Added
+- 2026-07-07: **Ambient (orb) voice mode** (`🌌 Ambient`). A full-screen, hands-free
+  view that hides the UI and renders JARVIS as a glowing orb animated by state: soft
+  breathing when idle, ripples to your real mic amplitude when listening (Web Audio),
+  churns while thinking, and pulses per spoken word while speaking (SpeechSynthesis
+  `boundary` events). Tap the orb to talk / interrupt; ✕ to exit. New
+  `app/public/ambient.js` + a small `onSpeak`/`onBoundary` hook in `voice.js`; all of
+  it is inert unless the orb is open. (Browser-native, no deps; the synth voice's raw
+  waveform isn't readable by the browser, so "speaking" is word-synced not
+  amplitude-synced.)
+- 2026-07-07: Skill **auto-hinting**. Each turn keyword-matches the user's message
+  against the skills (`TRIGGERS` in `skills.js`) and injects a one-line
+  `get_skill('…')` nudge right before the message. Toggle with the `skills_autohint`
+  config flag (default on), the `/hints on|off` UI command, or `POST /api/settings`;
+  exposed in `/api/config`. Honest result from live testing: the nudge fires and is
+  injected correctly, but qwen3-next often still proceeds directly (it's driven more
+  by the always-on tool descriptions than by on-demand skills) — so it's a cheap
+  backstop, not a forcing function.
+
+### Changed
+- 2026-07-07: Added `data-analysis` and `error-recovery` skills (18 total). Also
+  measured whether the local model actually consults skills: across two live tests
+  (a data-analysis ask and a browser task) qwen3-next called `list_skills`/`get_skill`
+  ZERO times, yet behaved correctly — it drove the `browser_*` tools straight from
+  their descriptions and answered sensibly. Takeaway: for this model, behavior is
+  driven by the always-on tool descriptions, not by on-demand skills; getting skills
+  actually used would require per-turn auto-hinting (deferred). The corrected/added
+  skills are still kept (they're accurate now and cost no always-on tokens).
+- 2026-07-07: Skills correctness pass (12 → 16 skills). Removed the dead `sql`-tool
+  references that were teaching the model to call a tool that no longer exists (in
+  the `internet` and `workflow-monitor-and-alert` skills). Rewrote `desktop-control`
+  to match reality (screenshot returns a vision text analysis + coordinates, not a
+  raw image; added `ui_actions`) and reframed it for non-browser apps. Replaced the
+  `browser-automation` (Playwright-via-shell) skill with a `browser` skill leading on
+  the first-class `browser_*` tools. Updated `scheduling` (output destinations,
+  notify-as-stop-signal), `workflow-login-and-act` (browser-first), and `memory`
+  (`update_memory`, timestamps). Added new skills: `vision`, `email`, `documents`,
+  and `task-authoring`. Fixed the stale "seeded into the skills DB table" comment
+  (skills are served in-memory now).
+- 2026-07-06: Documentation overhaul. Rewrote the README to be high-level and
+  accurate (it still described the removed MySQL `jarvis-db` / `sql` tool and
+  predated the gateway, browser/email/document/MCP tools, personas, voice
+  streaming, and the whole web UI). Added a `Docs/` directory with detailed guides:
+  architecture, configuration, tools, web-ui, voice, memory-and-scheduling, cli,
+  api, and extending — all cross-linked from the README and a `Docs/README.md`
+  index.
+- 2026-07-06: Voice made ChatGPT-like. TTS now uses a QUEUE and speaks the reply
+  sentence-by-sentence AS it streams in (previously it waited for the entire reply,
+  which meant ~30-90s of silence with the local reasoning model, then a dump). This
+  also fixes a real soundness bug: the browser truncates long single utterances —
+  chunking into sentences avoids it. Added barge-in: a new turn, the Stop button,
+  Esc, or tapping the mic instantly silences speech and resumes listening. Spoken
+  text is cleaned (code blocks, inline code, URLs, and importance markers are
+  skipped, not read aloud). New one-tap "🎙 Voice" toggle turns on hands-free
+  conversation (continuous listening + spoken replies) and remembers it. Mic still
+  pauses during speech to avoid the assistant hearing itself (browser Web Speech has
+  no echo cancellation for continuous recognition — so voice barge-in isn't possible
+  mid-speech; use the mic tap / Esc / Stop).
+
+### Added
+- 2026-07-06: Framework upgrade — new tool families. **Browser control**
+  (`browser_goto/snapshot/click/fill/extract`): a persistent Playwright-driven
+  Chromium in the workbench (visible on the desktop, logins persist under
+  /workspace/.browser_profile) driven by DOM refs/CSS selectors instead of pixel
+  guessing — verified live (goto → snapshot → extract → click). **Email**
+  (`check_email/read_email/send_email`) using the user's own account from a vault
+  secret named `email` ({username, password, imap_host, smtp_host}). **Documents**
+  (`read_document`): paged text extraction from PDF/DOCX/ODT/RTF/EPUB/HTML —
+  verified against a real PDF. **Memory** gained `update_memory` (correct in
+  place), metadata on add, and timestamps in results (new `/update` endpoint in the
+  sidecar). **MCP client** (Streamable HTTP): configure `mcp.servers` in
+  JARVIS_CONFIG.json and external tool servers register as `mcp_<server>_<tool>`.
+  **Custom tools**: drop a JS module in `data/custom_tools/` (template included)
+  and restart — no core edits; `/READ_WRITE_FILES/custom_tools` can also load if
+  `custom_tools.allow_model_authored` is explicitly enabled (default off).
+  **REST `POST /api/chat`** for scripts/automation (same brain as the WS chat, with
+  optional tier/persona). **Personas**: a `personas` config block (full replacement
+  via `system_prompt` or additive via `append`), a per-request persona on WS/REST,
+  and a `/persona` slash command.
+
+### Changed
+- 2026-07-06: LiteLLM gateway is now the default LLM path (`llm.base_url` →
+  `http://jarvis-litellm:4000/v1`). The local Ollama models are registered in
+  litellm/config.yaml under their exact Ollama tags, so existing model names work
+  unchanged, and cloud tiers (Claude/GPT/Gemini) become available by just exporting
+  the provider key. Verified through the gateway: basic chat, streaming (reasoning
+  arrives as `reasoning_content`), tool calls, vision (needs `ollama_chat/` prefix
+  — plain `ollama/` requires Pillow the image lacks), and the FULL eval suite
+  (11/11). Set base_url back to `http://host.docker.internal:11434/v1` to bypass.
+- 2026-07-06: Tool-weakness fixes from the code review. `run_shell`: hard
+  `timeout_s` (default 120s, killed in-container) and head+tail truncation with an
+  explicit marker (errors live at the tail). `fetch_url`: headers/body/json are now
+  actually exposed to the model (they existed but were unreachable), plus
+  timeout_s, offset paging, binary `save_to`, and SSRF checks on EVERY redirect hop
+  (was bypassable via 302) with fail-closed DNS. `web_search`: snippets, a `limit`
+  param, and explicit rate-limited/blocked detection instead of a silent empty
+  result. `read_file`: offset/max_chars paging, truncation notes, and a directive
+  error on binary files; `list_dir` returns sizes+mtimes. `press_key`: multi-key
+  sequences ("ctrl+a BackSpace") work instead of being silently mangled.
+  `ui_actions`: stops at the first failing step and reports it, supports
+  right_click, caps at 50 steps, and clamps the click button (was a shell-injection
+  vector). `analyze_image`/`read_document` reject missing files. Retryability now
+  lives with each tool definition (tools.isRetryable) instead of a hardcoded set.
+- 2026-07-06: Memory sidecar namespaces its Chroma collection by embed model
+  (`jarvis_<model>`), with a one-time rename migration of the legacy collection —
+  switching embedders now lands in a fresh collection instead of silently
+  corrupting search with mismatched vector dimensions.
+- 2026-07-06: System prompt: removed the dead `sql` tool reference (three places
+  taught the model to call a tool that no longer exists) and added the
+  browser-first guidance + new tool pointers. Dropped the unused `mysql2`
+  dependency.
+
+### Changed
 - 2026-07-06: Refined the "simplest interpretation" prompt nudge so it no longer
   discourages real tool use: conversational requests are answered in chat, but tasks
   that ask to compute/build/run/test/verify or produce a file must actually use the

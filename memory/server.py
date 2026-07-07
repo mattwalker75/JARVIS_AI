@@ -13,6 +13,7 @@ embedder/llm to Ollama in build_memory() for a fully offline setup).
 """
 import json
 import os
+import re
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -62,10 +63,30 @@ def build_memory():
         "api_key": api_key or "local",
     }}
 
+    # Namespace the collection BY EMBED MODEL: different embedders produce different
+    # vector dimensions, and mixing them in one Chroma collection silently corrupts
+    # search. Switching embed models now lands in a fresh collection (the old one stays
+    # on disk for rollback) instead of breaking memory in a confusing way.
+    embed_model = embed_cfg["config"]["model"]
+    collection = "jarvis_" + re.sub(r"\W+", "_", embed_model).strip("_")
+
+    # One-time migration: rename the legacy un-namespaced "jarvis" collection so
+    # existing memories survive the change (only if the new name doesn't exist yet).
+    try:
+        import chromadb
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        names = [c.name for c in client.list_collections()]
+        if "jarvis" in names and collection not in names:
+            client.get_collection("jarvis").modify(name=collection)
+            print(f"memory: migrated legacy collection 'jarvis' -> '{collection}'")
+    except Exception as e:
+        print(f"memory: legacy-collection migration skipped: {e}")
+    print(f"memory: embedder={embed_model} collection={collection}")
+
     cfg = {
         "vector_store": {
             "provider": "chroma",
-            "config": {"collection_name": "jarvis", "path": CHROMA_PATH},
+            "config": {"collection_name": collection, "path": CHROMA_PATH},
         },
         "llm": llm_cfg,
         "embedder": embed_cfg,
@@ -98,6 +119,11 @@ class SearchBody(BaseModel):
 
 class DeleteBody(BaseModel):
     memory_id: str
+
+
+class UpdateBody(BaseModel):
+    memory_id: str
+    text: str
 
 
 @app.get("/healthz")
@@ -148,3 +174,10 @@ def all_memories(user_id: str = DEFAULT_USER):
 def delete(body: DeleteBody):
     memory().delete(memory_id=body.memory_id)
     return {"deleted": body.memory_id}
+
+
+@app.post("/update")
+def update(body: UpdateBody):
+    # Correct a memory in place (keeps its id) instead of delete + re-add.
+    memory().update(memory_id=body.memory_id, data=body.text)
+    return {"updated": body.memory_id}

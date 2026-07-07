@@ -138,6 +138,7 @@
   async function listenOnce() {
     const s = supportInfo();
     if (!s.ok) { reportError(s.msg); setState("unsupported"); return; }
+    stopSpeaking();   // tapping the mic while JARVIS is talking interrupts it (barge-in)
     if (oneShot) { try { oneShot.stop(); } catch (_) {} return; }
     if (!(await ensureMicPermission())) return;
     const resume = wantRunning;
@@ -155,23 +156,69 @@
     try { r.start(); } catch (e) { oneShot = null; reportError("Could not start the microphone: " + e.message); }
   }
 
-  function speak(text) {
-    if (!cfg.tts || !window.speechSynthesis || !text) return;
-    const wasRunning = wantRunning;
+  // --- TTS: a QUEUE so streamed sentences speak in order (like ChatGPT — you hear the
+  // answer as it's generated), the browser never truncates a long utterance, and the
+  // whole thing can be interrupted (barge-in) via stopSpeaking(). ---
+  let ttsQueue = [];
+  let resumeAfterTts = false;
+
+  function cleanForSpeech(text) {
+    return String(text || "")
+      .replace(/\[importance:\s*\w+\]/gi, " ")
+      .replace(/```[\s\S]*?```/g, " (code block) ")   // complete fenced code — don't read aloud
+      .replace(/```[\s\S]*$/g, " (code) ")            // a still-streaming/unterminated fence
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\bhttps?:\/\/\S+/g, " link ")
+      .replace(/[*_#>~|]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  function ttsNext() {
+    if (!ttsQueue.length) {
+      if (speaking && handlers.onSpeak) { try { handlers.onSpeak(false); } catch (_) {} }
+      speaking = false;
+      if (enabled && resumeAfterTts) { resumeAfterTts = false; wantRunning = true; startRecognition(); }
+      return;
+    }
+    if (!speaking && handlers.onSpeak) { try { handlers.onSpeak(true); } catch (_) {} }
     speaking = true;
-    if (recognition) { try { recognition.stop(); } catch (_) {} recognition = null; }
-    const u = new SpeechSynthesisUtterance(String(text).replace(/[*_`#>]/g, ""));
+    const u = new SpeechSynthesisUtterance(ttsQueue.shift());
     const v = pickVoice(); if (v) u.voice = v;
     u.rate = cfg.tts_rate || 1.0; u.pitch = cfg.tts_pitch || 1.0;
-    u.onend = u.onerror = () => { speaking = false; if (enabled && wasRunning) { wantRunning = true; startRecognition(); } };
-    try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch (_) { speaking = false; }
+    u.onboundary = () => { if (handlers.onBoundary) { try { handlers.onBoundary(); } catch (_) {} } };  // per-word pulse
+    u.onend = () => setTimeout(ttsNext, 0);
+    u.onerror = () => setTimeout(ttsNext, 0);
+    try { window.speechSynthesis.speak(u); } catch (_) { setTimeout(ttsNext, 0); }
+  }
+  // Speak text — queued and split into sentence-sized chunks. Call it repeatedly with
+  // streamed fragments; each completed sentence plays as soon as it arrives.
+  function speak(text) {
+    if (!cfg.tts || !window.speechSynthesis) return;
+    const clean = cleanForSpeech(text);
+    if (!clean) return;
+    if (!speaking && ttsQueue.length === 0) {   // first chunk of a turn: pause the mic so we don't hear ourselves
+      if (wantRunning) resumeAfterTts = true;
+      if (recognition) { try { recognition.stop(); } catch (_) {} recognition = null; }
+    }
+    const pieces = clean.match(/[^.!?\n]+[.!?\n]+|\S[^.!?\n]*$/g) || [clean];
+    for (const p of pieces) { const s = p.trim(); if (s) ttsQueue.push(s); }
+    if (!speaking) ttsNext();
+  }
+  // Barge-in: stop talking immediately, drop the queue, resume listening.
+  function stopSpeaking() {
+    const was = speaking || ttsQueue.length > 0;
+    ttsQueue = [];
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+    if (was && handlers.onSpeak) { try { handlers.onSpeak(false); } catch (_) {} }
+    speaking = false;
+    if (enabled && (resumeAfterTts || was)) { resumeAfterTts = false; wantRunning = true; startRecognition(); }
   }
 
-  function setTts(on) { cfg.tts = !!on; if (!on && window.speechSynthesis) { try { window.speechSynthesis.cancel(); } catch (_) {} } }
+  function setTts(on) { cfg.tts = !!on; if (!on) stopSpeaking(); }
 
   window.JarvisVoice = {
     init(c, h) { cfg = Object.assign(cfg, c || {}); handlers = h || {}; return supportInfo().ok; },
-    setMode, listenOnce, speak, setTts,
+    setMode, listenOnce, speak, stopSpeaking, setTts,
     supported: () => supportInfo().ok,
     supportMessage: () => supportInfo().msg || "",
     mode: () => listenMode,

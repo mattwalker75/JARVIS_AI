@@ -66,6 +66,23 @@ app.delete("/api/memories/:id", async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// REST chat for external automation (scripts, cron, Shortcuts, other machines via a
+// tunnel): same brain as the WS chat, one request/response. Body:
+//   { "message": "...", "messages": [...optional history...], "tier": "chat", "persona": "work" }
+app.post("/api/chat", async (req, res) => {
+  try {
+    const b = req.body || {};
+    const hist = (Array.isArray(b.messages) ? b.messages : [])
+      .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string");
+    if (b.message) hist.push({ role: "user", content: String(b.message) });
+    if (!hist.length || hist[hist.length - 1].role !== "user") return res.status(400).json({ error: "provide 'message' (string) and/or 'messages' ending with a user turn" });
+    chatlog.record("user", hist[hist.length - 1].content);
+    const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt(b.persona) }, ...hist.slice(-40)], tier: b.tier });
+    chatlog.record("assistant", reply);
+    res.json({ reply });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Persist an allowlisted setting (voice, model, etc.) to JARVIS_CONFIG.json.
 app.post("/api/settings", (req, res) => {
   try {
@@ -75,15 +92,24 @@ app.post("/api/settings", (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Available models for the header switcher — proxied from the local Ollama.
+// Available models for the header switcher. Works against BOTH backends: an
+// OpenAI-compatible gateway (GET /v1/models — e.g. LiteLLM) and raw Ollama (/api/tags).
 app.get("/api/models", async (_req, res) => {
   try {
-    const base = (config.llm && config.llm.base_url) || "";
-    const host = base.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
-    if (!host) return res.json({ models: [], current: publicConfig().model });
-    const r = await fetch(host + "/api/tags", { signal: AbortSignal.timeout(5000) });
-    const d = await r.json();
-    res.json({ models: (d.models || []).map((m) => m.name).sort(), current: publicConfig().model });
+    const base = ((config.llm && config.llm.base_url) || "").replace(/\/+$/, "");
+    if (!base) return res.json({ models: [], current: publicConfig().model });
+    try {
+      const r = await fetch(base + "/models", { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const d = await r.json();
+        const names = (d.data || []).map((m) => m.id).filter(Boolean).sort();
+        if (names.length) return res.json({ models: names, current: publicConfig().model });
+      }
+    } catch (_) {}
+    const host = base.replace(/\/v1$/, "");
+    const r2 = await fetch(host + "/api/tags", { signal: AbortSignal.timeout(5000) });
+    const d2 = await r2.json();
+    res.json({ models: (d2.models || []).map((m) => m.name).sort(), current: publicConfig().model });
   } catch (e) { res.json({ models: [], current: publicConfig().model, error: e.message }); }
 });
 
@@ -93,8 +119,13 @@ function sharedBase(which) {
   return which === "ro" ? (s.read_only_dir || "/READ_ONLY_FILES") : (s.read_write_dir || "/READ_WRITE_FILES");
 }
 function safeJoin(base, rel) {
-  const abs = path.resolve(base, rel || ".");
+  let abs = path.resolve(base, rel || ".");
   if (abs !== base && !abs.startsWith(base + path.sep)) throw new Error("path escapes the folder");
+  // Resolve symlinks and RE-CHECK: a link planted inside the shared folder must not
+  // let /api/files/raw serve a target outside it (res.sendFile follows symlinks).
+  try { abs = fs.realpathSync(abs); } catch (_) { return abs; }   // nonexistent → caller 404s
+  const realBase = fs.realpathSync(base);
+  if (abs !== realBase && !abs.startsWith(realBase + path.sep)) throw new Error("path escapes the folder (symlink)");
   return abs;
 }
 app.get("/api/files", (req, res) => {
@@ -187,7 +218,7 @@ wss.on("connection", (ws) => {
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       : [];
     const history = all.slice(-40);   // cap the context sent to the model (unbounded history = cost + latency)
-    const messages = [{ role: "system", content: SYSTEM }, ...history];
+    const messages = [{ role: "system", content: data.persona ? systemPrompt(data.persona) : SYSTEM }, ...history];
     const emit = (ev) => { try { ws.send(JSON.stringify(ev)); } catch (_) {} };
 
     // One in-flight request per connection: don't overwrite an active AbortController

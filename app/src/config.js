@@ -8,6 +8,7 @@ const CONFIG_FILE = process.env.JARVIS_CONFIG_FILE || "/cfg/JARVIS_CONFIG.json";
 const SETTABLE = new Set([
   "voice.tts", "voice.stt", "voice.enabled", "voice.mic_mode", "voice.silence_timeout_seconds",
   "llm.model", "llm.models.chat", "llm.temperature", "llm.max_tokens", "assistant_name",
+  "skills_autohint",
 ]);
 
 let config = {};
@@ -25,8 +26,14 @@ function assistantName() {
     (config.app && config.app.title) || "JARVIS";
 }
 // The system prompt with {assistant_name} substituted, so the model knows its name.
-function systemPrompt() {
-  const sp = (config.llm && config.llm.system_prompt) || "You are {assistant_name}, a helpful AI assistant.";
+// Optional personas (config.personas.<name>) override or extend the base prompt:
+//   "personas": { "work": { "system_prompt": "..." },          // full replacement
+//                 "brief": { "append": "Answer in 2 sentences max." } }  // addition
+function systemPrompt(persona) {
+  let sp = (config.llm && config.llm.system_prompt) || "You are {assistant_name}, a helpful AI assistant.";
+  const p = persona && config.personas && config.personas[persona];
+  if (p && p.system_prompt) sp = p.system_prompt;
+  else if (p && p.append) sp = sp + "\n\n" + p.append;
   return sp.replace(/\{assistant_name\}/g, assistantName());
 }
 
@@ -71,6 +78,8 @@ function publicConfig() {
       mic_mode: v.mic_mode || "off",
     },
     workbench_url: (config.workbench && config.workbench.desktop_url) || "",
+    personas: Object.keys(config.personas || {}),
+    skills_autohint: config.skills_autohint !== false,
   };
 }
 

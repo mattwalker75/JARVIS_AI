@@ -1417,3 +1417,50 @@
 {"t":"2026-07-07T02:18:48.255Z","tool":"write_workbench_file","args":{"path":"/workspace/factorial.py","content":"import math\nprint(math.factorial(7))"},"status":"ok","ms":49}
 {"t":"2026-07-07T02:18:48.260Z","tool":"run_shell","args":{"command":"python /workspace/factorial.py"},"status":"ok","ms":53}
 {"t":"2026-07-07T02:19:18.839Z","tool":"screenshot","args":{},"status":"ok","ms":665}
+{"t":"2026-07-07T03:39:06.270Z","tool":"browser_goto","args":{"url":"https://example.com"},"status":"error: browser daemon failed to start: ","ms":30587}
+{"t":"2026-07-07T03:42:48.940Z","tool":"browser_goto","args":{"url":"https://example.com"},"status":"error: browser daemon failed to start: ","ms":30587}
+{"t":"2026-07-07T03:50:19.094Z","tool":"browser_goto","args":{"url":"https://example.com"},"status":"ok","ms":680}
+{"t":"2026-07-07T03:50:19.129Z","tool":"browser_snapshot","args":{},"status":"ok","ms":34}
+{"t":"2026-07-07T03:50:19.133Z","tool":"browser_extract","args":{},"status":"ok","ms":4}
+{"t":"2026-07-07T03:50:19.883Z","tool":"browser_click","args":{"target":"e0"},"status":"ok","ms":750}
+{"t":"2026-07-07T03:50:36.187Z","tool":"read_document","args":{"path":"/READ_WRITE_FILES/_doc_test.pdf"},"status":"ok","ms":149}
+{"t":"2026-07-07T03:51:38.390Z","tool":"read_document","args":{"path":"/READ_WRITE_FILES/_doc_test.pdf"},"status":"ok","ms":151}
+{"t":"2026-07-07T03:51:38.499Z","tool":"read_document","args":{"path":"/READ_WRITE_FILES/_missing.pdf"},"status":"error: no such file: /READ_WRITE_FILES/_missing.pdf","ms":0}
+{"t":"2026-07-07T03:52:10.663Z","tool":"write_fileread_file","args":{},"status":"error: unknown tool: write_fileread_file","ms":0}
+{"t":"2026-07-07T03:52:47.688Z","tool":"append_log","args":{"path":"eval_probe.log","message":"eval check ok"},"status":"ok","ms":5}
+{"t":"2026-07-07T03:53:03.540Z","tool":"fetch_url","args":{"url":"https://api.ipify.org?format=json"},"status":"ok","ms":145}
+{"t":"2026-07-07T03:53:14.703Z","tool":"list_tasks","args":{},"status":"ok","ms":2}
+{"t":"2026-07-07T03:53:32.388Z","tool":"add_memory","args":{"text":"my eval test code is XYZZY-42"},"status":"ok","ms":627}
+{"t":"2026-07-07T03:53:49.052Z","tool":"search_memory","args":{"query":"eval test code"},"status":"ok","ms":41}
+{"t":"2026-07-07T03:54:17.310Z","tool":"run_shell","args":{"command":"echo EVAL_SHELL_OK"},"status":"ok","ms":153}
+{"t":"2026-07-07T03:54:37.390Z","tool":"write_workbench_file","args":{"path":"/workspace/factorial.py","content":"import math\nprint(math.factorial(7))"},"status":"ok","ms":142}
+{"t":"2026-07-07T03:54:45.136Z","tool":"run_shell","args":{"command":"python /workspace/factorial.py","timeout_s":10},"status":"ok","ms":142}
+{"t":"2026-07-07T03:55:13.662Z","tool":"screenshot","args":{},"status":"ok","ms":141}
+{"t":"2026-07-07T03:57:13.967Z","tool":"write_file","args":{"path":"/READ_WRITE_FILES/eval_probe.txt","content":"eval-marker-7"},"status":"ok","ms":4}
+{"t":"2026-07-07T03:57:21.838Z","tool":"read_file","args":{"path":"/READ_WRITE_FILES/eval_probe.txt"},"status":"ok","ms":1}
+{"t":"2026-07-07T03:57:35.218Z","tool":"append_log","args":{"path":"eval_probe.log","message":"eval check ok"},"status":"ok","ms":1}
+{"t":"2026-07-07T03:57:52.829Z","tool":"fetch_url","args":{"url":"https://api.ipify.org?format=json"},"status":"ok","ms":143}
+{"t":"2026-07-07T03:58:04.303Z","tool":"list_tasks","args":{},"status":"ok","ms":2}
+{"t":"2026-07-07T03:58:21.562Z","tool":"add_memory","args":{"text":"my eval test code is XYZZY-42"},"status":"ok","ms":318}
+{"t":"2026-07-07T03:58:42.441Z","tool":"search_memory","args":{"query":"eval test code","limit":8},"status":"ok","ms":30}
+{"t":"2026-07-07T03:59:18.452Z","tool":"run_shell","args":{"command":"echo EVAL_SHELL_OK"},"status":"ok","ms":148}
+{"t":"2026-07-07T03:59:45.065Z","tool":"write_workbench_file","args":{"content":"import math\nprint(math.factorial(7))","path":"/workspace/factorial.py"},"status":"ok","ms":136}
+{"t":"2026-07-07T03:59:58.609Z","tool":"run_shell","args":{"command":"python3 /workspace/factorial.py","timeout_s":30},"status":"ok","ms":138}
+{"t":"2026-07-07T04:00:22.000Z","tool":"screenshot","args":{},"status":"ok","ms":140}
+{"t":"2026-07-07T05:13:35.068Z","tool":"browser_goto","args":{"url":"https://news.ycombinator.com"},"status":"ok","ms":302}
+{"t":"2026-07-07T05:13:42.172Z","tool":"browser_snapshot","args":{},"status":"ok","ms":841}
+{"t":"2026-07-07T05:23:13.552Z","tool":"list_dir","args":{"path":"/READ_WRITE_FILES"},"status":"ok","ms":5}
+{"t":"2026-07-07T05:23:18.074Z","tool":"list_dir","args":{"path":"/READ_WRITE_FILES/uploads"},"status":"ok","ms":1}
+{"t":"2026-07-07T05:33:30.136Z","tool":"write_file","args":{"path":"/READ_WRITE_FILES/eval_probe.txt","content":"eval-marker-7"},"status":"ok","ms":1}
+{"t":"2026-07-07T05:33:35.267Z","tool":"read_file","args":{"path":"/READ_WRITE_FILES/eval_probe.txt"},"status":"ok","ms":1}
+{"t":"2026-07-07T05:33:51.597Z","tool":"append_log","args":{"path":"eval_probe.log","message":"eval check ok"},"status":"ok","ms":1}
+{"t":"2026-07-07T05:35:04.065Z","tool":"write_workbench_filerun_shellrun_shell","args":{},"status":"error: unknown tool: write_workbench_filerun_shellrun_shell","ms":1}
+{"t":"2026-07-07T05:35:31.290Z","tool":"fetch_url","args":{"url":"https://api.ipify.org?format=json"},"status":"ok","ms":123}
+{"t":"2026-07-07T05:35:43.183Z","tool":"list_tasks","args":{},"status":"ok","ms":3}
+{"t":"2026-07-07T05:36:02.053Z","tool":"add_memory","args":{"text":"my eval test code is XYZZY-42"},"status":"ok","ms":317}
+{"t":"2026-07-07T05:36:27.444Z","tool":"search_memory","args":{"query":"eval test code","limit":8},"status":"ok","ms":28}
+{"t":"2026-07-07T05:37:05.476Z","tool":"run_shell","args":{"command":"echo EVAL_SHELL_OK"},"status":"ok","ms":147}
+{"t":"2026-07-07T05:37:36.844Z","tool":"write_workbench_file","args":{"path":"/workspace/factorial.py","content":"print(7*6*5*4*3*2*1)"},"status":"ok","ms":134}
+{"t":"2026-07-07T05:37:45.421Z","tool":"run_shell","args":{"command":"python /workspace/factorial.py","timeout_s":30},"status":"ok","ms":138}
+{"t":"2026-07-07T05:38:18.044Z","tool":"screenshot","args":{},"status":"ok","ms":138}
+{"t":"2026-07-07T05:46:14.957Z","tool":"write_filerun_shell","args":{},"status":"error: unknown tool: write_filerun_shell","ms":0}

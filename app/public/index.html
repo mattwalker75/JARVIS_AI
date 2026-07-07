@@ -18,20 +18,17 @@
     </div>
     <div class="controls">
       <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
+      <button id="ambient-btn" class="ghost" title="Ambient voice mode — full-screen orb, hands-free (tap the orb to talk, ✕ to exit)">🌌 Ambient</button>
       <select id="model-select" class="ghost model-select" title="Chat model" hidden></select>
+      <button id="voice-chat" class="ghost" title="Speak replies aloud (text-to-speech) — click to toggle">🔊 Voice</button>
       <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
       <span class="mic" id="mic-state" title="voice state">voice off</span>
-      <span class="ctl-ic" title="Microphone mode">🎙️</span>
+      <span class="ctl-ic" title="Microphone mode (how JARVIS listens)">🎙️</span>
       <div class="seg" id="mic-mode" role="group" aria-label="Microphone mode">
         <button data-mode="off" class="active" title="Mic off — use the 🎤 Talk button">Off</button>
-        <button data-mode="wake" title="Wake word — say &quot;Jarvis&quot; to start talking">Wake</button>
+        <button data-mode="wake" title="Wake word — say the wake word to start talking">Wake</button>
         <button data-mode="open" title="Always listening — just talk, no wake word">Open</button>
       </div>
-      <span class="ctl-ic" id="audio-ic" title="Audio output (spoken replies)">🔊</span>
-      <label class="switch" title="Audio output (spoken replies / text-to-speech)">
-        <input type="checkbox" id="audio-toggle" checked>
-        <span class="slider"></span>
-      </label>
       <div class="session-menu">
         <button id="sessions-btn" class="ghost">Sessions ▾</button>
         <div class="session-drop" id="sessions-drop" hidden>
@@ -121,6 +118,7 @@
   </main>
 
   <script src="/voice.js"></script>
+  <script src="/ambient.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

@@ -30,10 +30,24 @@ model_list:
     litellm_params:
       model: gemini/gemini-2.5-flash
       api_key: os.environ/GEMINI_API_KEY
-  # Local models via Ollama on the host (run `ollama serve` on your Mac):
-  - model_name: ollama-llama3
+  # Local models via Ollama on the host (run `ollama serve` on your Mac).
+  # model_name matches the Ollama tag exactly, so JARVIS_CONFIG.json model names work
+  # unchanged whether llm.base_url points at Ollama directly or at this gateway.
+  - model_name: qwen3-next:80b
     litellm_params:
-      model: ollama/llama3
+      model: ollama_chat/qwen3-next:80b
+      api_base: http://host.docker.internal:11434
+  - model_name: qwen2.5vl:32b
+    litellm_params:
+      model: ollama_chat/qwen2.5vl:32b
+      api_base: http://host.docker.internal:11434
+  - model_name: qwen2.5vl:7b
+    litellm_params:
+      model: ollama_chat/qwen2.5vl:7b
+      api_base: http://host.docker.internal:11434
+  - model_name: qwen3:8b
+    litellm_params:
+      model: ollama_chat/qwen3:8b
       api_base: http://host.docker.internal:11434
 
 litellm_settings:

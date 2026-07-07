@@ -22,7 +22,6 @@ messagesEl.addEventListener("click", (e) => {
 const activityEl = $("activity"), modelBadge = $("model-badge");
 const micMode = $("mic-mode"), micState = $("mic-state"), selftestBtn = $("selftest-btn");
 const micBtn = $("mic-btn");
-const audioToggle = $("audio-toggle"), audioIc = $("audio-ic");
 const desktop = $("desktop"), desktopLink = $("desktop-link");
 
 const history = [];
@@ -37,6 +36,10 @@ function restoreHistory() {
   }
 }
 let cfg = null, ws = null;
+// Ambient (orb) mode state helpers.
+let voiceListening = false, ambSpeaking = false;
+function amb(s) { if (window.JarvisAmbient && JarvisAmbient.active()) JarvisAmbient.setState(s); }
+function ambIdle() { return voiceListening ? "listening" : "idle"; }
 // Running per-session token/cost total (accumulated from usage events).
 let sessTokens = 0, sessCost = 0;
 function updateSessUsage() {
@@ -49,6 +52,14 @@ function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let streamBubble = null, streamText = "";   // the assistant bubble being streamed into
 let streamThink = null;                      // the <pre> of the live "Thinking" panel, if any
+let ttsSpokenLen = 0;                        // chars of the current reply already sent to TTS
+// Speak complete sentences AS they stream in (ChatGPT-style), not after the whole reply.
+function speakStreaming() {
+  if (!window.JarvisVoice || !JarvisVoice.ttsEnabled()) return;
+  const pending = streamText.slice(ttsSpokenLen);
+  const m = pending.match(/^[\s\S]*[.!?\n]/);   // everything up to the LAST sentence end
+  if (m && m[0].trim().length > 1) { JarvisVoice.speak(m[0]); ttsSpokenLen += m[0].length; }
+}
 
 // Reasoning models stream their thoughts before the answer. Show them in a collapsible
 // panel ABOVE the answer bubble (kept separate so re-rendering the bubble never wipes it).
@@ -180,6 +191,9 @@ function addMessage(role, text, cls) {
 // a live elapsed timer. Stays pinned at the bottom of the chat until the reply
 // completes (or errors), so you can always tell whether it's still going.
 function showWorking(label) {
+  if (window.JarvisVoice) JarvisVoice.stopSpeaking();   // new turn — interrupt any prior speech (barge-in)
+  ttsSpokenLen = 0;
+  amb("thinking");
   if (!workingEl) {
     const w = document.createElement("div"); w.className = "msg assistant working-msg";
     w.innerHTML = '<div class="bubble working"><span class="dots"><span></span><span></span><span></span></span>' +
@@ -205,9 +219,11 @@ function hideWorking() {
   if (workingTimer) { clearInterval(workingTimer); workingTimer = null; }
   if (workingEl) { workingEl.remove(); workingEl = null; }
   if (stopBtn) stopBtn.hidden = true;
+  if (!ambSpeaking) amb(ambIdle());   // done thinking; orb rests (or listens)
 }
 // Ask the server to abort the in-flight request (Stop button or Escape key).
 function sendCancel() {
+  if (window.JarvisVoice) JarvisVoice.stopSpeaking();   // Stop/Esc also silences speech
   if (!workingEl) return;                 // nothing is running
   if (!ws || ws.readyState !== 1) { hideWorking(); finalizeThink(); return; }  // socket gone — just clear the UI
   try { ws.send(JSON.stringify({ type: "cancel" })); } catch (_) {}
@@ -246,8 +262,9 @@ function connectWS() {
     }
     else if (d.type === "token") {
       finalizeThink();   // the answer is starting — collapse the thinking panel
-      if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; labelWorking("responding…"); pinWorking(); }
+      if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; ttsSpokenLen = 0; labelWorking("responding…"); pinWorking(); }
       streamText += d.text;
+      speakStreaming();
       scheduleRender();
     } else if (d.type === "reply") {
       hideWorking(); finalizeThink();
@@ -256,7 +273,12 @@ function connectWS() {
       if (streamBubble) { const lvl = renderAssistant(streamBubble, finalText); if (lvl) flashChat(lvl); }
       else addMessage("assistant", finalText);
       history.push({ role: "assistant", content: finalText }); saveHistory();
-      if (window.JarvisVoice) JarvisVoice.speak(plain(t || finalText));
+      if (window.JarvisVoice) {
+        // If we streamed sentences already, only speak the leftover tail; else speak it all.
+        if (ttsSpokenLen > 0 && streamText) { const rest = streamText.slice(ttsSpokenLen); if (rest.trim()) JarvisVoice.speak(rest); }
+        else JarvisVoice.speak(plain(finalText));
+      }
+      ttsSpokenLen = 0;
       streamBubble = null; streamText = "";
     } else if (d.type === "error") {
       hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
@@ -379,6 +401,7 @@ function regenerate() {
 const regenBtn = $("regen"); if (regenBtn) regenBtn.addEventListener("click", regenerate);
 
 // --- Slash commands ---
+let currentPersona = null;   // optional persona from config.personas, set via /persona
 function showSlashHelp() {
   addMessage("assistant", [
     "**Slash commands**",
@@ -386,6 +409,8 @@ function showSlashHelp() {
     "- `/new` or `/clear` — start a new conversation",
     "- `/regen` or `/retry` — regenerate the last response",
     "- `/model [name]` — switch the chat model (no name opens the picker)",
+    "- `/persona [name|off]` — switch persona (no name lists them)",
+    "- `/hints [on|off]` — toggle skill auto-hints (no arg shows the state)",
     "- `/remember <fact>` — save a fact to long-term memory",
     "- `/files`, `/tasks`, `/memory`, `/activity`, `/workbench` — open that side panel",
   ].join("\n"));
@@ -397,6 +422,21 @@ function handleSlash(text) {
     case "new": case "clear": newSession(); return;
     case "regen": case "retry": regenerate(); return;
     case "model": if (arg) setModel(arg); else { const s = $("model-select"); if (s && !s.hidden) s.focus(); else addMessage("assistant", "No model picker available.", "notice"); } return;
+    case "persona": {
+      const avail = (cfg && cfg.personas) || [];
+      if (!arg) { addMessage("assistant", avail.length ? "Personas: " + avail.map((p) => "`" + p + "`").join(", ") + (currentPersona ? ` (active: **${currentPersona}**)` : " (none active)") + " — `/persona <name>` to switch, `/persona off` to clear." : "No personas defined — add a `personas` block to JARVIS_CONFIG.json."); return; }
+      if (arg === "off" || arg === "none") { currentPersona = null; addMessage("assistant", "Persona cleared — using the default prompt.", "notice"); return; }
+      if (!avail.includes(arg)) { addMessage("assistant", "Unknown persona `" + arg + "` — available: " + (avail.join(", ") || "(none)"), "notice"); return; }
+      currentPersona = arg; addMessage("assistant", "🎭 Persona set to **" + arg + "** for this conversation.", "notice"); return;
+    }
+    case "hints": {
+      if (!arg) { addMessage("assistant", `Skill auto-hints are **${cfg && cfg.skills_autohint === false ? "off" : "on"}**. Use \`/hints on\` or \`/hints off\`.`, "notice"); return; }
+      if (arg !== "on" && arg !== "off") { addMessage("assistant", "Usage: `/hints on` or `/hints off`", "notice"); return; }
+      const on = arg === "on";
+      persistSetting("skills_autohint", on);
+      if (cfg) cfg.skills_autohint = on;
+      addMessage("assistant", `Skill auto-hints turned **${arg}** (saved).`, "notice"); return;
+    }
     case "remember":
       if (!arg) { addMessage("assistant", "Usage: `/remember <fact>`", "notice"); return; }
       fetch("/api/memories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: arg }) })
@@ -441,7 +481,7 @@ function send(text) {
   stickBottom = true;                     // a fresh send always snaps to the bottom
   addMessage("user", text); history.push({ role: "user", content: text }); saveHistory();
   inputEl.value = ""; autoGrow(); showWorking("working…");
-  ws.send(JSON.stringify({ type: "chat", messages: history }));
+  ws.send(JSON.stringify({ type: "chat", messages: history, persona: currentPersona || undefined }));
 }
 
 // Grow the textarea with its content (up to the CSS max-height, then scroll).
@@ -629,14 +669,28 @@ function setActiveMode(m) {
   if (!micMode) return;
   micMode.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
 }
+// The wake word is configurable (voice.wake_word in config; defaults to the assistant
+// name). Show it in the mic status, nicely capitalized.
+function wakeWordLabel() {
+  const w = (cfg && cfg.voice && cfg.voice.wake_word) || "jarvis";
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
 function setMic(state) {
   micState.className = "mic" + (state === "listening" || state === "open" ? " listening" : state === "asleep" ? " awake" : "");
   micState.textContent =
     state === "open" ? "always on" :
     state === "listening" ? "listening…" :
-    state === "asleep" ? 'say "Jarvis"' :
+    state === "asleep" ? `say "${wakeWordLabel()}"` :
     state === "unsupported" ? "no mic API" : "voice off";
   if (state === "off" || state === "unsupported") setActiveMode("off");
+  // Push-to-talk only makes sense when the mic is Off — Wake/Open already listen.
+  if (micBtn) {
+    const usable = state === "off" || state === "unsupported";
+    micBtn.disabled = !usable;
+    micBtn.title = usable ? "Push to talk (tap, then speak)" : "Not needed — the mic is already listening (Wake/Open)";
+  }
+  voiceListening = (state === "listening" || state === "open");
+  if (!ambSpeaking && !workingEl) amb(ambIdle());   // reflect mic state on the orb when idle
 }
 if (micMode) micMode.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
@@ -647,12 +701,38 @@ if (micMode) micMode.addEventListener("click", (e) => {
 });
 if (micBtn) micBtn.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });
 
-function applyAudio() {
-  const on = audioToggle.checked;
-  if (window.JarvisVoice) JarvisVoice.setTts(on);
-  if (audioIc) { audioIc.textContent = on ? "🔊" : "🔇"; audioIc.title = on ? "Audio on (spoken replies)" : "Audio muted"; }
+// The "Voice" button toggles spoken replies (text-to-speech). Listening is handled
+// separately by the mic-mode control (Off / Wake / Open) + push-to-talk.
+const voiceChatBtn = $("voice-chat");
+function updateVoiceBtn() {
+  if (!voiceChatBtn) return;
+  const on = !window.JarvisVoice || JarvisVoice.ttsEnabled();
+  voiceChatBtn.classList.toggle("active", !!on);
+  voiceChatBtn.textContent = on ? "🔊 Voice" : "🔇 Voice";
+  voiceChatBtn.title = on ? "Spoken replies ON (text-to-speech) — click to mute" : "Spoken replies OFF — click to enable";
 }
-if (audioToggle) audioToggle.addEventListener("change", () => { applyAudio(); persistSetting("voice.tts", audioToggle.checked); });
+function toggleVoice() {
+  if (!window.JarvisVoice) return;
+  const on = !JarvisVoice.ttsEnabled();
+  JarvisVoice.setTts(on);
+  persistSetting("voice.tts", on);
+  updateVoiceBtn();
+}
+if (voiceChatBtn) voiceChatBtn.addEventListener("click", toggleVoice);
+
+// Ambient (orb) mode: full-screen hands-free view. Tapping the orb talks / interrupts.
+const ambientBtn = $("ambient-btn");
+if (ambientBtn && window.JarvisAmbient) {
+  JarvisAmbient.onTap(() => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });   // tap orb = push-to-talk / barge-in
+  ambientBtn.addEventListener("click", () => {
+    JarvisAmbient.toggle();
+    if (JarvisAmbient.active()) {
+      // Entering: turn on spoken replies so it can talk back, and reflect current state.
+      if (window.JarvisVoice && !JarvisVoice.ttsEnabled()) { JarvisVoice.setTts(true); persistSetting("voice.tts", true); updateVoiceBtn(); }
+      amb(workingEl ? "thinking" : ambSpeaking ? "speaking" : ambIdle());
+    }
+  });
+}
 
 let lastVoiceError = "";
 function onVoiceError(msg) {
@@ -691,9 +771,13 @@ async function init() {
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
   if (cfg.workbench_url) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }
   if (window.JarvisVoice && cfg.voice) {
-    const ok = JarvisVoice.init(cfg.voice, { onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError });
+    const ok = JarvisVoice.init(cfg.voice, {
+      onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError,
+      onSpeak: (speaking) => { ambSpeaking = speaking; amb(speaking ? "speaking" : ambIdle()); },
+      onBoundary: () => { if (window.JarvisAmbient) JarvisAmbient.pulse(); },
+    });
     if (!ok) { setMic("unsupported"); onVoiceError(JarvisVoice.supportMessage()); }
-    if (audioToggle) { audioToggle.checked = cfg.voice.tts !== false; applyAudio(); }
+    updateVoiceBtn();   // reflect the saved TTS state on the Voice button
     // Restore the saved mic mode (persisted to config).
     const savedMode = cfg.voice.mic_mode || "off";
     if (ok && savedMode !== "off") { setActiveMode(savedMode); JarvisVoice.setMode(savedMode); }
