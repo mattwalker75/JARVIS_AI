@@ -8,6 +8,18 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-07: Recurring gateway error `litellm.APIConnectionError: Extra data: line 1
+  column N` (a JSON-decode failure in LiteLLM's Ollama NDJSON parser when Ollama's
+  streamed chunks coalesce). Rerouted the local models in `litellm/config.yaml` from
+  the `ollama_chat/` provider to `openai/` pointing at Ollama's OpenAI-compatible
+  `/v1` endpoint, so LiteLLM is a clean OpenAI-dialect passthrough and never touches
+  the flaky parser. Verified through the gateway: chat, tool calls, streaming
+  reasoning (`reasoning_content` → the Thinking panel), vision, and the full app
+  path. No functionality or flexibility lost (multi-provider tiers unchanged). Note:
+  the bug is present even in the newest LiteLLM (running 1.92.0), so an upstream
+  update would not have fixed it — the reroute was the right call.
+
 ### Changed
 - 2026-07-07: Voice tweaks. The **🎤 Talk** push-to-talk button is now disabled in
   Wake/Open mic modes (they already listen — it's only useful when the mic is Off).

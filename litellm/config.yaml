@@ -33,22 +33,32 @@ model_list:
   # Local models via Ollama on the host (run `ollama serve` on your Mac).
   # model_name matches the Ollama tag exactly, so JARVIS_CONFIG.json model names work
   # unchanged whether llm.base_url points at Ollama directly or at this gateway.
+  #
+  # Routed via the "openai/" provider pointing at Ollama's OpenAI-compatible /v1 endpoint
+  # (NOT "ollama_chat/") — this makes LiteLLM a clean OpenAI-dialect passthrough and
+  # avoids its Ollama NDJSON parser, which intermittently throws "Extra data: line 1
+  # column N" when Ollama's streamed chunks coalesce. Tools + vision + reasoning all pass
+  # through. api_key is a required-but-ignored dummy.
   - model_name: qwen3-next:80b
     litellm_params:
-      model: ollama_chat/qwen3-next:80b
-      api_base: http://host.docker.internal:11434
+      model: openai/qwen3-next:80b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
   - model_name: qwen2.5vl:32b
     litellm_params:
-      model: ollama_chat/qwen2.5vl:32b
-      api_base: http://host.docker.internal:11434
+      model: openai/qwen2.5vl:32b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
   - model_name: qwen2.5vl:7b
     litellm_params:
-      model: ollama_chat/qwen2.5vl:7b
-      api_base: http://host.docker.internal:11434
+      model: openai/qwen2.5vl:7b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
   - model_name: qwen3:8b
     litellm_params:
-      model: ollama_chat/qwen3:8b
-      api_base: http://host.docker.internal:11434
+      model: openai/qwen3:8b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
 
 litellm_settings:
   drop_params: true
