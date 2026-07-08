@@ -215,10 +215,23 @@
   }
 
   function setTts(on) { cfg.tts = !!on; if (!on) stopSpeaking(); }
+  function setVoice(name) { cfg.tts_voice = name || ""; }
+  function setRate(r) { cfg.tts_rate = Math.min(2, Math.max(0.5, Number(r) || 1)); }
+  function setPitch(p) { cfg.tts_pitch = Math.min(2, Math.max(0.5, Number(p) || 1)); }
+  function listVoices() { if (!voices.length) loadVoices(); return voices.map((v) => ({ name: v.name, lang: v.lang, default: !!v.default })); }
+  // Speak a one-off sample in the CURRENT voice/rate/pitch, even if TTS is muted (for previewing).
+  function test(sample) {
+    if (!window.speechSynthesis) return;
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+    const u = new SpeechSynthesisUtterance(sample || "Hi, this is how I sound.");
+    const v = pickVoice(); if (v) u.voice = v;
+    u.rate = cfg.tts_rate || 1.0; u.pitch = cfg.tts_pitch || 1.0;
+    try { window.speechSynthesis.speak(u); } catch (_) {}
+  }
 
   window.JarvisVoice = {
     init(c, h) { cfg = Object.assign(cfg, c || {}); handlers = h || {}; return supportInfo().ok; },
-    setMode, listenOnce, speak, stopSpeaking, setTts,
+    setMode, listenOnce, speak, stopSpeaking, setTts, setVoice, setRate, setPitch, listVoices, test,
     supported: () => supportInfo().ok,
     supportMessage: () => supportInfo().msg || "",
     mode: () => listenMode,

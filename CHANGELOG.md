@@ -35,6 +35,12 @@ infrastructure, security, documentation, or test-policy changes.
   hardcoded "Jarvis".
 
 ### Added
+- 2026-07-07: **Voice picker.** A 🎚️ voice-settings popover (next to 🔊 Voice) to
+  choose the spoken voice from the OS/browser's available voices, plus speed and pitch
+  sliders and a Test button (previews immediately, even when muted). Persists to
+  `voice.tts_voice` / `voice.tts_rate` / `voice.tts_pitch` (now exposed in
+  `/api/config` and the settings allowlist). The code already honored `tts_voice` but
+  never exposed it — now it's a first-class UI control.
 - 2026-07-07: **Ambient (orb) voice mode** (`🌌 Ambient`). A full-screen, hands-free
   view that hides the UI and renders JARVIS as a glowing orb animated by state: soft
   breathing when idle, ripples to your real mic amplitude when listening (Web Audio),

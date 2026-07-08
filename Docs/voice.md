@@ -58,6 +58,22 @@ ripple is real microphone amplitude (Web Audio). The one thing the browser won't
 is reading the *waveform of the synthesized voice itself*, so "speaking" is word-synced
 rather than amplitude-synced — but it reads as genuinely alive.
 
+## Choosing the voice
+
+Click the **🎚️** button (next to 🔊 Voice) for the voice-settings popover:
+
+- **Voice** — a dropdown of the speech voices your OS/browser provides. Changing it
+  plays a short sample immediately. ("Auto" picks a good English default.)
+- **Speed** and **Pitch** sliders.
+- **▶ Test voice** — hear the current settings any time (works even if Voice is muted).
+
+All three persist to `JARVIS_CONFIG.json` (`voice.tts_voice`, `voice.tts_rate`,
+`voice.tts_pitch`). The **available voices come from your Mac/Chrome** — macOS ships
+several (Samantha, Alex, Daniel, Karen…), and you can install more (including premium
+neural ones) under **System Settings → Accessibility → Spoken Content → System
+Voice → Manage Voices**; they'll appear in the dropdown after a browser refresh.
+Chrome also adds its own "Google …" voices.
+
 ## How speech output works (ChatGPT-style)
 
 - **Streaming** — replies are spoken **sentence by sentence as they're generated**,

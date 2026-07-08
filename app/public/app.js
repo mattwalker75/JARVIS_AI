@@ -720,6 +720,30 @@ function toggleVoice() {
 }
 if (voiceChatBtn) voiceChatBtn.addEventListener("click", toggleVoice);
 
+// Voice settings popover: pick the spoken voice + speed/pitch (persists to config).
+const voiceSettingsBtn = $("voice-settings-btn"), voiceDrop = $("voice-drop");
+const ttsVoiceSel = $("tts-voice"), ttsRate = $("tts-rate"), ttsPitch = $("tts-pitch"), ttsTest = $("tts-test");
+function populateVoices() {
+  if (!ttsVoiceSel || !window.speechSynthesis) return;
+  const list = window.speechSynthesis.getVoices() || [];
+  if (!list.length) return;   // not ready yet — onvoiceschanged will call again
+  const cur = (cfg && cfg.voice && cfg.voice.tts_voice) || "";
+  const sorted = list.slice().sort((a, b) => (/^en/i.test(b.lang) ? 1 : 0) - (/^en/i.test(a.lang) ? 1 : 0) || a.name.localeCompare(b.name));
+  ttsVoiceSel.innerHTML = '<option value="">Auto (best match)</option>';
+  sorted.forEach((v) => { const o = document.createElement("option"); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; if (v.name === cur) o.selected = true; ttsVoiceSel.appendChild(o); });
+}
+if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", populateVoices);
+if (voiceSettingsBtn) voiceSettingsBtn.addEventListener("click", (e) => { e.stopPropagation(); voiceDrop.hidden = !voiceDrop.hidden; if (!voiceDrop.hidden) populateVoices(); });
+document.addEventListener("click", (e) => { if (voiceDrop && !voiceDrop.hidden && !voiceDrop.contains(e.target) && e.target !== voiceSettingsBtn) voiceDrop.hidden = true; });
+if (ttsVoiceSel) ttsVoiceSel.addEventListener("change", () => {
+  if (window.JarvisVoice) { JarvisVoice.setVoice(ttsVoiceSel.value); JarvisVoice.test(); }
+  if (cfg && cfg.voice) cfg.voice.tts_voice = ttsVoiceSel.value;
+  persistSetting("voice.tts_voice", ttsVoiceSel.value);
+});
+if (ttsRate) ttsRate.addEventListener("change", () => { if (window.JarvisVoice) JarvisVoice.setRate(ttsRate.value); if (cfg && cfg.voice) cfg.voice.tts_rate = Number(ttsRate.value); persistSetting("voice.tts_rate", Number(ttsRate.value)); });
+if (ttsPitch) ttsPitch.addEventListener("change", () => { if (window.JarvisVoice) JarvisVoice.setPitch(ttsPitch.value); if (cfg && cfg.voice) cfg.voice.tts_pitch = Number(ttsPitch.value); persistSetting("voice.tts_pitch", Number(ttsPitch.value)); });
+if (ttsTest) ttsTest.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.test(); });
+
 // Ambient (orb) mode: full-screen hands-free view. Tapping the orb talks / interrupts.
 const ambientBtn = $("ambient-btn");
 if (ambientBtn && window.JarvisAmbient) {
@@ -778,6 +802,9 @@ async function init() {
     });
     if (!ok) { setMic("unsupported"); onVoiceError(JarvisVoice.supportMessage()); }
     updateVoiceBtn();   // reflect the saved TTS state on the Voice button
+    if (ttsRate) ttsRate.value = cfg.voice.tts_rate || 1.0;
+    if (ttsPitch) ttsPitch.value = cfg.voice.tts_pitch || 1.0;
+    populateVoices();
     // Restore the saved mic mode (persisted to config).
     const savedMode = cfg.voice.mic_mode || "off";
     if (ok && savedMode !== "off") { setActiveMode(savedMode); JarvisVoice.setMode(savedMode); }

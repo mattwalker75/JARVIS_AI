@@ -21,6 +21,16 @@
       <button id="ambient-btn" class="ghost" title="Ambient voice mode — full-screen orb, hands-free (tap the orb to talk, ✕ to exit)">🌌 Ambient</button>
       <select id="model-select" class="ghost model-select" title="Chat model" hidden></select>
       <button id="voice-chat" class="ghost" title="Speak replies aloud (text-to-speech) — click to toggle">🔊 Voice</button>
+      <div class="voice-menu">
+        <button id="voice-settings-btn" class="ghost" title="Voice settings — pick the spoken voice, speed, pitch">🎚️</button>
+        <div class="voice-drop" id="voice-drop" hidden>
+          <div class="vd-title">Spoken voice</div>
+          <div class="vd-row"><label for="tts-voice">Voice</label><select id="tts-voice"></select></div>
+          <div class="vd-row"><label for="tts-rate">Speed</label><input id="tts-rate" type="range" min="0.6" max="1.6" step="0.05"></div>
+          <div class="vd-row"><label for="tts-pitch">Pitch</label><input id="tts-pitch" type="range" min="0.6" max="1.4" step="0.05"></div>
+          <button id="tts-test" class="ghost">▶ Test voice</button>
+        </div>
+      </div>
       <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
       <span class="mic" id="mic-state" title="voice state">voice off</span>
       <span class="ctl-ic" title="Microphone mode (how JARVIS listens)">🎙️</span>
