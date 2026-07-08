@@ -18,7 +18,7 @@ reasoning, a vision model for screenshots).
 
 ## The stack
 
-Four containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
+Five containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
 
 | Container | Role | Port |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ Four containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
 | `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | 8120 |
 | `jarvis-litellm` | LLM gateway — one endpoint, many providers | 4000 |
 | `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
+| `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
 
 The app drives the workbench through the Docker socket (`docker exec`), reaches
 memory + the gateway over the internal network, and shares two host folders

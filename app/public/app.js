@@ -722,19 +722,50 @@ if (voiceChatBtn) voiceChatBtn.addEventListener("click", toggleVoice);
 
 // Voice settings popover: pick the spoken voice + speed/pitch (persists to config).
 const voiceSettingsBtn = $("voice-settings-btn"), voiceDrop = $("voice-drop");
-const ttsVoiceSel = $("tts-voice"), ttsRate = $("tts-rate"), ttsPitch = $("tts-pitch"), ttsTest = $("tts-test");
-function populateVoices() {
-  if (!ttsVoiceSel || !window.speechSynthesis) return;
+const ttsEngineSel = $("tts-engine"), ttsVoiceSel = $("tts-voice"), ttsRate = $("tts-rate"), ttsPitch = $("tts-pitch"), ttsTest = $("tts-test");
+function curEngine() { return (cfg && cfg.voice && cfg.voice.tts_engine) === "piper" ? "piper" : "browser"; }
+// Pitch only applies to the browser engine (Piper has no pitch control) — dim it there.
+function updatePitchState() {
+  const piper = curEngine() === "piper";
+  if (ttsPitch) ttsPitch.disabled = piper;
+  const row = ttsPitch && ttsPitch.closest(".vd-row");
+  if (row) row.style.opacity = piper ? "0.4" : "";
+}
+async function populateVoices() {
+  if (!ttsVoiceSel) return;
+  const cur = (cfg && cfg.voice && cfg.voice.tts_voice) || "";
+  if (curEngine() === "piper") {
+    ttsVoiceSel.innerHTML = '<option value="">Loading…</option>';
+    try {
+      const d = await (await fetch("/api/tts/voices")).json();
+      const list = d.voices || [];
+      if (!list.length) { ttsVoiceSel.innerHTML = '<option value="">(Piper unavailable)</option>'; return; }
+      ttsVoiceSel.innerHTML = '<option value="">Auto (default)</option>';
+      list.forEach((v) => { const o = document.createElement("option"); o.value = v.id; o.textContent = v.label || v.id; if (v.id === cur) o.selected = true; ttsVoiceSel.appendChild(o); });
+    } catch (_) { ttsVoiceSel.innerHTML = '<option value="">(Piper unavailable)</option>'; }
+    return;
+  }
+  // browser engine
+  if (!window.speechSynthesis) { ttsVoiceSel.innerHTML = '<option value="">(no browser voices)</option>'; return; }
   const list = window.speechSynthesis.getVoices() || [];
   if (!list.length) return;   // not ready yet — onvoiceschanged will call again
-  const cur = (cfg && cfg.voice && cfg.voice.tts_voice) || "";
   const sorted = list.slice().sort((a, b) => (/^en/i.test(b.lang) ? 1 : 0) - (/^en/i.test(a.lang) ? 1 : 0) || a.name.localeCompare(b.name));
   ttsVoiceSel.innerHTML = '<option value="">Auto (best match)</option>';
   sorted.forEach((v) => { const o = document.createElement("option"); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; if (v.name === cur) o.selected = true; ttsVoiceSel.appendChild(o); });
 }
-if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", populateVoices);
+if (window.speechSynthesis) window.speechSynthesis.addEventListener("voiceschanged", () => { if (curEngine() === "browser") populateVoices(); });
 if (voiceSettingsBtn) voiceSettingsBtn.addEventListener("click", (e) => { e.stopPropagation(); voiceDrop.hidden = !voiceDrop.hidden; if (!voiceDrop.hidden) populateVoices(); });
 document.addEventListener("click", (e) => { if (voiceDrop && !voiceDrop.hidden && !voiceDrop.contains(e.target) && e.target !== voiceSettingsBtn) voiceDrop.hidden = true; });
+// Switching engine: the voice lists differ, so reset the chosen voice to Auto.
+if (ttsEngineSel) ttsEngineSel.addEventListener("change", () => {
+  const e = ttsEngineSel.value === "piper" ? "piper" : "browser";
+  if (cfg && cfg.voice) { cfg.voice.tts_engine = e; cfg.voice.tts_voice = ""; }
+  if (window.JarvisVoice) { JarvisVoice.setEngine(e); JarvisVoice.setVoice(""); }
+  persistSetting("voice.tts_engine", e);
+  persistSetting("voice.tts_voice", "");
+  updatePitchState();
+  populateVoices();
+});
 if (ttsVoiceSel) ttsVoiceSel.addEventListener("change", () => {
   if (window.JarvisVoice) { JarvisVoice.setVoice(ttsVoiceSel.value); JarvisVoice.test(); }
   if (cfg && cfg.voice) cfg.voice.tts_voice = ttsVoiceSel.value;
@@ -744,10 +775,12 @@ if (ttsRate) ttsRate.addEventListener("change", () => { if (window.JarvisVoice) 
 if (ttsPitch) ttsPitch.addEventListener("change", () => { if (window.JarvisVoice) JarvisVoice.setPitch(ttsPitch.value); if (cfg && cfg.voice) cfg.voice.tts_pitch = Number(ttsPitch.value); persistSetting("voice.tts_pitch", Number(ttsPitch.value)); });
 if (ttsTest) ttsTest.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.test(); });
 
-// Ambient (orb) mode: full-screen hands-free view. Tapping the orb talks / interrupts.
+// Ambient mode: full-screen hands-free view (expressive face or pulsating orb). Tapping
+// the avatar talks / interrupts; the in-overlay button switches face <-> orb and persists.
 const ambientBtn = $("ambient-btn");
 if (ambientBtn && window.JarvisAmbient) {
-  JarvisAmbient.onTap(() => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });   // tap orb = push-to-talk / barge-in
+  JarvisAmbient.onTap(() => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });   // tap = push-to-talk / barge-in
+  JarvisAmbient.onStyleChange((s) => { if (cfg && cfg.voice) cfg.voice.ambient_style = s; persistSetting("voice.ambient_style", s); });
   ambientBtn.addEventListener("click", () => {
     JarvisAmbient.toggle();
     if (JarvisAmbient.active()) {
@@ -798,12 +831,16 @@ async function init() {
     const ok = JarvisVoice.init(cfg.voice, {
       onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError,
       onSpeak: (speaking) => { ambSpeaking = speaking; amb(speaking ? "speaking" : ambIdle()); },
-      onBoundary: () => { if (window.JarvisAmbient) JarvisAmbient.pulse(); },
+      onBoundary: () => { if (window.JarvisAmbient) JarvisAmbient.pulse(); },   // browser: per-word pulse
+      onLevel: (lvl) => { if (window.JarvisAmbient && JarvisAmbient.active()) JarvisAmbient.setLevel(lvl); }, // piper: real amplitude
     });
     if (!ok) { setMic("unsupported"); onVoiceError(JarvisVoice.supportMessage()); }
     updateVoiceBtn();   // reflect the saved TTS state on the Voice button
+    if (window.JarvisAmbient) JarvisAmbient.setStyle(cfg.voice.ambient_style || "face");   // avatar style (face | orb)
+    if (ttsEngineSel) ttsEngineSel.value = curEngine();
     if (ttsRate) ttsRate.value = cfg.voice.tts_rate || 1.0;
     if (ttsPitch) ttsPitch.value = cfg.voice.tts_pitch || 1.0;
+    updatePitchState();
     populateVoices();
     // Restore the saved mic mode (persisted to config).
     const savedMode = cfg.voice.mic_mode || "off";

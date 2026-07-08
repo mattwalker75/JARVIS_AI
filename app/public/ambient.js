@@ -14,6 +14,10 @@
   let overlay, canvas, ctx, raf, tapFn = null;
   let micStream = null, analyser = null, dataArr = null, audioCtx = null;
   let state = "idle", energy = 0, pulseE = 0, t = 0, active = false;
+  let extLevel = 0, extLevelFrames = 0;   // real amplitude of the AI's own voice (Piper engine)
+  let style = "face";                     // "face" (expressive) | "orb" (pulsating) — switchable
+  let styleFn = null, styleBtn = null;    // persist callback + the in-overlay toggle button
+  let mouthOpen = 0, eyeOpenCur = 1, lookX = 0, lookY = 0, nextBlink = 3, blinkStart = -10;
 
   const COLORS = {
     idle:      [96, 148, 190],
@@ -29,11 +33,15 @@
     overlay.innerHTML =
       '<canvas id="ambient-canvas"></canvas>' +
       '<div class="ambient-caption" id="ambient-caption"></div>' +
+      '<button class="ambient-style" id="ambient-style" title="Switch between the face and the orb"></button>' +
       '<button class="ambient-exit" id="ambient-exit" title="Exit ambient mode">✕ Exit</button>';
     document.body.appendChild(overlay);
     canvas = overlay.querySelector("#ambient-canvas");
     ctx = canvas.getContext("2d");
     overlay.querySelector("#ambient-exit").addEventListener("click", (e) => { e.stopPropagation(); exit(); });
+    styleBtn = overlay.querySelector("#ambient-style");
+    styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setStyle(style === "face" ? "orb" : "face"); if (styleFn) styleFn(style); });
+    refreshStyleBtn();
     canvas.addEventListener("click", () => { if (tapFn) tapFn(); });
     resize();
     window.addEventListener("resize", resize);
@@ -55,29 +63,62 @@
 
   function render() {
     t += 1 / 60;
-    let target = 0.14, smooth = 0.16;                    // idle breathing baseline
+
+    // Shared speaking amplitude (0..1). Piper gives the AI's REAL voice amplitude; the
+    // browser engine has no waveform, so synthesize a syllable-rate envelope + word pulses.
+    // Decrement the Piper freshness counter ONCE per frame here (both renderers read it).
+    let amp = 0;
+    if (state === "speaking") {
+      if (extLevelFrames > 0) { extLevelFrames--; amp = Math.min(1, extLevel * 1.15); }
+      else {
+        const env = 0.5 * Math.abs(Math.sin(t * 10.5)) + 0.3 * Math.abs(Math.sin(t * 6.1 + 1.1)) + 0.2 * Math.abs(Math.sin(t * 15.7 + 0.5));
+        amp = Math.min(1, 0.3 + env * 0.5);
+      }
+      amp = Math.min(1, amp + pulseE);
+    }
+
+    // Energy: drives the orb's size/wobble; a gentle fraction drives the face's head.
+    let target = 0.14, smooth = 0.16;
     if (state === "listening") target = 0.18 + micLevel() * 0.85;
     else if (state === "thinking") target = 0.34 + Math.sin(t * 3.1) * 0.12 + Math.sin(t * 7) * 0.05;
-    else if (state === "speaking") {
-      // Continuous "talking" motion (the browser won't expose the synth voice's real
-      // amplitude), layered with the per-word pulses — so it visibly reacts while it speaks.
-      const talk = 0.13 * Math.abs(Math.sin(t * 10.5))
-                 + 0.08 * Math.abs(Math.sin(t * 6.1 + 1.1))
-                 + 0.05 * Math.abs(Math.sin(t * 15.7 + 0.5));
-      target = 0.30 + talk + pulseE;
-      smooth = 0.3;                                       // snappier so the motion pops
-    }
-    if (state === "idle") target += Math.sin(t * 1.1) * 0.05;     // slow breathe
+    else if (state === "speaking") { target = 0.22 + amp; smooth = 0.32; }
+    if (state === "idle") target += Math.sin(t * 1.1) * 0.05;
     energy += (target - energy) * smooth;
-    pulseE *= 0.88;
+    pulseE *= 0.87;
+
+    // Face: the mouth lip-syncs to `amp` (only when SPEAKING — the face is JARVIS, so the
+    // user's mic level must not move it). Fast attack, slower release = natural speech.
+    const mTarget = state === "speaking" ? Math.max(0, Math.min(1, 0.12 + amp * 0.9)) : 0;
+    mouthOpen += (mTarget - mouthOpen) * (mTarget > mouthOpen ? 0.55 : 0.3);
+    // Blink every few seconds (open -> shut -> open over ~0.16s).
+    if (t >= nextBlink) { blinkStart = t; nextBlink = t + 2.4 + Math.random() * 4; }
+    const bt = t - blinkStart;
+    let eyeOpen = (bt >= 0 && bt < 0.16) ? Math.abs(Math.cos((bt / 0.16) * Math.PI)) : 1;
+    if (state === "listening") eyeOpen = Math.min(1.15, eyeOpen * 1.12);   // wide, attentive
+    eyeOpenCur += (eyeOpen - eyeOpenCur) * 0.5;
+    // Gaze: eyes wander while thinking, recenter otherwise.
+    const gx = state === "thinking" ? Math.sin(t * 1.7) : 0;
+    const gy = state === "thinking" ? -0.6 + Math.sin(t * 0.9) * 0.3 : 0;
+    lookX += (gx - lookX) * 0.07; lookY += (gy - lookY) * 0.07;
 
     const w = window.innerWidth, h = window.innerHeight, cx = w / 2, cy = h / 2;
     ctx.clearRect(0, 0, w, h);
+    const [cr, cg, cb] = COLORS[state] || COLORS.idle;
+    if (style === "orb") drawOrb(w, h, cx, cy, cr, cg, cb);
+    else drawFace(w, h, cx, cy, cr, cg, cb);
+
+    raf = requestAnimationFrame(render);
+  }
+
+  function drawEllipse(x, y, rx, ry) {
+    ctx.beginPath();
+    ctx.ellipse(x, y, Math.max(0.5, rx), Math.max(0.5, ry), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawOrb(w, h, cx, cy, cr, cg, cb) {
     const base = Math.min(w, h) * 0.16;
     const r = base * (1 + energy * 0.55);
-    const [cr, cg, cb] = COLORS[state] || COLORS.idle;
-
-    // outer glow
     const g = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.6);
     g.addColorStop(0, `rgba(${cr},${cg},${cb},0.55)`);
     g.addColorStop(0.35, `rgba(${cr},${cg},${cb},0.22)`);
@@ -85,8 +126,6 @@
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(cx, cy, r * 2.6, 0, Math.PI * 2); ctx.fill();
 
-    // orb body with an organic wobble (extra fast ripple while speaking, so it looks
-    // like it's actively talking)
     const spk = state === "speaking" ? 1 : 0;
     ctx.beginPath();
     for (let a = 0; a <= Math.PI * 2 + 0.001; a += 0.1) {
@@ -105,8 +144,50 @@
     body.addColorStop(0.5, `rgba(${cr},${cg},${cb},0.95)`);
     body.addColorStop(1, `rgba(${(cr * 0.45) | 0},${(cg * 0.45) | 0},${(cb * 0.6) | 0},0.92)`);
     ctx.fillStyle = body; ctx.fill();
+  }
 
-    raf = requestAnimationFrame(render);
+  // A glowing, expressive face: same ethereal look as the orb (soft glow + luminous head),
+  // but with blinking eyes, a wandering gaze, and a mouth that lip-syncs to the voice.
+  function drawFace(w, h, cx, cy, cr, cg, cb) {
+    const R = Math.min(w, h) * 0.2 * (1 + energy * 0.12);   // steady head (not a pulsing orb)
+
+    const g = ctx.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 2.3);
+    g.addColorStop(0, `rgba(${cr},${cg},${cb},0.5)`);
+    g.addColorStop(0.4, `rgba(${cr},${cg},${cb},0.15)`);
+    g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 2.3, 0, Math.PI * 2); ctx.fill();
+
+    const body = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.32, R * 0.15, cx, cy, R);
+    body.addColorStop(0, "rgba(255,255,255,0.94)");
+    body.addColorStop(0.55, `rgba(${cr},${cg},${cb},0.95)`);
+    body.addColorStop(1, `rgba(${(cr * 0.45) | 0},${(cg * 0.45) | 0},${(cb * 0.6) | 0},0.95)`);
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+
+    const ink = "rgba(16,22,36,0.9)";
+    // Eyes (dark luminescent ovals; shift with gaze, squash on blink, small glint).
+    const eyeDX = R * 0.4, eyeDY = R * 0.16, ew = R * 0.14, eh = R * 0.2 * Math.max(0.06, eyeOpenCur);
+    for (const s of [-1, 1]) {
+      const exx = cx + s * eyeDX + lookX * R * 0.05;
+      const eyy = cy - eyeDY + lookY * R * 0.05;
+      ctx.fillStyle = ink; drawEllipse(exx, eyy, ew, eh);
+      if (eyeOpenCur > 0.5) { ctx.fillStyle = "rgba(255,255,255,0.8)"; drawEllipse(exx - ew * 0.3, eyy - eh * 0.35, ew * 0.28, ew * 0.28); }
+    }
+    // Mouth: open + lip-sync while speaking; a gentle closed curve otherwise.
+    const my = cy + R * 0.44, mw = R * 0.44;
+    if (state === "speaking" && mouthOpen > 0.05) {
+      const mh = R * (0.04 + mouthOpen * 0.34);
+      ctx.fillStyle = ink; drawEllipse(cx, my, mw * (0.62 + mouthOpen * 0.3), mh);
+      ctx.fillStyle = "rgba(8,11,18,0.92)"; drawEllipse(cx, my + mh * 0.12, mw * (0.45 + mouthOpen * 0.25), mh * 0.66);
+    } else {
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(2.5, R * 0.035); ctx.lineCap = "round";
+      const curve = state === "thinking" ? 0.0 : 0.13;   // neutral while thinking, else a soft smile
+      ctx.beginPath();
+      ctx.moveTo(cx - mw * 0.5, my);
+      ctx.quadraticCurveTo(cx, my + R * curve, cx + mw * 0.5, my);
+      ctx.stroke();
+    }
   }
 
   async function startMic() {
@@ -133,6 +214,10 @@
     if (cap) cap.textContent = CAPTION[s] || "";
   }
 
+  // The toggle button shows the style you'll switch TO (so its label is the alternative).
+  function refreshStyleBtn() { if (styleBtn) styleBtn.textContent = style === "face" ? "◍ Orb" : "☺ Face"; }
+  function setStyle(s) { style = s === "orb" ? "orb" : "face"; refreshStyleBtn(); }
+
   function enter() {
     if (active) return;
     if (!overlay) build();
@@ -155,7 +240,12 @@
   window.JarvisAmbient = {
     enter, exit, toggle: () => (active ? exit() : enter()),
     setState, pulse: () => { pulseE = Math.min(0.9, pulseE + 0.4); },
+    // Real spoken-voice amplitude (0..1) from the Piper engine — makes "speaking" truly
+    // amplitude-reactive. Stays "fresh" for a few frames so a dropped update just decays.
+    setLevel: (x) => { extLevel = Math.max(0, Math.min(1, x || 0)); extLevelFrames = 10; },
     active: () => active,
     onTap: (fn) => { tapFn = fn; },
+    setStyle, style: () => style,
+    onStyleChange: (fn) => { styleFn = fn; },
   };
 })();

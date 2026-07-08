@@ -50,6 +50,8 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/config` | Public config (no secrets): title, provider, model, voice, personas. |
 | `GET /api/models` | Available models (from the gateway or Ollama) + current. |
 | `POST /api/settings` | Persist an allowlisted setting: `{path, value}` (see [Configuration](configuration.md#settings-the-ui-can-change)). |
+| `GET /api/tts/voices` | Neural (Piper) voices available: `{voices:[{id,label,lang}], default}`. |
+| `POST /api/tts` | Synthesize speech (Piper): body `{text, voice?, rate?}` → `audio/wav`. Proxied to `jarvis-piper`. |
 | `GET /api/selftest` | Exercise memory/shell/files/internet/desktop/vault without the model. |
 | `GET /healthz` | Liveness. |
 

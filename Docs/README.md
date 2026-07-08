@@ -7,7 +7,7 @@ Detailed documentation for JARVIS, a personal local AI framework. Start with the
 
 | Doc | What's inside |
 | --- | --- |
-| [Architecture](architecture.md) | The four containers, how a message flows end to end, the LLM gateway, volumes, ports, and the security model. |
+| [Architecture](architecture.md) | The five containers, how a message flows end to end, the LLM gateway, volumes, ports, and the security model. |
 | [Configuration](configuration.md) | Complete `JARVIS_CONFIG.json` reference — every section and key, with examples for local / cloud / mixed setups. |
 | [Tools](tools.md) | Every tool the model can call, grouped by family, with parameters and notes. |
 | [Web UI](web-ui.md) | The chat interface: tabs (Activity / Tasks / Memory / Files / Workbench), slash commands, model switcher, drag-drop, settings that persist. |

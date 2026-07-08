@@ -7,7 +7,7 @@ const CONFIG_FILE = process.env.JARVIS_CONFIG_FILE || "/cfg/JARVIS_CONFIG.json";
 // survive reboots/rebuilds). An allowlist — never let arbitrary or secret keys be written.
 const SETTABLE = new Set([
   "voice.tts", "voice.stt", "voice.enabled", "voice.mic_mode", "voice.silence_timeout_seconds",
-  "voice.tts_voice", "voice.tts_rate", "voice.tts_pitch",
+  "voice.followup_seconds", "voice.ambient_style", "voice.tts_engine", "voice.tts_voice", "voice.tts_rate", "voice.tts_pitch",
   "llm.model", "llm.models.chat", "llm.temperature", "llm.max_tokens", "assistant_name",
   "skills_autohint",
 ]);
@@ -76,7 +76,10 @@ function publicConfig() {
       wake_word: (v.wake_word || name).toLowerCase(),
       stop_phrase: (v.stop_phrase || (name + " stop listening")).toLowerCase(),
       silence_timeout_seconds: v.silence_timeout_seconds || 12,
+      followup_seconds: Number(v.followup_seconds) || 0,
+      ambient_style: v.ambient_style === "orb" ? "orb" : "face",
       mic_mode: v.mic_mode || "off",
+      tts_engine: v.tts_engine === "piper" ? "piper" : "browser",
       tts_voice: v.tts_voice || "",
       tts_rate: v.tts_rate || 1.0,
       tts_pitch: v.tts_pitch || 1.0,

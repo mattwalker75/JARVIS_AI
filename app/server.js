@@ -10,6 +10,7 @@ const llm = require("./src/llm");
 const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
 const chatlog = require("./src/chatlog");
+const tts = require("./src/tts");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uploads
@@ -90,6 +91,23 @@ app.post("/api/settings", (req, res) => {
     if (typeof p !== "string") return res.status(400).json({ error: "path (string) required" });
     res.json(setSetting(p, value));
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Neural TTS (Piper) — the browser fetches audio from here when the voice engine is
+// "piper". Proxied to the jarvis-piper container so the browser stays same-origin.
+app.get("/api/tts/voices", async (_req, res) => {
+  try { res.json(await tts.voices()); }
+  catch (e) { res.status(502).json({ error: e.message, voices: [] }); }
+});
+app.post("/api/tts", async (req, res) => {
+  try {
+    const { text, voice, rate } = req.body || {};
+    if (!text || !String(text).trim()) return res.status(400).json({ error: "text required" });
+    const buf = await tts.synth(text, voice, rate);
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Length", buf.length);
+    res.send(buf);
+  } catch (e) { res.status(502).json({ error: e.message }); }
 });
 
 // Available models for the header switcher. Works against BOTH backends: an

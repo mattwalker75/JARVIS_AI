@@ -1,6 +1,6 @@
 # Architecture
 
-JARVIS is a four-container Docker Compose stack (project name `jarvis`), everything
+JARVIS is a five-container Docker Compose stack (project name `jarvis`), everything
 bound to `127.0.0.1` (localhost only).
 
 ```
@@ -12,13 +12,13 @@ bound to `127.0.0.1` (localhost only).
 │   • tool-calling loop (app/src/llm.js)                            │
 │   • 48 tools (app/src/tools.js)                                   │
 │   • scheduler, sessions, chatlog                                  │
-└───┬───────────────┬───────────────┬───────────────┬──────────────┘
-    │ docker exec   │ http           │ http          │ http
-    ▼               ▼                ▼               ▼
- jarvis-workbench  jarvis-litellm   jarvis-memory   Ollama (host)
- (:8111 desktop)   (:4000 gateway)  (:8120 Mem0)    (:11434)
- root Linux +      OpenAI-dialect   semantic mem     local models
- browser daemon    → many providers + Chroma store
+└─┬────────────┬──────────────┬──────────────┬────────────┬────────┘
+  │ docker exec │ http          │ http         │ http       │ http
+  ▼            ▼               ▼              ▼            ▼
+ jarvis-      jarvis-litellm   jarvis-memory  jarvis-piper Ollama (host)
+ workbench    (:4000 gateway)  (:8120 Mem0)   (:5000 TTS)  (:11434)
+ (:8111)      OpenAI-dialect   semantic mem   offline      local models
+ root Linux   → many providers + Chroma store neural voice
 ```
 
 ## The containers
@@ -59,6 +59,15 @@ Pre-loaded with a large toolchain (languages, build tools, DB clients, media too
 Playwright, data/ML libs). The LLM runs commands here via `run_shell`, and a
 **Playwright browser daemon** (`app/src/browserd.py`, started on demand) provides the
 `browser_*` tools. You can watch it live in the **Workbench** tab.
+
+### jarvis-piper (`:5000`, internal-only) — offline neural voice
+A tiny Python HTTP service (`piper/serve.py`) wrapping [Piper](https://github.com/rhasspy/piper),
+an on-device neural text-to-speech engine. The engine binary and voice models are baked
+into the image at build time (arch auto-detected for arm64/x86_64), so it runs **fully
+offline** and the voice is **machine-independent**. Not published to the host — the app
+reaches it at `http://jarvis-piper:5000` and proxies the browser through `/api/tts`
+(`app/src/tts.js`). Only used when the voice engine is set to **Piper** (browser TTS needs
+no container). See [Voice](voice.md#neural-voice-piper).
 
 ## How a chat message flows
 

@@ -93,11 +93,18 @@ Point `base_url` straight at a backend if you don't need multi-provider:
   "stt": true,                      // accept speech input
   "mic_mode": "off",                // "off" | "wake" | "open" (persisted from the UI)
   "silence_timeout_seconds": 12,    // wake mode: sleep after this much silence
+  "followup_seconds": 0,            // wake mode: reply without the wake word for N s AFTER it stops talking (0 = off)
   "wake_word": "jarvis",            // optional; defaults to assistant_name
-  "stop_phrase": "jarvis stop listening"
+  "stop_phrase": "jarvis stop listening",
+  "tts_engine": "browser",          // "browser" (OS/Chrome voices) | "piper" (offline neural)
+  "tts_voice": "",                  // engine-specific voice id ("" = auto)
+  "tts_rate": 1.0,                  // 0.5–2.0 speaking speed (both engines)
+  "tts_pitch": 1.0                  // 0.5–2.0 pitch (browser engine only)
 }
 ```
-See [Voice](voice.md) for behavior details.
+`tts_engine: "piper"` uses the offline neural voice from the `jarvis-piper` container —
+free, fully local, and machine-independent. See [Voice](voice.md#neural-voice-piper) for
+the engine comparison and how to add voices.
 
 ## `mem0`
 
@@ -178,6 +185,7 @@ allowlist:
 
 ```
 voice.tts   voice.stt   voice.enabled   voice.mic_mode   voice.silence_timeout_seconds
+voice.followup_seconds   voice.tts_engine   voice.tts_voice   voice.tts_rate   voice.tts_pitch
 llm.model   llm.models.chat   llm.temperature   llm.max_tokens   assistant_name
 skills_autohint
 ```

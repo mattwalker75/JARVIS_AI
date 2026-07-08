@@ -52,6 +52,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .ambient-caption { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; color: rgba(230,245,255,.7); font-size: 1rem; letter-spacing: .06em; text-transform: lowercase; pointer-events: none; }
 .ambient-exit { position: absolute; top: 20px; right: 22px; background: rgba(255,255,255,.06); border: 1px solid var(--edge); color: var(--muted); border-radius: 20px; padding: 8px 16px; font-size: .85rem; cursor: pointer; z-index: 2; }
 .ambient-exit:hover { color: var(--text); border-color: var(--accent); }
+.ambient-style { position: absolute; top: 20px; left: 22px; background: rgba(255,255,255,.06); border: 1px solid var(--edge); color: var(--muted); border-radius: 20px; padding: 8px 16px; font-size: .85rem; cursor: pointer; z-index: 2; }
+.ambient-style:hover { color: var(--text); border-color: var(--accent); }
 
 .session-menu { position: relative; }
 .session-drop { position: absolute; right: 0; top: 36px; width: 320px; max-height: 60vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--edge); border-radius: 10px; padding: 10px; z-index: 50; box-shadow: 0 12px 30px rgba(0,0,0,.4); }

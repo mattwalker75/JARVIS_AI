@@ -35,11 +35,17 @@
     ]
   },
   "voice": {
-    "_comment": "Browser-native (Web Speech API) voice; Chrome/Safari. The wake word and stop phrase derive from assistant_name (say the assistant's name to start). Optionally override with wake_word / stop_phrase here.",
+    "_comment": "Voice I/O. STT is browser-native (Web Speech API; Chrome/Safari). TTS has two engines (tts_engine): 'browser' = built-in OS/Chrome voices, or 'piper' = offline NEURAL voice from the jarvis-piper container (free, fully local, machine-independent). The wake word and stop phrase derive from assistant_name (say the assistant's name to start); override with wake_word / stop_phrase. followup_seconds (Wake mode) gives you that many seconds AFTER the AI stops talking to reply without repeating the wake word — 0 disables it.",
     "enabled": true,
     "tts": true,
     "stt": true,
-    "silence_timeout_seconds": 12
+    "silence_timeout_seconds": 12,
+    "followup_seconds": 0,
+    "ambient_style": "face",
+    "tts_engine": "browser",
+    "tts_voice": "",
+    "tts_rate": 1.0,
+    "tts_pitch": 1.0
   },
   "mem0": {
     "_comment": "Semantic long-term memory (Mem0 sidecar, jarvis-memory). The LLM stores/recalls facts by meaning via add_memory/search_memory; backed by a local Chroma vector store. user_id scopes whose memories (single user = 'default').",

@@ -2,13 +2,14 @@
 #
 # JARVIS.sh - Single control script for the JARVIS multi-container stack.
 #
-# Wraps docker-compose.yml (jarvis-app + jarvis-memory + jarvis-litellm + jarvis-workbench).
+# Wraps docker-compose.yml (jarvis-app + jarvis-memory + jarvis-litellm + jarvis-workbench + jarvis-piper).
 # Expands on the ByOwnerOS RUN_LOCAL_DEV.sh pattern with memory backup/restore.
 #
 #   jarvis-app        Node.js backend + JS frontend (orchestrator)            :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
 #   jarvis-litellm    LiteLLM gateway — one endpoint -> many model providers  :4000
 #   jarvis-workbench  Linux desktop (noVNC) the LLM works in as root          :8111
+#   jarvis-piper      Offline neural text-to-speech (Piper), internal-only    :5000
 #
 # Usage:
 #   ./JARVIS.sh <flag> [<flag> ...]
@@ -156,9 +157,9 @@ cmd_check() {
 
 cmd_setup() {
   require_daemon
-  info "SETUP: building the app + workbench + memory images and pulling the gateway image..."
-  warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet."
-  dc build jarvis-app jarvis-workbench jarvis-memory || { err "Image build failed."; return 1; }
+  info "SETUP: building the app + workbench + memory + voice (piper) images and pulling the gateway image..."
+  warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
+  dc build jarvis-app jarvis-workbench jarvis-memory jarvis-piper || { err "Image build failed."; return 1; }
   dc pull jarvis-litellm || true
   ok "SETUP complete. Next:  ./JARVIS.sh --start"
 }

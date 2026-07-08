@@ -25,6 +25,10 @@
         <button id="voice-settings-btn" class="ghost" title="Voice settings — pick the spoken voice, speed, pitch">🎚️</button>
         <div class="voice-drop" id="voice-drop" hidden>
           <div class="vd-title">Spoken voice</div>
+          <div class="vd-row"><label for="tts-engine">Engine</label><select id="tts-engine">
+            <option value="browser">Browser (built-in)</option>
+            <option value="piper">Piper (neural · local)</option>
+          </select></div>
           <div class="vd-row"><label for="tts-voice">Voice</label><select id="tts-voice"></select></div>
           <div class="vd-row"><label for="tts-rate">Speed</label><input id="tts-rate" type="range" min="0.6" max="1.6" step="0.05"></div>
           <div class="vd-row"><label for="tts-pitch">Pitch</label><input id="tts-pitch" type="range" min="0.6" max="1.4" step="0.05"></div>

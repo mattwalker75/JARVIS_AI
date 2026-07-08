@@ -8,6 +8,46 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-07: **Expressive-face ambient avatar (+ face/orb switch).** Ambient mode can now
+  render an expressive glowing **face** — it blinks, its gaze wanders while thinking, and
+  its mouth **lip-syncs to the voice** (driven by the AI's real amplitude on the Piper
+  engine). The original pulsating **orb** is kept; a button in the top-left of ambient mode
+  switches between them live and persists the choice (`voice.ambient_style`, default
+  `face`). Implemented in `app/public/ambient.js` (`drawFace`/`drawOrb`); wired + allowlisted
+  in `app/src/config.js`, persisted from `app/public/app.js`.
+- 2026-07-07: **Conversational follow-up window for Wake mode.** After JARVIS finishes
+  speaking, the mic stays awake for `voice.followup_seconds` (configurable; `0` = off) so
+  you can reply **without** repeating the wake word — turning Wake mode into a natural
+  back-and-forth. The timer is anchored to **end-of-speech** (not your last utterance), so
+  the model thinking or giving a long answer never eats into the reply window; it re-opens
+  after every response. It's the time to *start* replying — the countdown stops the moment
+  you begin speaking (detected on interim results, re-armed to the engaged timeout), so a
+  longer sentence won't be cut off. Applies to Wake mode with spoken replies on.
+  Implemented in `app/public/voice.js` (`scheduleSleep`/follow-up logic in `finishSpeaking`
+  + interim-speech detection in `onResult`); surfaced + allowlisted in `app/src/config.js`.
+  `silence_timeout_seconds` still governs the initial post-wake-word window.
+- 2026-07-07: **Emojis are no longer spoken.** The AI still uses emojis on screen to
+  express tone, but they're now stripped before text-to-speech (both engines) so the voice
+  reads the prose, not "🎉". Covers pictographs, flags, skin-tone modifiers, ZWJ sequences,
+  variation selectors, and keycaps (`cleanForSpeech` in `app/public/voice.js`).
+- 2026-07-07: **Offline neural voice (Piper).** A new fifth container, `jarvis-piper`,
+  runs [Piper](https://github.com/rhasspy/piper) — an on-device neural text-to-speech
+  engine — behind a tiny HTTP API (`piper/serve.py`). The voice engine is now selectable
+  in the 🎚️ voice popover: **Browser** (OS/Chrome Web Speech voices, as before) or
+  **Piper** (neural). Piper is **free, fully local, and machine-independent** — the engine
+  binary + voice models are baked into the image at build time (arch auto-detected for
+  arm64/x86_64), so at runtime nothing leaves the machine and the same voice travels with
+  JARVIS to any host. Ships 7 curated en voices (US/GB, female/male). ~45× faster than
+  real-time on CPU. New backend proxy `app/src/tts.js` + endpoints `GET /api/tts/voices`
+  and `POST /api/tts` (browser stays same-origin; the app forwards to the internal-only
+  container). New settings `voice.tts_engine` / `tts_voice` / `tts_rate` / `tts_pitch`,
+  all UI-settable and persisted. Add/swap voices via `piper/download-voices.sh` + rebuild.
+- 2026-07-07: The **ambient orb is now truly amplitude-reactive while speaking** when the
+  Piper engine is active — because JARVIS plays its own audio through the Web Audio API,
+  the orb is driven by the real waveform of its voice (the browser engine still uses the
+  word-synced envelope, since it won't expose the synth waveform).
+
 ### Fixed
 - 2026-07-07: Recurring gateway error `litellm.APIConnectionError: Extra data: line 1
   column N` (a JSON-decode failure in LiteLLM's Ollama NDJSON parser when Ollama's

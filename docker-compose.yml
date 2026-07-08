@@ -6,6 +6,7 @@ name: jarvis
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
 #   jarvis-litellm    LiteLLM gateway — one endpoint -> many model providers  :4000
 #   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111
+#   jarvis-piper      Offline neural text-to-speech (Piper), internal-only     :5000
 #
 # The app reaches the workbench via the Docker socket (docker exec), the memory
 # service + gateway over the internal network, and mounts the shared folders into
@@ -67,6 +68,20 @@ services:
       - ./litellm/config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
 
+  jarvis-piper:
+    build:
+      context: ./piper
+      dockerfile: Dockerfile
+    image: jarvis-piper:local
+    container_name: jarvis-piper
+    restart: unless-stopped
+    # Internal-only: the app reaches it over the compose network at http://jarvis-piper:5000.
+    # No host port is published (uncomment below to poke it directly for debugging).
+    # ports:
+    #   - "127.0.0.1:5111:5000"
+    expose:
+      - "5000"
+
   jarvis-app:
     build:
       context: ./app
@@ -75,6 +90,8 @@ services:
     restart: unless-stopped
     depends_on:
       jarvis-litellm:
+        condition: service_started
+      jarvis-piper:
         condition: service_started
     environment:
       JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
