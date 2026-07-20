@@ -59,6 +59,21 @@ model_list:
       model: openai/qwen3:8b
       api_base: http://host.docker.internal:11434/v1
       api_key: ollama
+  - model_name: llama3.3:latest
+    litellm_params:
+      model: openai/llama3.3:latest
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
+  - model_name: AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b
+    litellm_params:
+      model: openai/AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
+  - model_name: llama2-uncensored:70b
+    litellm_params:
+      model: openai/llama2-uncensored:70b
+      api_base: http://host.docker.internal:11434/v1
+      api_key: ollama
 
 litellm_settings:
   drop_params: true
