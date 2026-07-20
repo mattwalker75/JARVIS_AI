@@ -21,15 +21,16 @@ infrastructure, security, documentation, or test-policy changes.
   against Ollama: the same model that 400'd now returns a clean tool call.
 
 ### Added
-- 2026-07-20: **Three additional local models registered in the LiteLLM
+- 2026-07-20: **Two additional local models registered in the LiteLLM
   gateway** (`litellm/config.yaml`), routed to host Ollama via the same
   OpenAI-dialect passthrough as the existing local models — so they appear in
   the header model switcher and can be selected for any tier:
-  `llama3.3:latest`, `AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b`, and
-  `llama2-uncensored:70b` (all already pulled in Ollama). Existing models are
-  unchanged. Requires a gateway reload to take effect
-  (`docker compose up -d --force-recreate jarvis-litellm`); verified the
-  gateway serves all 13 models afterward.
+  `llama3.3:latest` and `AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b` (both already
+  pulled in Ollama, both tool-capable). `llama2-uncensored:70b` was also
+  trialed but removed: Ollama reports it as `completion`-only with no
+  tool-calling template, so it cannot drive JARVIS's tools. Existing models
+  are unchanged. Requires a gateway reload to take effect
+  (`docker compose up -d --force-recreate jarvis-litellm`).
 - 2026-07-07: **Expressive-face ambient avatar (+ face/orb switch).** Ambient mode can now
   render an expressive glowing **face** — it blinks, its gaze wanders while thinking, and
   its mouth **lip-syncs to the voice** (driven by the AI's real amplitude on the Piper
