@@ -29,6 +29,28 @@ async function chat({ messages, emit, tier, excludeTools, signal }) {
   return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal);
 }
 
+// Some chat templates (notably strict Qwen3 derivatives) raise
+// "System message must be at the beginning" for ANY system message that is not
+// the very first one — which breaks Ollama's tool-call parser generation the
+// moment tools are attached. JARVIS legitimately injects system notes anywhere
+// in the turn (current-time note, per-turn skill hint, repeat-tool warning), so
+// before sending we collapse every system message into a single leading one.
+// This is the standard, most-compatible message shape and is a no-op in effect
+// for lenient templates.
+function oneSystemAtFront(msgs) {
+  const sys = [];
+  const rest = [];
+  for (const m of msgs) {
+    if (m && m.role === "system") {
+      sys.push(typeof m.content === "string" ? m.content : JSON.stringify(m.content));
+    } else {
+      rest.push(m);
+    }
+  }
+  if (!sys.length) return msgs.slice();
+  return [{ role: "system", content: sys.join("\n\n") }, ...rest];
+}
+
 async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal) {
   const excluded = new Set(excludeTools || []);
   const toolset = excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs;
@@ -72,7 +94,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     lastModel = modelFor(tier);
     const body = {
       model: lastModel,
-      messages: convo,
+      messages: oneSystemAtFront(convo),
       temperature: llm.temperature ?? 0.4,
       max_tokens: llm.max_tokens ?? 1200,
       tools: toolset,

@@ -8,6 +8,18 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-20: **Tool calls now work with strict chat templates (e.g. Qwen3
+  derivatives).** JARVIS injects system notes anywhere in a turn (current
+  time, per-turn skill hint, repeat-tool warning), but some models' chat
+  templates raise `System message must be at the beginning`, which made
+  Ollama's tool-call parser generation 400 the moment tools were attached
+  (e.g. `AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b`). `app/src/llm.js` now
+  collapses all system messages into a single leading one
+  (`oneSystemAtFront`) before each request — the standard, most-compatible
+  message shape, and a no-op in effect for lenient templates. Verified
+  against Ollama: the same model that 400'd now returns a clean tool call.
+
 ### Added
 - 2026-07-20: **Three additional local models registered in the LiteLLM
   gateway** (`litellm/config.yaml`), routed to host Ollama via the same
