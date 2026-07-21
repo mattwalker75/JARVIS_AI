@@ -519,6 +519,7 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   if (t.dataset.tab === "tasks") { refreshTasks(); refreshNotes(); }
   if (t.dataset.tab === "memory") refreshMemories();
   if (t.dataset.tab === "files") refreshFiles();
+  if (t.dataset.tab === "config") loadConfig();
 }));
 
 // --- Tasks panel ---
@@ -853,3 +854,131 @@ async function init() {
   inputEl.focus();
 }
 init();
+
+// ===== Config tab: full JARVIS_CONFIG.json + JARVIS_SECRETS.json editor =====
+// Hybrid editor: friendly fields and the raw JSON stay in sync (JSON is canonical at
+// save). Saving writes both files (server validates + auto-backs-up); applying the
+// change is a separate `./JARVIS.sh --reload`.
+let cfgObj = {}, secretsObj = { secrets: {} };
+
+// Declarative map of structured field -> config path -> type.
+const CFG_FIELDS = [
+  ["cfg-provider", "llm.provider", "str"],
+  ["cfg-base-url", "llm.base_url", "str"],
+  ["cfg-model-mode", "llm.model_mode", "str"],
+  ["cfg-model", "llm.model", "str"],
+  ["cfg-tier-chat", "llm.models.chat", "str"],
+  ["cfg-tier-cheap", "llm.models.cheap", "str"],
+  ["cfg-tier-smart", "llm.models.smart", "str"],
+  ["cfg-tier-vision", "llm.models.vision", "str"],
+  ["cfg-temperature", "llm.temperature", "num"],
+  ["cfg-max-tokens", "llm.max_tokens", "num"],
+  ["cfg-ollama-manage", "ollama.manage", "bool"],
+  ["cfg-ollama-ctx", "ollama.context_length", "num"],
+  ["cfg-ollama-keep", "ollama.keep_alive", "str"],
+  ["cfg-ollama-par", "ollama.num_parallel", "num"],
+  ["cfg-ollama-maxl", "ollama.max_loaded_models", "num"],
+  ["cfg-assistant-name", "assistant_name", "str"],
+  ["cfg-tts-engine", "voice.tts_engine", "str"],
+  ["cfg-mic-mode", "voice.mic_mode", "str"],
+  ["cfg-voice-enabled", "voice.enabled", "bool"],
+  ["cfg-skills-autohint", "skills_autohint", "bool"],
+];
+
+function getPath(obj, dotted) {
+  return dotted.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function setPath(obj, dotted, val) {
+  const parts = dotted.split("."); let o = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (typeof o[parts[i]] !== "object" || o[parts[i]] == null) o[parts[i]] = {};
+    o = o[parts[i]];
+  }
+  o[parts[parts.length - 1]] = val;
+}
+
+function populateStructured() {
+  for (const [id, path, type] of CFG_FIELDS) {
+    const el = $(id); if (!el) continue;
+    const v = getPath(cfgObj, path);
+    if (type === "bool") el.checked = v !== false && v != null ? !!v : (v === true);
+    else el.value = v == null ? "" : v;
+  }
+  // sensible default for the two booleans when the key is absent
+  if (getPath(cfgObj, "voice.enabled") === undefined) $("cfg-voice-enabled").checked = true;
+  if (getPath(cfgObj, "skills_autohint") === undefined) $("cfg-skills-autohint").checked = true;
+  if (getPath(cfgObj, "ollama.manage") === undefined) $("cfg-ollama-manage").checked = true;
+}
+
+function collectStructured() {
+  for (const [id, path, type] of CFG_FIELDS) {
+    const el = $(id); if (!el) continue;
+    let val;
+    if (type === "bool") val = el.checked;
+    else if (type === "num") val = el.value === "" ? undefined : Number(el.value);
+    else val = el.value === "" ? undefined : el.value;
+    setPath(cfgObj, path, val);
+  }
+}
+function renderRawConfig() { $("cfg-json").value = JSON.stringify(cfgObj, null, 2); $("cfg-json-err").textContent = ""; }
+function renderRawSecrets() { $("cfg-secrets").value = JSON.stringify(secretsObj, null, 2); $("cfg-secrets-err").textContent = ""; }
+
+async function loadConfig() {
+  const result = $("cfg-result"); if (result) result.textContent = "";
+  let d;
+  try { d = await (await fetch("/api/config/full")).json(); }
+  catch (e) { $("cfg-json-err").textContent = "Failed to load config: " + e.message; return; }
+  if (d.config_error) { $("cfg-json-err").textContent = "Config file error: " + d.config_error; }
+  cfgObj = d.config && typeof d.config === "object" ? d.config : {};
+  secretsObj = d.secrets && typeof d.secrets === "object" ? d.secrets : { secrets: {} };
+  populateStructured();
+  renderRawConfig();
+  renderRawSecrets();
+}
+
+async function saveConfig() {
+  const result = $("cfg-result");
+  let config, secrets;
+  try { config = JSON.parse($("cfg-json").value); }
+  catch (e) { $("cfg-json-err").textContent = "Invalid JSON — fix before saving: " + e.message; return; }
+  try { secrets = JSON.parse($("cfg-secrets").value); }
+  catch (e) { $("cfg-secrets-err").textContent = "Invalid JSON — fix before saving: " + e.message; return; }
+  const btn = $("cfg-save"); btn.disabled = true;
+  try {
+    const r = await fetch("/api/config/full", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config, secrets }),
+    });
+    const d = await r.json();
+    if (!r.ok) { result.className = "cfg-result err"; result.textContent = "Save failed: " + (d.error || r.status); return; }
+    cfgObj = config; secretsObj = secrets; populateStructured();
+    result.className = "cfg-result ok";
+    const nb = (d.backups || []).length;
+    result.innerHTML = "✅ Saved " + (d.saved || []).join(" + ") +
+      (nb ? " (backed up " + nb + " file" + (nb > 1 ? "s" : "") + ")" : "") +
+      ". Now run <code>./JARVIS.sh --reload</code> to apply (restarts the app" +
+      (config.ollama && config.ollama.manage !== false ? " + Ollama" : "") + ").";
+  } catch (e) {
+    result.className = "cfg-result err"; result.textContent = "Save failed: " + e.message;
+  } finally { btn.disabled = false; }
+}
+
+// Wiring
+CFG_FIELDS.forEach(([id]) => { const el = $(id); if (el) el.addEventListener("change", () => { collectStructured(); renderRawConfig(); }); });
+(() => {
+  const raw = $("cfg-json"); if (raw) raw.addEventListener("blur", () => {
+    try { cfgObj = JSON.parse(raw.value); populateStructured(); $("cfg-json-err").textContent = ""; }
+    catch (e) { $("cfg-json-err").textContent = "Invalid JSON: " + e.message; }
+  });
+  const sraw = $("cfg-secrets"); if (sraw) sraw.addEventListener("blur", () => {
+    try { secretsObj = JSON.parse(sraw.value); $("cfg-secrets-err").textContent = ""; }
+    catch (e) { $("cfg-secrets-err").textContent = "Invalid JSON: " + e.message; }
+  });
+  const reveal = $("cfg-secrets-reveal"); if (reveal) reveal.addEventListener("click", (e) => {
+    e.preventDefault();
+    const t = $("cfg-secrets"); const masked = t.classList.toggle("cfg-masked");
+    reveal.textContent = masked ? "👁 Reveal" : "🙈 Hide";
+  });
+  const save = $("cfg-save"); if (save) save.addEventListener("click", saveConfig);
+  const rel = $("cfg-reload-from-disk"); if (rel) rel.addEventListener("click", loadConfig);
+})();

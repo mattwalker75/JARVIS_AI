@@ -84,6 +84,7 @@
         <button class="tab" data-tab="memory">Memory</button>
         <button class="tab" data-tab="files">Files</button>
         <button class="tab" data-tab="workbench">Workbench</button>
+        <button class="tab" data-tab="config">Config</button>
       </div>
       <div class="panel active" id="panel-activity">
         <div class="activity" id="activity">
@@ -127,6 +128,73 @@
       <div class="panel" id="panel-workbench">
         <iframe id="desktop" title="JARVIS Workbench desktop"></iframe>
         <a id="desktop-link" class="desktop-link" target="_blank" rel="noopener">Open desktop in a new tab ↗</a>
+      </div>
+      <div class="panel" id="panel-config">
+        <div class="cfg-pane">
+          <div class="tasks-head">
+            <h4>Configuration</h4>
+            <button id="cfg-reload-from-disk" class="ghost" title="Discard edits and reload from the files on disk">↻ Reload</button>
+          </div>
+          <div class="hint">Everything in <code>JARVIS_CONFIG.json</code> + <code>JARVIS_SECRETS.json</code>. Edit the friendly fields or the raw JSON — they stay in sync. After saving, run <code>./JARVIS.sh --reload</code> to apply.</div>
+
+          <div class="cfg-section">
+            <h5>Model &amp; LLM</h5>
+            <label>Provider<input id="cfg-provider" autocomplete="off"></label>
+            <label>Gateway base URL<input id="cfg-base-url" autocomplete="off"></label>
+            <label>Model mode<select id="cfg-model-mode"><option value="single">single</option><option value="multi">multi</option></select></label>
+            <label>Model (single mode)<input id="cfg-model" autocomplete="off"></label>
+            <div class="cfg-grid">
+              <label>chat tier<input id="cfg-tier-chat" autocomplete="off"></label>
+              <label>cheap tier<input id="cfg-tier-cheap" autocomplete="off"></label>
+              <label>smart tier<input id="cfg-tier-smart" autocomplete="off"></label>
+              <label>vision tier<input id="cfg-tier-vision" autocomplete="off"></label>
+            </div>
+            <div class="cfg-grid">
+              <label>Temperature<input id="cfg-temperature" type="number" step="0.1" min="0" max="2"></label>
+              <label>Max tokens<input id="cfg-max-tokens" type="number" min="1"></label>
+            </div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Ollama <span class="cfg-badge">host · needs --reload</span></h5>
+            <label class="cfg-check"><input type="checkbox" id="cfg-ollama-manage"> Let JARVIS manage Ollama on --reload</label>
+            <div class="cfg-grid">
+              <label>Context length<input id="cfg-ollama-ctx" type="number" min="1024" step="1024"></label>
+              <label>Keep alive<input id="cfg-ollama-keep" autocomplete="off" title="-1 = keep resident forever; or a duration like 30m"></label>
+              <label>Num parallel<input id="cfg-ollama-par" type="number" min="1"></label>
+              <label>Max loaded models<input id="cfg-ollama-maxl" type="number" min="1"></label>
+            </div>
+            <div class="hint">Context is pre-allocated at load (bigger = more RAM + slower first load, fixed ceiling). keep_alive <code>-1</code> avoids ~minute cold reloads.</div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Assistant &amp; Voice</h5>
+            <label>Assistant name<input id="cfg-assistant-name" autocomplete="off"></label>
+            <div class="cfg-grid">
+              <label>TTS engine<select id="cfg-tts-engine"><option value="browser">browser</option><option value="piper">piper</option></select></label>
+              <label>Mic mode<select id="cfg-mic-mode"><option value="off">off</option><option value="wake">wake</option><option value="open">open</option></select></label>
+            </div>
+            <label class="cfg-check"><input type="checkbox" id="cfg-voice-enabled"> Voice enabled</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-skills-autohint"> Skill auto-hints</label>
+          </div>
+
+          <details class="cfg-section cfg-raw">
+            <summary>Advanced — full JARVIS_CONFIG.json</summary>
+            <textarea id="cfg-json" class="cfg-json" spellcheck="false" autocomplete="off"></textarea>
+            <div id="cfg-json-err" class="cfg-err"></div>
+          </details>
+
+          <details class="cfg-section cfg-raw">
+            <summary>Secrets — JARVIS_SECRETS.json <button type="button" id="cfg-secrets-reveal" class="ghost">👁 Reveal</button></summary>
+            <textarea id="cfg-secrets" class="cfg-json cfg-masked" spellcheck="false" autocomplete="off"></textarea>
+            <div id="cfg-secrets-err" class="cfg-err"></div>
+          </details>
+
+          <div class="cfg-actions">
+            <button id="cfg-save" class="primary">💾 Save all</button>
+          </div>
+          <div id="cfg-result" class="cfg-result"></div>
+        </div>
       </div>
     </aside>
   </main>

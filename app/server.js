@@ -5,7 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
-const { config, loadError, publicConfig, systemPrompt, setSetting } = require("./src/config");
+const { config, loadError, publicConfig, systemPrompt, setSetting, readFullConfig, writeFullConfig } = require("./src/config");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
@@ -90,6 +90,22 @@ app.post("/api/settings", (req, res) => {
     const { path: p, value } = req.body || {};
     if (typeof p !== "string") return res.status(400).json({ error: "path (string) required" });
     res.json(setSetting(p, value));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Full config editor (the Config tab): read/write the WHOLE JARVIS_CONFIG.json +
+// JARVIS_SECRETS.json. Localhost-only single-user app, so secrets are returned in the
+// clear for editing. Writes validate + auto-backup; applying is `./JARVIS.sh --reload`.
+app.get("/api/config/full", (_req, res) => {
+  try { res.json(readFullConfig()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/api/config/full", (req, res) => {
+  try {
+    const { config: c, secrets: s } = req.body || {};
+    if (c === undefined && s === undefined) return res.status(400).json({ error: "nothing to save" });
+    const r = writeFullConfig({ config: c, secrets: s });
+    res.json({ ...r, reload_required: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -18,8 +18,11 @@
 #   -c, --check        Verify the local Docker daemon is running.
 #   -b, --setup        Build the app/workbench/memory images and pull the gateway image.
 #   -u, --start        Start the whole stack; print URLs.
-#   -r, --reload       Restart the app to re-read config files (JARVIS_CONFIG.json +
-#                      JARVIS_SECRETS.json); memory + gateway + workbench keep running.
+#   -r, --reload       Apply config + restart the app to re-read config files
+#                      (JARVIS_CONFIG.json + JARVIS_SECRETS.json). Also applies the host
+#                      Ollama settings (ollama.* — context_length/keep_alive/…) and
+#                      restarts Ollama, unless ollama.manage=false. Memory + gateway +
+#                      workbench keep running. Run this after saving from the Config tab.
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
 #   -p, --prompt <text>  Run one prompt and print the answer; supports piping stdin in.
 #   -e, --eval         Replay data/evals/*.json through the model and report pass/fail.
@@ -178,9 +181,54 @@ cmd_start() {
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
 }
 
+# Apply the host Ollama settings from JARVIS_CONFIG.json (ollama.*) and restart the
+# Ollama app so it picks them up. Ollama runs on the HOST, outside this stack, which is
+# why it's driven here via launchctl env + an app restart rather than from the container.
+apply_ollama_settings() {
+  local manage; manage="$(lc "$(read_cfg ollama.manage true)")"
+  if [[ "$manage" != "true" ]]; then
+    info "Ollama: manage=false in config — leaving Ollama untouched."
+    return 0
+  fi
+  if [[ "$(uname)" != "Darwin" ]]; then
+    warn "Ollama auto-management is implemented for macOS only; set ollama.manage=false to silence this. Skipping."
+    return 0
+  fi
+  command -v ollama >/dev/null 2>&1 || { warn "Ollama CLI not found on PATH; skipping Ollama management."; return 0; }
+
+  local ctx keep par maxl
+  ctx="$(read_cfg ollama.context_length 65536)"
+  keep="$(read_cfg ollama.keep_alive -1)"
+  par="$(read_cfg ollama.num_parallel 1)"
+  maxl="$(read_cfg ollama.max_loaded_models 3)"
+
+  info "Ollama: applying context_length=${ctx}, keep_alive=${keep}, num_parallel=${par}, max_loaded_models=${maxl}"
+  # launchctl setenv makes these visible to the GUI Ollama.app when it next launches.
+  launchctl setenv OLLAMA_CONTEXT_LENGTH   "$ctx"  2>/dev/null || true
+  launchctl setenv OLLAMA_KEEP_ALIVE       "$keep" 2>/dev/null || true
+  launchctl setenv OLLAMA_NUM_PARALLEL     "$par"  2>/dev/null || true
+  launchctl setenv OLLAMA_MAX_LOADED_MODELS "$maxl" 2>/dev/null || true
+
+  info "Ollama: restarting so the new settings take effect..."
+  osascript -e 'quit app "Ollama"' 2>/dev/null || killall Ollama 2>/dev/null || true
+  sleep 2
+  open -a Ollama 2>/dev/null || { warn "Could not launch Ollama.app; start Ollama manually."; return 0; }
+  # Wait for the Ollama API to come back up.
+  local up=""
+  for _ in $(seq 1 30); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:11434/api/tags 2>/dev/null)" == "200" ]] \
+      && { up=1; break; }
+    sleep 2
+  done
+  [[ -n "$up" ]] && ok "Ollama restarted with the new settings." \
+    || warn "Ollama did not answer on :11434 yet (it may still be starting)."
+}
+
 cmd_reload() {
   require_daemon
-  info "RELOAD: restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
+  info "RELOAD: applying config and restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
+  apply_ollama_settings
+  export_provider_keys
   info "(The database, memory service, and workbench keep running; the LLM's memory and any browser session are preserved.)"
   dc restart jarvis-app || { err "Reload failed."; return 1; }
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true

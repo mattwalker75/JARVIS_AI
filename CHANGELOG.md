@@ -8,6 +8,29 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-20: **Config tab — edit the entire configuration from the UI.** A new
+  sidebar tab exposes everything in `JARVIS_CONFIG.json` and
+  `JARVIS_SECRETS.json`. Hybrid editor: friendly fields for the high-value
+  settings (LLM provider/base_url/model-mode/model, the per-task model tiers,
+  temperature, max tokens, assistant name, voice engine/mic mode, toggles) plus
+  raw-JSON editors for the complete config and secrets — the two views stay in
+  sync (JSON is canonical at save). Secrets are shown masked with a Reveal
+  toggle (fine on this localhost-only single-user app). New backend endpoints
+  `GET/POST /api/config/full` read/validate/write both files; every save
+  **auto-backs-up** the previous file to `/data` and validates before writing,
+  so a bad edit is always recoverable. Saving does not hot-apply — it prompts
+  to run `./JARVIS.sh --reload`.
+- 2026-07-20: **Host Ollama settings are now first-class config.** New `ollama`
+  block in `JARVIS_CONFIG.json` (`manage`, `context_length`, `keep_alive`,
+  `num_parallel`, `max_loaded_models`), editable from the Config tab.
+  `./JARVIS.sh --reload` now applies them to the host Ollama via
+  `launchctl setenv` and restarts Ollama (macOS; skipped if `manage:false`),
+  then restarts the app. This fixes the ~60s cold-load latency on large models:
+  Ollama 0.32 auto-sizes context to the full window (128k → an 85GB resident
+  footprint that gets evicted and reloaded); capping `context_length` (default
+  65536) plus `keep_alive:-1` keeps models resident and warm.
+
 ### Fixed
 - 2026-07-20: **Tool calls now work with strict chat templates (e.g. Qwen3
   derivatives).** JARVIS injects system notes anywhere in a turn (current

@@ -1,7 +1,11 @@
 "use strict";
 const fs = require("fs");
+const path = require("path");
 
 const CONFIG_FILE = process.env.JARVIS_CONFIG_FILE || "/cfg/JARVIS_CONFIG.json";
+// Timestamped backups of the config/secrets files land here before every full-editor
+// save, so a bad edit is always recoverable. /data is bind-mounted and gitignored.
+const CONFIG_BACKUP_DIR = process.env.JARVIS_BACKUP_DIR || "/data";
 
 // Settings the UI is allowed to change and persist back to JARVIS_CONFIG.json (so they
 // survive reboots/rebuilds). An allowlist — never let arbitrary or secret keys be written.
@@ -108,6 +112,52 @@ function setSetting(pathStr, value) {
   return { path: pathStr, value };
 }
 
+// --- full-config editor (the UI Config tab) -------------------------------------
+// The Config tab reads and writes the WHOLE JARVIS_CONFIG.json + JARVIS_SECRETS.json,
+// not just the small SETTABLE allowlist. Reads come straight from disk (so the editor
+// reflects the on-disk state even if the in-memory config is stale after a prior save),
+// and writes validate, back up the previous file, then overwrite in place. Applying the
+// change is a separate explicit step: `./JARVIS.sh --reload`.
+function _readJson(file) { return JSON.parse(fs.readFileSync(file, "utf8")); }
+
+function readFullConfig() {
+  const out = { config: null, secrets: null, config_error: null, secrets_error: null };
+  try { out.config = _readJson(CONFIG_FILE); } catch (e) { out.config_error = e.message; }
+  try { out.secrets = _readJson(SECRETS_FILE); } catch (e) { out.secrets_error = e.message; }
+  return out;
+}
+
+function _backup(file) {
+  try {
+    if (!fs.existsSync(file)) return null;
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const dest = path.join(CONFIG_BACKUP_DIR, path.basename(file, ".json") + ".backup." + ts + ".json");
+    fs.copyFileSync(file, dest);
+    return dest;
+  } catch (_) { return null; }
+}
+
+function writeFullConfig({ config: newConfig, secrets: newSecrets }) {
+  const result = { saved: [], backups: [] };
+  if (newConfig !== undefined && newConfig !== null) {
+    if (typeof newConfig !== "object" || Array.isArray(newConfig)) throw new Error("config must be a JSON object");
+    if (!newConfig.llm || typeof newConfig.llm !== "object") throw new Error("config.llm must be present and be an object");
+    const b = _backup(CONFIG_FILE); if (b) result.backups.push(b);
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    config = newConfig; // keep the in-memory copy consistent for anything read before --reload
+    result.saved.push("config");
+  }
+  if (newSecrets !== undefined && newSecrets !== null) {
+    if (typeof newSecrets !== "object" || Array.isArray(newSecrets)) throw new Error("secrets must be a JSON object");
+    if (!newSecrets.secrets || typeof newSecrets.secrets !== "object") throw new Error("secrets file must have a 'secrets' object");
+    const b = _backup(SECRETS_FILE); if (b) result.backups.push(b);
+    fs.writeFileSync(SECRETS_FILE, JSON.stringify(newSecrets, null, 2));
+    secretsDoc = newSecrets;
+    result.saved.push("secrets");
+  }
+  return result;
+}
+
 // --- credential vault (the user's own accounts) ---
 const SECRETS_FILE = process.env.JARVIS_SECRETS_FILE || "/cfg/JARVIS_SECRETS.json";
 let secretsDoc = { secrets: {} };
@@ -134,4 +184,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt };
+module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, readFullConfig, writeFullConfig };
