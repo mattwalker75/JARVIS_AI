@@ -63,21 +63,25 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   }
 
   const convo = messages.slice();
-  // Give the model the current time (for scheduling) and the shared-folder paths.
+  // Per-turn VOLATILE context — the current time (for scheduling), the shared-folder
+  // paths, and an optional skill hint — is prepended to the LAST USER message, NOT
+  // injected as a leading system note. This is a big performance win: the current time
+  // changes every request, so putting it in the system block made the whole
+  // system-prompt + tools prefix (~8k tokens) byte-different every turn, which defeats
+  // Ollama/llama.cpp's KV-cache reuse and forces a full ~40s re-prefill on the first
+  // model call of EVERY turn. Keeping the system block stable lets the cache hit, so
+  // only the (already-changing) user tail is re-processed.
   const sh = config.shared || {};
-  const nowNote = { role: "system", content: `Current date/time: ${new Date().toString()} (epoch ms ${Date.now()}). Shared folders: read-only = ${sh.read_only_dir || "/READ_ONLY_FILES"}, read-write = ${sh.read_write_dir || "/READ_WRITE_FILES"} (write files the user should receive into the read-write folder; a bare filename works).` };
-  if (convo.length && convo[0].role === "system") convo.splice(1, 0, nowNote);
-  else convo.unshift(nowNote);
-
-  // Auto-hint: nudge the model toward a relevant skill for THIS turn, placed right
-  // before the last user message (recency = salience). On by default; toggle with the
-  // skills_autohint config flag / the /hints UI command.
-  if (config.skills_autohint !== false) {
-    const lastUserIdx = convo.map((m) => m.role).lastIndexOf("user");
-    if (lastUserIdx >= 0 && typeof convo[lastUserIdx].content === "string") {
+  const lastUserIdx = convo.map((m) => m.role).lastIndexOf("user");
+  if (lastUserIdx >= 0 && typeof convo[lastUserIdx].content === "string") {
+    const notes = [`(Context — current date/time: ${new Date().toString()}. Shared folders: read-only = ${sh.read_only_dir || "/READ_ONLY_FILES"}, read-write = ${sh.read_write_dir || "/READ_WRITE_FILES"} — write files the user should receive into the read-write folder; a bare filename works.)`];
+    // Auto-hint: nudge the model toward a relevant skill for THIS turn (on by default;
+    // toggle with the skills_autohint config flag / the /hints UI command).
+    if (config.skills_autohint !== false) {
       const h = require("./skills").hint(convo[lastUserIdx].content);
-      if (h) convo.splice(lastUserIdx, 0, { role: "system", content: h });
+      if (h) notes.push("(" + h + ")");
     }
+    convo[lastUserIdx] = { ...convo[lastUserIdx], content: notes.join("\n") + "\n\n" + convo[lastUserIdx].content };
   }
 
   const maxIter = llm.max_tool_iterations || 8;

@@ -8,6 +8,24 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-21: **Massive prompt-processing latency fix (~50s → ~1s per turn).**
+  Per-turn volatile context (the current-time note and the skill hint) was
+  injected as a leading **system** message, so — merged to the front by
+  `oneSystemAtFront` — the large, otherwise-stable system-prompt + tools
+  prefix (~8k tokens) was byte-different every turn. That defeated
+  Ollama/llama.cpp KV-cache reuse and forced a full re-prefill of the whole
+  prompt on the first model call of EVERY turn (~40s on a 70B). Now that
+  volatile context is prepended to the **last user message** instead, so the
+  system+tools prefix stays byte-identical and the cache is reused; only the
+  changing user tail is re-processed. (`app/src/llm.js`.) Pairs with the
+  `--reload` Ollama `keep_alive:-1` fix that keeps the model + its cache
+  resident. Note: model choice matters too — Llama-3.x templates render tool
+  definitions inside the *last user message* (so the tools payload never
+  caches across prompts), whereas Qwen3 templates put tools in the stable
+  system block; on this hardware Qwen3.6 (35B-A3B MoE) is dramatically faster
+  than a dense 70B for JARVIS's tool-heavy prompts.
+
 ### Added
 - 2026-07-20: **Config tab — edit the entire configuration from the UI.** A new
   sidebar tab exposes everything in `JARVIS_CONFIG.json` and
