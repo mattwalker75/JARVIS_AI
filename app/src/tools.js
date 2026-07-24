@@ -6,6 +6,7 @@ const dns = require("dns").promises;
 const net = require("net");
 const Docker = require("dockerode");
 const { config, getSecrets, setSecret: cfgSetSecret, deleteSecret: cfgDeleteSecret } = require("./config");
+const log = require("./logger");
 
 const docker = new Docker({ socketPath: "/var/run/docker.sock" });
 
@@ -689,12 +690,18 @@ function audit(name, args, status, ms) {
 
 async function execTool(name, args) {
   const started = Date.now();
+  log.info("tool", `call ${name}`);
+  log.verbose("tool", `call ${name}`, { args });
   try {
     const result = await _execTool(name, args);
-    audit(name, args, "ok", Date.now() - started);
+    const ms = Date.now() - started;
+    audit(name, args, "ok", ms);
+    log.verbose("tool", `ok ${name} (${ms}ms)`, { result });
     return result;
   } catch (e) {
-    audit(name, args, "error: " + (e.message || e), Date.now() - started);
+    const ms = Date.now() - started;
+    audit(name, args, "error: " + (e.message || e), ms);
+    log.error("tool", `error ${name} (${ms}ms): ${e.message || e}`, { args });
     throw e;
   }
 }

@@ -8,6 +8,20 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-24: **Leveled debug logging → `JARVIS_AI/Logs/`.** New `logging.level`
+  config flag (0-5), editable from the **Config tab** and applied **live** — no
+  `--reload` (the full-config save now mutates the in-memory config in place, so
+  the logger's live level read picks it up immediately). Levels: `1` errors, `2`
+  warnings, `3` info (turn start/end + each tool call), `4` verbose (full tool
+  args + results + token usage), `5` debug (the complete LLM request messages +
+  raw response + browser actions). Off (`0`) by default — zero overhead. **Secret
+  values are redacted** so a level-5 log is never a credential leak. New
+  `app/src/logger.js` (one file per day, per-payload size cap, never throws);
+  `llm.js` logs every turn's request/response, `tools.js` `execTool` logs every
+  tool call/result/error. `Logs/` is bind-mounted and gitignored. This is the
+  diagnostic engine for the pending agent-behavior fixes.
+
 ### Fixed
 - 2026-07-21: **Massive prompt-processing latency fix (~50s → ~1s per turn).**
   Per-turn volatile context (the current-time note and the skill hint) was

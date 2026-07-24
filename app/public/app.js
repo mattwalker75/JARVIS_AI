@@ -883,6 +883,7 @@ const CFG_FIELDS = [
   ["cfg-mic-mode", "voice.mic_mode", "str"],
   ["cfg-voice-enabled", "voice.enabled", "bool"],
   ["cfg-skills-autohint", "skills_autohint", "bool"],
+  ["cfg-log-level", "logging.level", "num"],
 ];
 
 function getPath(obj, dotted) {

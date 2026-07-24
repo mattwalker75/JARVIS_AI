@@ -32,3 +32,7 @@ READ_ONLY_FILES/*
 
 # local config backup (contains a real key)
 JARVIS_CONFIG.*backup*.json
+
+# Debug logs (JARVIS_AI/Logs/), keep the dir
+Logs/*
+!Logs/.gitkeep

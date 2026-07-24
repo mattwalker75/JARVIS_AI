@@ -112,6 +112,13 @@ function setSetting(pathStr, value) {
   return { path: pathStr, value };
 }
 
+// Current debug-logging level (0 off .. 5 full). Read live from `config` so a change
+// saved from the Config tab takes effect immediately (no --reload needed for logging).
+function logLevel() {
+  const n = Number(config.logging && config.logging.level);
+  return Number.isFinite(n) ? Math.max(0, Math.min(5, Math.trunc(n))) : 0;
+}
+
 // --- full-config editor (the UI Config tab) -------------------------------------
 // The Config tab reads and writes the WHOLE JARVIS_CONFIG.json + JARVIS_SECRETS.json,
 // not just the small SETTABLE allowlist. Reads come straight from disk (so the editor
@@ -144,7 +151,11 @@ function writeFullConfig({ config: newConfig, secrets: newSecrets }) {
     if (!newConfig.llm || typeof newConfig.llm !== "object") throw new Error("config.llm must be present and be an object");
     const b = _backup(CONFIG_FILE); if (b) result.backups.push(b);
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
-    config = newConfig; // keep the in-memory copy consistent for anything read before --reload
+    // Mutate the SAME `config` object in place (not reassign) so every module that
+    // captured the reference at require-time — and live accessors like logLevel() —
+    // see the update immediately (e.g. a log-level change applies without --reload).
+    for (const k of Object.keys(config)) delete config[k];
+    Object.assign(config, newConfig);
     result.saved.push("config");
   }
   if (newSecrets !== undefined && newSecrets !== null) {
@@ -152,7 +163,8 @@ function writeFullConfig({ config: newConfig, secrets: newSecrets }) {
     if (!newSecrets.secrets || typeof newSecrets.secrets !== "object") throw new Error("secrets file must have a 'secrets' object");
     const b = _backup(SECRETS_FILE); if (b) result.backups.push(b);
     fs.writeFileSync(SECRETS_FILE, JSON.stringify(newSecrets, null, 2));
-    secretsDoc = newSecrets;
+    for (const k of Object.keys(secretsDoc)) delete secretsDoc[k];
+    Object.assign(secretsDoc, newSecrets);
     result.saved.push("secrets");
   }
   return result;
@@ -184,4 +196,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, readFullConfig, writeFullConfig };
+module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, readFullConfig, writeFullConfig, logLevel };

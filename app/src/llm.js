@@ -4,6 +4,7 @@
 // 'mock' replies offline.
 const { config, modelFor } = require("./config");
 const tools = require("./tools");
+const log = require("./logger");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -105,7 +106,17 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       tool_choice: "auto",
       stream_options: { include_usage: true },
     };
-    const { message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal);
+    log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}`);
+    log.debug("llm", "request", { model: lastModel, tool_names: toolset.map((t) => t.function && t.function.name), messages: body.messages });
+    let msg, turnUsage, finish;
+    try {
+      ({ message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal));
+    } catch (e) {
+      log.error("llm", `request failed: ${e.message}`, { model: lastModel });
+      throw e;
+    }
+    log.info("llm", `response finish=${finish} tool_calls=${(msg.tool_calls || []).length} content_len=${(msg.content || "").length}`);
+    log.debug("llm", "response", { content: msg.content, tool_calls: msg.tool_calls, reasoning_len: (msg.reasoning || "").length });
     addUsage(turnUsage);
     convo.push(msg);
 

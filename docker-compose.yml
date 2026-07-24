@@ -107,6 +107,7 @@ services:
       - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
       - ./READ_WRITE_FILES:/READ_WRITE_FILES
       - ./data:/data
+      - ./Logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:

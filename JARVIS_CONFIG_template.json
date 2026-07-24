@@ -71,5 +71,9 @@
     "read_write_dir": "/READ_WRITE_FILES"
   },
   "_skills_autohint_comment": "When true (default), each turn injects a one-line hint pointing the model at a relevant skill's get_skill playbook (keyword-matched from your message). Toggle from the UI with /hints on|off. Set false to disable.",
-  "skills_autohint": true
+  "skills_autohint": true,
+  "_logging_note": "Debug logging to JARVIS_AI/Logs/. level: 0 off (default) .. 1 errors, 2 warn, 3 info (turns+tools), 4 verbose (full tool args/results), 5 debug (full LLM requests/responses + browser actions). Read live — change from the Config tab and it applies immediately, no --reload. Secrets are redacted.",
+  "logging": {
+    "level": 0
+  }
 }

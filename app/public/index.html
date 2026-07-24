@@ -178,6 +178,20 @@
             <label class="cfg-check"><input type="checkbox" id="cfg-skills-autohint"> Skill auto-hints</label>
           </div>
 
+          <div class="cfg-section">
+            <h5>Diagnostics <span class="cfg-badge">applies live</span></h5>
+            <label>Debug logging level → JARVIS_AI/Logs/
+              <select id="cfg-log-level">
+                <option value="0">0 — off</option>
+                <option value="1">1 — errors</option>
+                <option value="2">2 — warnings</option>
+                <option value="3">3 — info (turns + tool calls)</option>
+                <option value="4">4 — verbose (full tool args + results)</option>
+                <option value="5">5 — full debug (LLM requests + responses)</option>
+              </select></label>
+            <div class="hint">Level 5 logs everything to <code>JARVIS_AI/Logs/</code> for debugging (secrets redacted). This setting applies <strong>immediately on save</strong> — no <code>--reload</code> needed.</div>
+          </div>
+
           <details class="cfg-section cfg-raw">
             <summary>Advanced — full JARVIS_CONFIG.json</summary>
             <textarea id="cfg-json" class="cfg-json" spellcheck="false" autocomplete="off"></textarea>
