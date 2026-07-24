@@ -8,6 +8,13 @@ const log = require("./logger");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Follow-through guardrail: a weaker local model sometimes NARRATES an action it's about
+// to take ("let me search that…", "I'll run the command…") but ends the turn WITHOUT
+// emitting a tool call. This matches a first-person intent phrase followed (in the same
+// clause) by a tool-ish verb — deliberately conservative so ordinary conversation
+// ("it's going to be great", "let me know") does NOT trip it.
+const ACTION_INTENT_RE = /\b(let me|i'?ll|i will|i'?m going to|i am going to|let me go|hang on,? let me|give me a (?:sec|moment)|one (?:sec|moment))\b[^.!?\n]*\b(search|look|check|run|fetch|grab|find|dig|browse|open|navigate|pull|query|execute|scrape|retrieve|do that|look that up|take care of|pull up|bring up)\b/i;
+
 // Retryability is a property of each tool (see tools.isRetryable) — read-only tools
 // retry on transient errors; mutating tools never auto-retry to avoid double execution.
 const TRANSIENT = /(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|PROTOCOL_CONNECTION_LOST|ECONNREFUSED|\b(429|50\d)\b|service 5\d\d)/i;
@@ -88,6 +95,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   const maxIter = llm.max_tool_iterations || 8;
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const fingerprints = [];
+  let intentNudges = 0;   // follow-through guardrail budget (see ACTION_INTENT_RE)
   let lastModel = modelFor(tier);
   const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; } };
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
@@ -166,6 +174,16 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
         convo.push({ role: "system", content: "You have now made the same tool call 3 times without progress. Stop repeating it — try a clearly different approach, or give your best final answer in plain text." });
       }
       continue; // let the model react to tool results
+    }
+
+    // Follow-through guardrail: the model ended the turn with NO tool call. If it clearly
+    // promised a tool action but didn't take it, nudge it to actually act and keep going
+    // (bounded budget so ordinary conversation isn't pestered).
+    if (msg.content && intentNudges < 2 && ACTION_INTENT_RE.test(msg.content)) {
+      intentNudges++;
+      log.warn("llm", `follow-through nudge #${intentNudges}: promised an action but made no tool call`, { content: (msg.content || "").slice(0, 200) });
+      convo.push({ role: "system", content: "You described an action you were about to take but did not call any tool. If you intended to act (search the web, run a command, open the browser, fetch a page, read/write a file, etc.), CALL THE APPROPRIATE TOOL NOW. If you were only making conversation and no action is needed, briefly give your final answer." });
+      continue;
     }
 
     emitUsage();

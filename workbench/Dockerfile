@@ -69,7 +69,15 @@ RUN pip3 install --no-cache-dir --break-system-packages \
    || true
 
 # Playwright browsers + their OS dependencies (reliable headless web automation/testing).
-RUN playwright install --with-deps chromium firefox || playwright install chromium firefox || true
+# Install to a FIXED image path — NOT the default ~/.cache under /config, which is a
+# runtime volume that would SHADOW the browsers (the old durability trap). This path is
+# baked into the image and survives fresh volumes and rebuilds.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+# FAIL THE BUILD if chromium doesn't actually install — silently shipping a browserless
+# workbench (the old `|| true`) is exactly what broke the browser tools before.
+RUN (playwright install --with-deps chromium firefox || playwright install chromium firefox) \
+    && ls -d /opt/ms-playwright/chromium-* >/dev/null 2>&1 \
+    && echo "OK: playwright chromium installed at /opt/ms-playwright"
 
 # --- Application frameworks & extra language tooling (so common stacks work OFFLINE) ---
 

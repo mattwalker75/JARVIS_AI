@@ -37,6 +37,7 @@ def ensure_page():
             headless=False,
             args=["--no-sandbox", "--window-size=1010,700", "--window-position=8,8"],
             viewport={"width": 1000, "height": 640},
+            java_script_enabled=True,   # explicit: many sites require JS (safe — sandboxed in the container)
         )
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
     return page

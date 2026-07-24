@@ -9,6 +9,31 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Fixed
+- 2026-07-24: **Browser tools were completely broken — now fixed, durably.**
+  Root cause found via the new level-5 logs: the browser-daemon start command
+  ran `pkill -f '[b]rowserd.py'` in a shell whose own command line contained
+  `python3 /opt/jarvis/browserd.py`, so **pkill killed its own launching shell
+  before the daemon could start** (surfacing as "browser daemon failed to
+  start:" with an empty reason after a 30s hang). Now it frees the port with
+  `fuser -k 9251/tcp` (port-based, can't match a command line), logs the daemon
+  lifecycle, and surfaces the real failure detail instead of an empty string.
+  Verified end-to-end: `browser_goto` + `browser_extract` work again.
+  - **Durability** (answering "will it come back on rebuild?"): Playwright
+    browsers now install to a fixed image path `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`
+    in the workbench Dockerfile instead of `~/.cache` under the `/config`
+    volume (which shadowed them on fresh volumes), and the install **fails the
+    build loudly** if Chromium is missing instead of the old silent `|| true`.
+    `fuser` (psmisc) was already in the Dockerfile, so the fix's dependency is
+    baked in.
+  - **JavaScript** is explicitly enabled in `browserd.py`
+    (`java_script_enabled=True`) for JS-dependent sites — safe given the
+    intentional sandboxed-container/root design.
+- 2026-07-24: **Follow-through guardrail for "says it but doesn't do it."** When
+  the model ends a turn narrating an action ("let me search that…", "I'll run
+  the command…") but emits no tool call, the loop now nudges it to actually call
+  the tool and continues (bounded budget). Matching is deliberately conservative
+  (`ACTION_INTENT_RE` in `llm.js`) so ordinary conversation ("it's going to be
+  great", "let me know") doesn't trip it; triggers are logged at WARN.
 - 2026-07-24: **Workbench desktop can be brought back after opening it in a new
   tab.** The embedded desktop iframe shares the workbench's VNC session; opening
   it in a new tab (or backgrounding the JARVIS tab) left the embedded view frozen

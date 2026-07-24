@@ -390,17 +390,23 @@ async function ensureBrowserd() {
   if (browserdStarting) return browserdStarting;
   browserdStarting = (async () => {
     try { const r = await fetch(BROWSERD_URL, { signal: AbortSignal.timeout(1500) }); if (r.ok) return; } catch (_) {}
+    log.info("browser", "browser daemon not up — starting it in the workbench");
     await writeWorkbenchFile("/opt/jarvis/browserd.py", BROWSERD_PY);
-    // '[b]rowserd' so pkill can't match this very command line and kill its own shell;
-    // setsid + </dev/null so the daemon escapes the exec session's process group and
-    // survives after this shell exits (a plain nohup dies with the docker exec).
-    await runShell("pkill -f '[b]rowserd.py' 2>/dev/null; sleep 0.3; setsid nohup python3 /opt/jarvis/browserd.py > /workspace/.browserd.log 2>&1 < /dev/null & disown; echo started");
+    // Free the port by whatever holds it. IMPORTANT: kill by PORT (fuser), never by
+    // name here — the launching shell's own command line contains "browserd.py", so a
+    // `pkill -f browserd.py` matches and kills THIS shell before the daemon can start
+    // (the historical cause of "browser daemon failed to start" with an empty error).
+    // setsid + </dev/null so the daemon escapes the exec's process group and survives.
+    await runShell("fuser -k 9251/tcp 2>/dev/null; sleep 0.3; setsid nohup python3 /opt/jarvis/browserd.py > /workspace/.browserd.log 2>&1 < /dev/null & disown; echo started");
     for (let i = 0; i < 30; i++) {
       await tsleep(1000);
-      try { const r = await fetch(BROWSERD_URL, { signal: AbortSignal.timeout(1500) }); if (r.ok) return; } catch (_) {}
+      try { const r = await fetch(BROWSERD_URL, { signal: AbortSignal.timeout(1500) }); if (r.ok) { log.info("browser", `browser daemon is up (after ${i + 1}s)`); return; } } catch (_) {}
     }
-    const log = await runShell("tail -5 /workspace/.browserd.log 2>/dev/null");
-    throw new Error("browser daemon failed to start: " + (log.output || "").slice(0, 300));
+    const logTail = await runShell("tail -20 /workspace/.browserd.log 2>/dev/null");
+    const detail = (logTail.output || "").trim() ||
+      "(no daemon output — check that Playwright + Chromium are installed in the workbench and that DISPLAY=:1 is available)";
+    log.error("browser", "browser daemon failed to start", { detail: detail.slice(0, 800) });
+    throw new Error("browser daemon failed to start: " + detail.slice(0, 400));
   })().finally(() => { browserdStarting = null; });
   return browserdStarting;
 }
