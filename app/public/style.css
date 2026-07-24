@@ -221,7 +221,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .note.error { border-left-color: var(--danger); }
 
 #desktop { flex: 1; width: 100%; border: 0; background: #000; }
-.desktop-link { display: block; text-align: center; padding: 8px; color: var(--muted); border-top: 1px solid var(--edge); text-decoration: none; font-size: .8rem; }
+.desktop-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--edge); }
+.desktop-bar #desktop-reload { flex: 0 0 auto; font-size: .78rem; padding: 5px 10px; }
+.desktop-link { flex: 1; display: block; text-align: center; padding: 6px; color: var(--muted); text-decoration: none; font-size: .8rem; }
 .desktop-link:hover { color: var(--accent); }
 
 /* ===== Config tab ===== */

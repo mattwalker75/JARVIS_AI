@@ -8,6 +8,15 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-24: **Workbench desktop can be brought back after opening it in a new
+  tab.** The embedded desktop iframe shares the workbench's VNC session; opening
+  it in a new tab (or backgrounding the JARVIS tab) left the embedded view frozen
+  with no way to reconnect. Added a **"↻ Reconnect here"** button in the
+  Workbench panel, and the desktop now **auto-reconnects** when you switch back to
+  the JARVIS tab with the Workbench panel open. Front-end only (`app/public/`),
+  no restart needed — just refresh.
+
 ### Added
 - 2026-07-24: **Leveled debug logging → `JARVIS_AI/Logs/`.** New `logging.level`
   config flag (0-5), editable from the **Config tab** and applied **live** — no

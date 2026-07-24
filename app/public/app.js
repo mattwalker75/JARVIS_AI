@@ -23,6 +23,22 @@ const activityEl = $("activity"), modelBadge = $("model-badge");
 const micMode = $("mic-mode"), micState = $("mic-state"), selftestBtn = $("selftest-btn");
 const micBtn = $("mic-btn");
 const desktop = $("desktop"), desktopLink = $("desktop-link");
+// Re-establish the embedded desktop connection. Opening the desktop in a new tab (or
+// backgrounding this tab) can leave the iframe's VNC socket frozen; reloading the iframe
+// gets a fresh connection so the desktop works "here" again.
+function reloadDesktop() {
+  if (!cfg || !cfg.workbench_url || !desktop) return;
+  desktop.src = "about:blank";
+  setTimeout(() => { desktop.src = cfg.workbench_url; }, 60);
+}
+const desktopReload = $("desktop-reload");
+if (desktopReload) desktopReload.addEventListener("click", reloadDesktop);
+// When you come back to the JARVIS tab with the Workbench panel open, auto-reconnect —
+// this is exactly the "opened it in a new tab and now the embedded one is dead" case.
+document.addEventListener("visibilitychange", () => {
+  const wb = $("panel-workbench");
+  if (!document.hidden && wb && wb.classList.contains("active")) reloadDesktop();
+});
 
 const history = [];
 // Persist the conversation so a browser refresh doesn't lose it.
