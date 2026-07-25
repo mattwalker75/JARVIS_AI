@@ -9,6 +9,14 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Fixed
+- 2026-07-24: **"Launched an app but it never started" — now verified & honest.**
+  `open_app`/`open_url` used `nohup CMD & ; echo launched`, which reported success
+  even when the app **crashed on startup** (e.g. Chromium exiting because as root it
+  needs `--no-sandbox`) — so the model believed it had started something that never
+  actually came up. Both now launch detached (`setsid`, survives the exec) AND
+  verify the process is still alive ~1.5s later, returning the real startup output
+  and a clear **`FAILED: the app exited immediately…`** with the reason instead of a
+  false "launched". Confirmed against the exact Chromium-sandbox crash from the logs.
 - 2026-07-24: **Browser tools were completely broken — now fixed, durably.**
   Root cause found via the new level-5 logs: the browser-daemon start command
   ran `pkill -f '[b]rowserd.py'` in a shell whose own command line contained

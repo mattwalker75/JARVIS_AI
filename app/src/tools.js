@@ -40,7 +40,7 @@ async function runShell(command, timeoutS) {
       try { info = await exec.inspect(); } catch (_) {}
       const code = info.ExitCode ?? null;
       let output = clipOutput(out.toString("utf8"));
-      if (code === 124 || timedOut) output += `\n[KILLED: command exceeded the ${t}s time limit — pass a larger timeout_s or run it in the background with nohup]`;
+      if (code === 124 || timedOut) output += `\n[KILLED: command exceeded the ${t}s time limit. Pass a larger timeout_s; or to launch a PERSISTENT app/server use the open_app tool, or 'setsid nohup CMD </dev/null >/dev/null 2>&1 &' — a plain 'nohup CMD &' dies when this shell returns]`;
       resolve({ exit_code: code, output });
     };
     // Node-side safety net in case the in-container timeout itself wedges.
@@ -318,13 +318,29 @@ async function scrollWheel(direction, amount = 3) {
   const btn = String(direction).toLowerCase() === "up" ? 4 : 5;
   return runShell(`xdotool click --repeat ${px(amount) || 1} ${btn}`);
 }
+// Launch a GUI/background app on the desktop, DETACHED so it survives run_shell's exec
+// (setsid + </dev/null), and VERIFY it actually started: capture startup output and, if
+// the process died within ~1.5s or printed errors, report that instead of a false
+// "launched". A plain `nohup CMD & ; echo launched` (the old behavior) lies when the app
+// crashes on startup — e.g. Chromium exiting because it needs --no-sandbox as root — so
+// the model believed it started something that never actually came up.
+async function launchDetached(command) {
+  const logf = `/tmp/jarvis-launch-${Date.now()}.log`;
+  const script =
+    `setsid nohup ${command} </dev/null >${logf} 2>&1 & disown; pid=$!; ` +
+    `sleep 1.5; ` +
+    `if kill -0 "$pid" 2>/dev/null; then echo "launched (running, pid $pid)"; ` +
+    `else echo "FAILED: the app exited immediately after launch. Startup output:"; tail -20 ${logf} 2>/dev/null; fi; ` +
+    `if [ -s ${logf} ]; then echo "--- startup output ---"; tail -15 ${logf} 2>/dev/null; fi`;
+  return runShell(script);
+}
 async function openUrl(url) {
   if (!/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
-  return runShell(`nohup chromium --no-sandbox --new-window ${shq(url)} >/dev/null 2>&1 & disown; echo launched`);
+  return launchDetached(`chromium --no-sandbox --new-window ${shq(url)}`);
 }
 async function openApp(command) {
   if (!command) throw new Error("no command");
-  return runShell(`nohup ${command} >/dev/null 2>&1 & disown; echo launched`);
+  return launchDetached(command);
 }
 // Run a SEQUENCE of desktop actions in one tool call (one LLM turn) instead of many.
 // Each step's exit code is checked — the sequence STOPS at the first failure and says
