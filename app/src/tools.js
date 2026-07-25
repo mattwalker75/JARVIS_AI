@@ -78,8 +78,12 @@ function resolveShared(p, mustWrite) {
   catch { try { abs = path.join(fs.realpathSync(path.dirname(abs)), path.basename(abs)); } catch (_) {} }
   const inRo = abs === ro || abs.startsWith(ro + path.sep);
   const inRw = abs === rw || abs.startsWith(rw + path.sep);
-  if (mustWrite && !inRw) throw new Error(`write is only allowed under ${rw}`);
-  if (!inRo && !inRw) throw new Error(`path must be under ${ro} (read-only) or ${rw} (read-write)`);
+  // /workspace is the workbench's persistent build area (the AI works there). It's a
+  // shared volume also mounted into the app, so list_dir/read_file/write_file/analyze_image
+  // can operate on it directly (read + write) instead of only the user-exchange folders.
+  const inWs = abs === "/workspace" || abs.startsWith("/workspace/");
+  if (mustWrite && !inRw && !inWs) throw new Error(`write is only allowed under ${rw} or /workspace`);
+  if (!inRo && !inRw && !inWs) throw new Error(`path must be under ${ro} (read-only), ${rw} (read-write), or /workspace (workbench build area)`);
   return abs;
 }
 
@@ -191,8 +195,26 @@ function isPrivateIp(ip) {
   const s = (ip || "").toLowerCase();
   return s === "::1" || s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd") || s.startsWith("::ffff:127.") || s.startsWith("::ffff:10.") || s.startsWith("::ffff:192.168.");
 }
+// Self-check exception: the model serves preview apps on the WORKBENCH at ports
+// 9101-9150. Allow fetch_url to reach those (so it can inspect the page it just served),
+// and transparently route a natural "localhost:<preview-port>" to the workbench, where the
+// app actually runs. Everything else stays blocked by the SSRF guard.
+const WORKBENCH_HOST = "jarvis-workbench";
+function isPreviewPort(port) { const n = Number(port); return n >= PREVIEW_MIN && n <= PREVIEW_MAX; }
+function routePreviewUrl(url) {
+  try {
+    const u = new URL(url);
+    if (isPreviewPort(u.port) && /^(localhost|127\.0\.0\.1|\[?::1\]?)$/i.test(u.hostname)) {
+      u.hostname = WORKBENCH_HOST;
+      return u.href;
+    }
+  } catch (_) {}
+  return url;
+}
 async function assertPublicUrl(url) {
-  let host; try { host = new URL(url).hostname; } catch { throw new Error("invalid url"); }
+  let u; try { u = new URL(url); } catch { throw new Error("invalid url"); }
+  if (u.hostname === WORKBENCH_HOST && isPreviewPort(u.port)) return; // self-check its own served app
+  const host = u.hostname;
   let ips;
   if (net.isIP(host)) ips = [host];
   else {
@@ -205,6 +227,7 @@ async function assertPublicUrl(url) {
 
 async function fetchUrl(url, opts = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
+  url = routePreviewUrl(url); // localhost:<preview-port> -> the workbench where it's served
   const timeoutMs = Math.min(120, Math.max(2, Number(opts.timeout_s) || 30)) * 1000;
   const reqHeaders = { "User-Agent": "JARVIS/1.0", ...(opts.headers || {}) };
   let body = opts.body;
@@ -219,7 +242,7 @@ async function fetchUrl(url, opts = {}) {
       redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
     });
     if (resp.status >= 300 && resp.status < 400 && resp.headers.get("location")) {
-      current = new URL(resp.headers.get("location"), current).href;
+      current = routePreviewUrl(new URL(resp.headers.get("location"), current).href);
       if (hop === 5) throw new Error("too many redirects");
       continue;
     }

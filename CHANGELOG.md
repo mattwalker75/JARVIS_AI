@@ -8,6 +8,21 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-25: **File tools can now reach the workbench build area.**
+  `list_dir`/`read_file`/`write_file`/`analyze_image` were restricted to the
+  user-exchange folders, so the model couldn't inspect what it built in
+  `/workspace` (7 errors in one session, e.g. `read_file /workspace/doom.html`).
+  The workbench's `/workspace` volume is now also mounted into the app, and the
+  path check allows `/workspace` (read + write). The model can inspect its own
+  work instead of falling back to `run_shell cat`.
+- 2026-07-25: **`fetch_url` can self-check served preview apps.** The SSRF guard
+  blocked the model from fetching `localhost:9101` to check the app it just
+  served. Now `fetch_url` transparently routes `localhost:<9101-9150>` to the
+  workbench (where preview apps actually run) and allows the workbench host on
+  those ports — other private/loopback addresses stay blocked. Verified: a
+  served page fetched back `200`.
+
 ### Added
 - 2026-07-25: **Completion-verification loop — keep working until the job is
   really done.** When the model finishes a turn that used tools and thinks it's
