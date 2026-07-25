@@ -19,6 +19,37 @@ const ACTION_INTENT_RE = /\b(let me|i'?ll|i will|i'?m going to|i am going to|let
 // retry on transient errors; mutating tools never auto-retry to avoid double execution.
 const TRANSIENT = /(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|PROTOCOL_CONNECTION_LOST|ECONNREFUSED|\b(429|50\d)\b|service 5\d\d)/i;
 
+// Some models (e.g. Qwen3 via Ollama) intermittently EMIT A TOOL CALL AS PLAIN TEXT —
+// `<tool_call>run_shell <parameter=command>…</parameter></tool_call>` — instead of through
+// the tool-calls API, because the model's XML-parameter dialect doesn't match the server's
+// JSON tool-call parser. The call then never executes, yet the model believes it did and
+// carries on reporting the work as done ("said it would, but nothing happened"). This parser
+// recovers such calls so the harness can run them for real. Returns {markers, calls}.
+function parseTextToolCalls(content, knownNames) {
+  if (!content || content.indexOf("<tool_call>") === -1) return { markers: false, calls: [] };
+  const calls = [];
+  const blocks = content.split("<tool_call>").slice(1);
+  for (const raw of blocks) {
+    const block = raw.split("</tool_call>")[0];
+    // (a) JSON dialect: <tool_call>{"name":"…","arguments":{…}}</tool_call>
+    const jm = block.match(/\{[\s\S]*\}/);
+    if (jm) {
+      try { const o = JSON.parse(jm[0]); if (o && knownNames.has(o.name)) { calls.push({ name: o.name, args: o.arguments || o.parameters || {} }); continue; } } catch (_) {}
+    }
+    // (b) XML-parameter dialect: name on the first line, then <parameter=key>value</parameter>…
+    const head = (block.split(/[\n<>]/)[0] || "").trim();          // token right after <tool_call>
+    let name = knownNames.has(head) ? head : null;
+    if (!name) for (const k of knownNames) { if (head.startsWith(k)) { name = k; break; } }  // "run_shellcommand" → "run_shell"
+    if (!name) continue;
+    const args = {}; let m;
+    const re = /<parameter=(\w+)>\s*([\s\S]*?)\s*<\/parameter>/g;
+    while ((m = re.exec(block))) args[m[1]] = m[2];
+    if (Object.keys(args).length === 0) continue;                  // too garbled to run safely — leave for the nudge
+    calls.push({ name, args });
+  }
+  return { markers: true, calls };
+}
+
 // Rough USD per 1K tokens [prompt, completion]; used only for a cost estimate in the UI.
 const PRICES = {
   "gpt-4o-mini": [0.00015, 0.0006], "gpt-4o": [0.0025, 0.01],
@@ -99,6 +130,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   let intentNudges = 0;        // follow-through guardrail budget (see ACTION_INTENT_RE)
   let completionChecks = 0;    // "are you REALLY done?" budget
   let workedSinceCheck = false; // did the model call a tool since the last completion check?
+  let leakedFixes = 0;         // budget for salvaging/correcting tool calls emitted as TEXT
   let lastModel = modelFor(tier);
   const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; } };
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
@@ -185,6 +217,39 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     // messages to the front, which (a) defeats a nudge meant to follow the model's reply and
     // (b) can leave two assistant messages adjacent at the end → a 400 from strict backends.
     //
+    // 0) Tool-call-as-text: the model wrote a `<tool_call>…</tool_call>` block in its reply
+    //    instead of calling the tool for real (it never ran). Salvage the parseable ones and
+    //    EXECUTE them so the work actually happens; then tell the model to use the real
+    //    tool-call mechanism from now on. This is a top cause of "said it did it but didn't".
+    if (msg.content && leakedFixes < 6) {
+      const known = new Set(toolset.map((t) => t.function && t.function.name));
+      const { markers, calls } = parseTextToolCalls(msg.content, known);
+      if (markers) {
+        leakedFixes++;
+        if (calls.length) {
+          log.warn("llm", `salvaged ${calls.length} tool call(s) the model wrote as TEXT — executing for real`, { names: calls.map((c) => c.name) });
+          const results = [];
+          for (const c of calls) {
+            if (emit) emit({ type: "tool", tool: c.name, input: c.args });
+            const started = Date.now();
+            let result;
+            try { result = await execWithRetry(c.name, c.args, signal); }
+            catch (e) { result = { error: e.message }; }
+            if (result && result.__image__) { const { __image__, ...rest } = result; result = { note: "screenshot captured", ...rest }; }
+            if (emit) emit({ type: "tool_result", tool: c.name, output: clip(result, 4000), ms: Date.now() - started });
+            results.push(`${c.name}(${JSON.stringify(c.args)}) →\n${clip(result, 4000)}`);
+          }
+          workedSinceCheck = true;
+          convo.push({ role: "user", content: "[system] Your previous reply wrote the tool call(s) as TEXT inside <tool_call> tags — that does NOT execute them. I ran them for you this once; results below. From now on you MUST invoke tools through the real function-call mechanism, never by typing <tool_call> tags in your reply.\n\n" + results.join("\n\n") });
+          continue;
+        }
+        // Markers present but nothing parseable → correct the model and let it retry.
+        log.warn("llm", `model wrote a malformed tool call as text (unparseable) — correcting`, { content: (msg.content || "").slice(0, 200) });
+        convo.push({ role: "user", content: "[system] Your last reply contained a tool call written as TEXT (<tool_call> tags), but it was malformed and did NOT execute — nothing ran. Do not type tool calls as text. Re-issue the action now as a real function/tool call." });
+        continue;
+      }
+    }
+
     // 1) Follow-through: it narrated an action ("let me search…") but didn't take it.
     if (msg.content && intentNudges < 2 && ACTION_INTENT_RE.test(msg.content)) {
       intentNudges++;

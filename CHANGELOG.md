@@ -48,6 +48,18 @@ infrastructure, security, documentation, or test-policy changes.
   premature "I'm done" stops. (`app/src/llm.js`.)
 
 ### Fixed
+- 2026-07-25: **Tool calls written as TEXT now actually run — a top cause of "said it
+  did it but didn't."** The chat model (Qwen3 via Ollama) intermittently emitted a
+  tool call as plain text — `<tool_call>run_shell <parameter=command>…</parameter>`
+  (an XML-parameter dialect the server's JSON tool-call parser doesn't recognize) —
+  so the command never executed, yet the model believed it had and carried on
+  reporting the work as done. In one session **22 of 40** no-tool-call turns were
+  actually leaked calls like this. The loop now detects `<tool_call>` blocks in the
+  reply, **salvages and executes** the parseable ones for real (feeding results
+  back), and **corrects** the model to use the real tool-call mechanism; malformed/
+  unparseable ones get a corrective nudge instead of being silently accepted.
+  Bounded to 6 fixes/turn. Verified against the real malformed strings from the logs
+  (clean, garbled, JSON, and multi-call variants). (`app/src/llm.js`.)
 - 2026-07-25: **Follow-through guardrail no longer 400s.** The nudge was pushed
   as a **system** message, but `oneSystemAtFront` relocates system messages to
   the front — which both defeated the nudge and left two assistant messages
