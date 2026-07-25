@@ -8,7 +8,23 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-25: **Completion-verification loop — keep working until the job is
+  really done.** When the model finishes a turn that used tools and thinks it's
+  done, it's challenged to re-read the original request and confirm EVERY part is
+  actually complete and verified; if not, it continues. It self-terminates when
+  it stops finding new work (re-affirms with no new tool call), bounded by
+  `llm.completion_checks` (default 2, `0` = off; in the Config tab). Catches
+  premature "I'm done" stops. (`app/src/llm.js`.)
+
 ### Fixed
+- 2026-07-25: **Follow-through guardrail no longer 400s.** The nudge was pushed
+  as a **system** message, but `oneSystemAtFront` relocates system messages to
+  the front — which both defeated the nudge and left two assistant messages
+  adjacent at the end → `400: Cannot have 2 or more assistant messages`. All
+  in-loop nudges (follow-through, completion check, repeat-tool guard) are now
+  **user**-role messages, so they stay where they belong and never trigger the
+  400. Verified: a real task fired a completion check with zero 400s.
 - 2026-07-24: **"Launched an app but it never started" — now verified & honest.**
   `open_app`/`open_url` used `nohup CMD & ; echo launched`, which reported success
   even when the app **crashed on startup** (e.g. Chromium exiting because as root it

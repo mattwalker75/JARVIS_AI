@@ -93,9 +93,12 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   }
 
   const maxIter = llm.max_tool_iterations || 8;
+  const maxCompletionChecks = Number.isFinite(Number(llm.completion_checks)) ? Number(llm.completion_checks) : 2;
   const usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
   const fingerprints = [];
-  let intentNudges = 0;   // follow-through guardrail budget (see ACTION_INTENT_RE)
+  let intentNudges = 0;        // follow-through guardrail budget (see ACTION_INTENT_RE)
+  let completionChecks = 0;    // "are you REALLY done?" budget
+  let workedSinceCheck = false; // did the model call a tool since the last completion check?
   let lastModel = modelFor(tier);
   const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; } };
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
@@ -129,6 +132,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     convo.push(msg);
 
     if (msg.tool_calls && msg.tool_calls.length) {
+      workedSinceCheck = true;   // real work happened; a later "done" must be re-verified
       // Run independent tool calls concurrently (results pushed back in order).
       const settled = await Promise.allSettled(msg.tool_calls.map(async (tc) => {
         let args = {};
@@ -171,18 +175,32 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       const fp = msg.tool_calls.map((tc) => tc.function.name + ":" + (tc.function.arguments || "")).sort().join("|");
       fingerprints.push(fp);
       if (fingerprints.filter((f) => f === fp).length >= 3) {
-        convo.push({ role: "system", content: "You have now made the same tool call 3 times without progress. Stop repeating it — try a clearly different approach, or give your best final answer in plain text." });
+        convo.push({ role: "user", content: "[system] You have now made the same tool call 3 times without progress. Stop repeating it — try a clearly different approach, or give your best final answer in plain text." });
       }
       continue; // let the model react to tool results
     }
 
-    // Follow-through guardrail: the model ended the turn with NO tool call. If it clearly
-    // promised a tool action but didn't take it, nudge it to actually act and keep going
-    // (bounded budget so ordinary conversation isn't pestered).
+    // ── Turn ended with NO tool call. Decide: accept the answer, or nudge & keep going. ──
+    // NOTE: nudges are USER-role messages, NOT system. oneSystemAtFront() relocates system
+    // messages to the front, which (a) defeats a nudge meant to follow the model's reply and
+    // (b) can leave two assistant messages adjacent at the end → a 400 from strict backends.
+    //
+    // 1) Follow-through: it narrated an action ("let me search…") but didn't take it.
     if (msg.content && intentNudges < 2 && ACTION_INTENT_RE.test(msg.content)) {
       intentNudges++;
       log.warn("llm", `follow-through nudge #${intentNudges}: promised an action but made no tool call`, { content: (msg.content || "").slice(0, 200) });
-      convo.push({ role: "system", content: "You described an action you were about to take but did not call any tool. If you intended to act (search the web, run a command, open the browser, fetch a page, read/write a file, etc.), CALL THE APPROPRIATE TOOL NOW. If you were only making conversation and no action is needed, briefly give your final answer." });
+      convo.push({ role: "user", content: "[system] You described an action you were about to take but did not call any tool. If you intended to act (search the web, run a command, open the browser, fetch a page, read/write a file, etc.), CALL THE APPROPRIATE TOOL NOW. If you were only making conversation and no action is needed, briefly give your final answer." });
+      continue;
+    }
+
+    // 2) Completion check: if the model DID real work this session and now thinks it's done,
+    //    make it re-verify true completion before we accept. Keep nudging until it stops
+    //    finding work (it re-affirms with no new tool call) or the budget is exhausted.
+    if (msg.content && workedSinceCheck && completionChecks < maxCompletionChecks) {
+      completionChecks++;
+      workedSinceCheck = false;   // require NEW work to justify another completion nudge
+      log.info("llm", `completion check #${completionChecks}: verifying the job is really done`);
+      convo.push({ role: "user", content: "[system] Before you finish: re-read my ORIGINAL request and check that EVERY part is fully DONE and verified — not just described, planned, or partially done, and not something you only said you would do. If ANYTHING is incomplete or unverified, continue now using your tools. Only give your final answer if the job is genuinely 100% complete. Do NOT add work I did not ask for." });
       continue;
     }
 
