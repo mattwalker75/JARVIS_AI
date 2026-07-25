@@ -248,6 +248,20 @@ wss.on("connection", (ws) => {
     if (data.type === "cancel") { if (ws._abort) { try { ws._abort.abort(); } catch (_) {} } return; }
     if (data.type !== "chat") return;
 
+    // "Just stop." — if the user types a bare stop command while something is running,
+    // treat it as an interrupt instead of rejecting it with the "still working" error.
+    // This is the keyboard-free hard stop: it aborts the LLM AND (via the signal now
+    // threaded into tools) kills any in-flight workbench command.
+    if (ws._abort) {
+      const lastMsg = Array.isArray(data.messages) ? data.messages[data.messages.length - 1] : null;
+      const txt = (lastMsg && typeof lastMsg.content === "string" ? lastMsg.content : "").trim();
+      if (/^(stop|stop\s*it|just\s*stop|stop\s*everything|halt|abort|cancel|quit\s*it|nevermind|never\s*mind|enough)[\s.!]*$/i.test(txt)) {
+        try { ws._abort.abort(); } catch (_) {}
+        try { ws.send(JSON.stringify({ type: "reply", text: "⏹ Stopping everything." })); } catch (_) {}
+        return;
+      }
+    }
+
     const all = Array.isArray(data.messages)
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       : [];

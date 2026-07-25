@@ -1,6 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input"), stopBtn = $("stop");
+const statusEl = $("jarvis-status");   // always-visible working/idle pill in the header
 
 // Auto-scroll only when the user is already at the bottom. If they scroll up to read
 // while the AI is streaming, stop yanking them back down; re-engage when they return.
@@ -66,6 +67,21 @@ function updateSessUsage() {
 }
 function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
+let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
+const STALL_MS = 25000;                                        // no streamed progress for this long ⇒ "seems stuck"
+// Update the always-visible header pill. state: "idle" | "working" | "stalled".
+function setStatus(state, text) {
+  if (!statusEl) return;
+  statusEl.className = "jstatus " + state;
+  const t = statusEl.querySelector(".jstext");
+  if (t) t.textContent = text || (state === "idle" ? "Idle" : state === "stalled" ? "Stalled?" : "Working");
+}
+// Any streamed progress event resets the stall clock and confirms JARVIS is alive.
+function markActivity() {
+  lastActivityAt = Date.now();
+  if (stalled) { stalled = false; if (workingEl) { const b = workingEl.querySelector(".bubble"); if (b) b.classList.remove("stalled"); } }
+  if (workingEl) setStatus("working", "Working");
+}
 let streamBubble = null, streamText = "";   // the assistant bubble being streamed into
 let streamThink = null;                      // the <pre> of the live "Thinking" panel, if any
 let ttsSpokenLen = 0;                        // chars of the current reply already sent to TTS
@@ -215,15 +231,24 @@ function showWorking(label) {
     w.innerHTML = '<div class="bubble working"><span class="dots"><span></span><span></span><span></span></span>' +
       '<span class="wlabel"></span><span class="wtime"></span></div>';
     messagesEl.appendChild(w);
-    workingEl = w; workingStart = Date.now();
+    workingEl = w; workingStart = Date.now(); lastActivityAt = Date.now(); stalled = false;
     workingTimer = setInterval(() => {
-      const t = workingEl && workingEl.querySelector(".wtime");
+      if (!workingEl) return;
+      const t = workingEl.querySelector(".wtime");
       if (t) t.textContent = Math.round((Date.now() - workingStart) / 1000) + "s";
+      // Stall detection: no streamed progress for STALL_MS ⇒ warn it may be stuck (Esc to stop).
+      if (!stalled && Date.now() - lastActivityAt > STALL_MS) {
+        stalled = true;
+        const b = workingEl.querySelector(".bubble"); if (b) b.classList.add("stalled");
+        const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = "still working — model is slow (press Esc to stop)";
+        setStatus("stalled", "Stalled?");
+      }
     }, 1000);
   }
   if (label != null) { const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = label; }
   messagesEl.appendChild(workingEl);                 // keep it pinned to the bottom
   if (stopBtn) stopBtn.hidden = false;
+  setStatus("working", "Working");
   scrollDown();
 }
 function labelWorking(text) {
@@ -235,6 +260,8 @@ function hideWorking() {
   if (workingTimer) { clearInterval(workingTimer); workingTimer = null; }
   if (workingEl) { workingEl.remove(); workingEl = null; }
   if (stopBtn) stopBtn.hidden = true;
+  stalled = false;
+  setStatus("idle", "Idle");
   if (!ambSpeaking) amb(ambIdle());   // done thinking; orb rests (or listens)
 }
 // Ask the server to abort the in-flight request (Stop button or Escape key).
@@ -264,6 +291,8 @@ function connectWS() {
   ws.onerror = () => { try { ws.close(); } catch (_) {} };   // let onclose drive the reconnect
   ws.onmessage = (ev) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
+    // Any of these events means the model is actively producing output — reset the stall clock.
+    if (["tool", "tool_result", "usage", "reasoning", "token"].includes(d.type)) markActivity();
     if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
     else if (d.type === "tool_result") { addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
     else if (d.type === "usage") {

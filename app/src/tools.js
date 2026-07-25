@@ -19,37 +19,70 @@ function clipOutput(s, headMax = 12000, tailMax = 8000) {
 }
 
 // --- run_shell: root command in the workbench container ---
-async function runShell(command, timeoutS) {
+let shellNonceSeq = 0;
+async function runShell(command, timeoutS, signal) {
   const name = (config.workbench && config.workbench.container) || "jarvis-workbench";
   const container = docker.getContainer(name);
   // Enforce a hard time limit INSIDE the container so an interactive prompt or a
   // foreground server can't hang the whole turn forever (`timeout` sends TERM, then KILL).
   const t = Math.min(600, Math.max(1, Number(timeoutS) || 120));
+  if (signal && signal.aborted) return { exit_code: null, output: "[STOPPED before start]" };
+  // Tag the command with a unique nonce (as a trailing comment — doesn't affect the exit
+  // code) so a hard Stop can find and kill THIS command's process group from inside the
+  // container's PID namespace. We can't use the exec's host-side PID: `kill` runs inside
+  // the container, where that number means a different (or no) process.
+  const nonce = "Q" + Date.now().toString(36) + (shellNonceSeq++).toString(36);
+  const noncePat = "[Q]" + nonce.slice(1);  // bracket the 1st char so our own pkill never self-matches
+  const tagged = `${command}\n# ${nonce}`;
   const exec = await container.exec({
-    Cmd: ["timeout", "-k", "5", String(t), "bash", "-lc", command], AttachStdout: true, AttachStderr: true, User: "0",
+    Cmd: ["timeout", "-k", "5", String(t), "bash", "-lc", tagged], AttachStdout: true, AttachStderr: true, User: "0",
     Env: ["DISPLAY=:1"], // so GUI commands target the watchable desktop
     WorkingDir: "/workspace", // persistent project dir (survives rebuilds)
   });
   const stream = await exec.start({ hijack: true, stdin: false });
   return await new Promise((resolve, reject) => {
-    let out = Buffer.alloc(0), settled = false;
+    let out = Buffer.alloc(0), settled = false, stopped = false;
     const finish = async (timedOut) => {
       if (settled) return; settled = true;
       clearTimeout(guard);
+      if (signal) try { signal.removeEventListener("abort", onAbort); } catch (_) {}
       let info = {};
       try { info = await exec.inspect(); } catch (_) {}
       const code = info.ExitCode ?? null;
       let output = clipOutput(out.toString("utf8"));
-      if (code === 124 || timedOut) output += `\n[KILLED: command exceeded the ${t}s time limit. Pass a larger timeout_s; or to launch a PERSISTENT app/server use the open_app tool, or 'setsid nohup CMD </dev/null >/dev/null 2>&1 &' — a plain 'nohup CMD &' dies when this shell returns]`;
+      if (stopped) output += `\n[STOPPED by user — the workbench command was killed]`;
+      else if (code === 124 || timedOut) output += `\n[KILLED: command exceeded the ${t}s time limit. Pass a larger timeout_s; or to launch a PERSISTENT app/server use the open_app tool, or 'setsid nohup CMD </dev/null >/dev/null 2>&1 &' — a plain 'nohup CMD &' dies when this shell returns]`;
       resolve({ exit_code: code, output });
     };
+    // Hard stop: when the user hits Stop mid-command, kill the whole process group of THIS
+    // command (timeout → bash → the actual program) so a long build or hung server dies
+    // immediately instead of running to its timeout. Runs inside the workbench (correct PID
+    // namespace); the kill exec's stream MUST be drained or Docker never runs it.
+    const onAbort = async () => {
+      if (settled || stopped) return; stopped = true;
+      try {
+        const killScript =
+          `p=$(pgrep -f '${noncePat}' | head -1); ` +
+          `if [ -n "$p" ]; then g=$(ps -o pgid= -p "$p" | tr -d ' '); ` +
+          `[ -n "$g" ] && kill -TERM -"$g" 2>/dev/null; sleep 0.3; [ -n "$g" ] && kill -KILL -"$g" 2>/dev/null; fi; true`;
+        const k = await container.exec({ Cmd: ["bash", "-lc", killScript], AttachStdout: true, AttachStderr: true, User: "0" });
+        const ks = await k.start({ hijack: true, stdin: false });
+        await new Promise((res) => {
+          try { container.modem.demuxStream(ks, { write() {} }, { write() {} }); } catch (_) {}
+          ks.on("end", res); ks.on("close", res); ks.on("error", res);
+        });
+      } catch (_) {}
+      try { stream.destroy(); } catch (_) {}
+      finish(false);
+    };
+    if (signal) { if (signal.aborted) { onAbort(); } else signal.addEventListener("abort", onAbort, { once: true }); }
     // Node-side safety net in case the in-container timeout itself wedges.
     const guard = setTimeout(() => { try { stream.destroy(); } catch (_) {} finish(true); }, (t + 15) * 1000);
     const sink = { write: (c) => { out = Buffer.concat([out, c]); } };
     container.modem.demuxStream(stream, sink, sink);
     stream.on("end", () => finish(false));
     stream.on("close", () => finish(false));
-    stream.on("error", (e) => { if (!settled) { settled = true; clearTimeout(guard); reject(e); } });
+    stream.on("error", (e) => { if (!settled) { settled = true; clearTimeout(guard); if (signal) try { signal.removeEventListener("abort", onAbort); } catch (_) {} if (stopped) return resolve({ exit_code: null, output: clipOutput(out.toString("utf8")) + "\n[STOPPED by user]" }); reject(e); } });
   });
 }
 
@@ -733,12 +766,12 @@ function audit(name, args, status, ms) {
   } catch (_) {}
 }
 
-async function execTool(name, args) {
+async function execTool(name, args, signal) {
   const started = Date.now();
   log.info("tool", `call ${name}`);
   log.verbose("tool", `call ${name}`, { args });
   try {
-    const result = await _execTool(name, args);
+    const result = await _execTool(name, args, signal);
     const ms = Date.now() - started;
     audit(name, args, "ok", ms);
     log.verbose("tool", `ok ${name} (${ms}ms)`, { result });
@@ -751,14 +784,14 @@ async function execTool(name, args) {
   }
 }
 
-async function _execTool(name, args) {
+async function _execTool(name, args, signal) {
   switch (name) {
     case "add_memory": return await addMemory(args.text, args.metadata);
     case "search_memory": return await searchMemory(args.query, args.limit);
     case "list_memories": return await listMemories();
     case "delete_memory": return await deleteMemory(args.id);
     case "update_memory": return await updateMemory(args.id, args.text);
-    case "run_shell": return await runShell(args.command, args.timeout_s);
+    case "run_shell": return await runShell(args.command, args.timeout_s, signal);
     case "write_workbench_file": return await writeWorkbenchFile(args.path, args.content);
     case "serve_app": return await serveApp(args.command, args.port, args.cwd);
     case "list_dir": return await listDir(args.path);

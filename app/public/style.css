@@ -19,6 +19,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .arc { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--accent); box-shadow: 0 0 14px var(--accent); animation: pulse 2.4s infinite; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 8px var(--accent); } 50% { box-shadow: 0 0 18px var(--accent); } }
 .title { font-weight: 800; letter-spacing: 2px; }
+.titlerow { display: flex; align-items: center; gap: 10px; }
+/* Always-visible working/idle status pill — so you never have to guess whether JARVIS
+   is busy. Green dot = idle, amber pulsing = working, red pulsing = seems stalled. */
+.jstatus { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 11px;
+  font-size: .62rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  border: 1px solid var(--edge); background: rgba(255,255,255,.03); color: var(--muted); }
+.jstatus .jdot { width: 8px; height: 8px; border-radius: 50%; background: #3ad07a; box-shadow: 0 0 6px #3ad07a; }
+.jstatus.idle { color: #3ad07a; border-color: rgba(58,208,122,.4); }
+.jstatus.working { color: #ffb03a; border-color: rgba(255,176,58,.45); }
+.jstatus.working .jdot { background: #ffb03a; box-shadow: 0 0 6px #ffb03a; animation: jstatpulse 1s infinite; }
+.jstatus.stalled { color: var(--danger); border-color: rgba(255,90,90,.5); }
+.jstatus.stalled .jdot { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: jstatpulse .6s infinite; }
+@keyframes jstatpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.bubble.working.stalled { color: var(--danger); }
+.bubble.working.stalled .dots span { background: var(--danger); }
+@media (prefers-reduced-motion: reduce) { .jstatus .jdot { animation: none !important; } }
 .model { font-size: .75rem; color: var(--muted); }
 .usage { font-size: .68rem; color: var(--muted); opacity: .75; }
 .controls { display: flex; align-items: center; gap: 12px; }

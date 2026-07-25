@@ -24,6 +24,21 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-25: **Working/idle status — you never have to guess if JARVIS is busy.**
+  An always-visible pill in the header shows **Idle** (green), **Working** (amber,
+  pulsing dot), or **Stalled?** (red) driven by the streamed turn/tool events. A
+  stall detector flips the working indicator to a red "still working — model is
+  slow (press Esc to stop)" warning when no progress streams for 25s, so a slow
+  model no longer looks like an idle one. (`app/public/{index.html,app.js,style.css}`.)
+- 2026-07-25: **Hard stop — "just stop, I don't care what you're doing."** Stop
+  (button / Esc) now aborts the LLM **and** kills any in-flight workbench command:
+  the abort signal is threaded through `execTool` into `run_shell`, which kills
+  the command's whole process group inside the container (namespace-correct — a
+  long build or hung server dies immediately instead of running to its timeout).
+  Typing a bare "stop" / "just stop" / "cancel" while it's busy now interrupts
+  instead of being rejected with "I'm still working…". Verified: an aborted
+  `sleep 60` leaves no surviving processes; normal commands keep their exit code.
+  (`app/server.js`, `app/src/llm.js`, `app/src/tools.js`.)
 - 2026-07-25: **Completion-verification loop — keep working until the job is
   really done.** When the model finishes a turn that used tools and thinks it's
   done, it's challenged to re-read the original request and confirm EVERY part is

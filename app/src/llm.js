@@ -140,7 +140,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
         if (emit) emit({ type: "tool", tool: tc.function.name, input: args });
         const started = Date.now();
         let result;
-        try { result = await execWithRetry(tc.function.name, args); }
+        try { result = await execWithRetry(tc.function.name, args, signal); }
         catch (e) { result = { error: e.message }; }
         let summarized = result;
         if (result && result.__image__) {
@@ -221,13 +221,15 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
 }
 
 // Execute a tool, retrying read-only/idempotent ones on transient errors.
-async function execWithRetry(name, args) {
+async function execWithRetry(name, args, signal) {
   const tries = tools.isRetryable(name) ? 3 : 1;
   let lastErr;
   for (let a = 0; a < tries; a++) {
-    try { return await tools.execTool(name, args); }
+    if (signal && signal.aborted) throw new Error("stopped");   // don't start/retry a tool after Stop
+    try { return await tools.execTool(name, args, signal); }
     catch (e) {
       lastErr = e;
+      if (signal && signal.aborted) throw e;                    // Stop pressed mid-tool — don't retry
       if (a === tries - 1 || !TRANSIENT.test(e.message || "")) throw e;
       await sleep(Math.min(8000, 400 * 2 ** a) + Math.random() * 300);
     }
