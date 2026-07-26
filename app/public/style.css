@@ -98,25 +98,21 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .layout.resizing { transition: none; }                      /* no lag while dragging the grip */
 .layout.drawer-collapsed { grid-template-columns: minmax(0, 1fr) 0px; }
 .layout.drawer-collapsed .side { overflow: hidden; }
-.layout.drawer-collapsed .drawer-grip { display: none; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
 
-/* Resizable / collapsible side drawer */
-.drawer-grip { position: absolute; left: 0; top: 0; bottom: 0; width: 9px; margin-left: -5px; z-index: 6; cursor: col-resize; }
-.drawer-grip::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--edge); transition: background .15s, box-shadow .15s; }
-.drawer-grip:hover::after, .drawer-grip.dragging::after { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-.drawer-collapse { flex: 0 0 auto; background: transparent; border: 1px solid transparent; color: var(--muted); padding: 8px 10px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 1rem; line-height: 1; }
-.drawer-collapse:hover { color: var(--text); }
-/* Right-edge handle: the ONLY thing visible when the drawer is closed — grab it and drag
-   left to open (or click to open to the last width). */
-.drawer-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 20px; z-index: 7; cursor: w-resize;
-  display: none; align-items: center; justify-content: flex-end; }
-.layout.drawer-collapsed .drawer-handle { display: flex; }
-.drawer-handle::before { content: "‹"; display: flex; align-items: center; justify-content: center;
+/* One drag-handle, always attached to the drawer's left edge — it slides in/out WITH the
+   drawer. Click it to open/close; drag it to resize (drag to the far right to close, or from
+   the screen edge to the left to open). The chevron flips to show the direction. */
+.drawer-handle { position: absolute; top: 0; bottom: 0; right: var(--drawer-w); width: 18px; z-index: 7; cursor: col-resize;
+  display: flex; align-items: center; justify-content: center; transition: right .18s ease; }
+.layout.drawer-collapsed .drawer-handle { right: 0; }
+.layout.resizing .drawer-handle { transition: none; }
+.drawer-handle::before { content: "\203A"; display: flex; align-items: center; justify-content: center;
   width: 16px; height: 66px; border-radius: 9px 0 0 9px;
   background: var(--panel); border: 1px solid var(--edge); border-right: none;
   color: var(--accent); font-size: 1.15rem; font-weight: 800; line-height: 1;
   transition: box-shadow .15s, border-color .15s, background .15s; }
+.layout.drawer-collapsed .drawer-handle::before { content: "\2039"; }
 .drawer-handle:hover::before { border-color: var(--accent); background: rgba(54,211,255,.10); box-shadow: -3px 0 14px rgba(54,211,255,.4); }
 .drawer-handle .dot { position: absolute; top: calc(50% - 40px); right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: jstatpulse 1s infinite; }
 /* mode toggles: watchdog (accent when on) + plan (amber when on) */

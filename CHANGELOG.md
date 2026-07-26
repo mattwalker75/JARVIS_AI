@@ -112,11 +112,12 @@ infrastructure, security, documentation, or test-policy changes.
   Added a global `[hidden] { display: none !important; }` guard. (`app/public/style.css`.)
 
 ### Changed
-- 2026-07-26: **Side panel is now a pure drag-handle drawer.** Removed the header "▥ Panel"
-  button; the drawer is opened by a grab handle on the right edge of the screen (click to
-  open to the last width, or drag left to open and size it) and closed with the in-panel »
-  chevron or by dragging the grip. The "work happening while closed" badge moved to the
-  handle. (`app/public/{index.html,app.js,style.css}`.)
+- 2026-07-26: **Side panel is now a single attached drag-handle drawer.** Removed the header
+  "▥ Panel" button, the separate resize grip, and the » collapse chevron. One handle stays
+  attached to the drawer's left edge and slides in/out with it: **click** to open/close
+  (chevron flips ‹/›), **drag** to resize (drag it to the far right edge to close, or pull it
+  out from the edge to open). Width + open state persist; the "work happening while closed"
+  badge sits on the handle. (`app/public/{index.html,app.js,style.css}`.)
 - 2026-07-26: **Header controls wrap** instead of overflowing — as the window narrows, the
   toolbar buttons flow onto additional rows so they stay on screen. (`app/public/style.css`.)
 - 2026-07-26: **Removed the "System self-test" button** from the UI (it's a CLI/`curl`

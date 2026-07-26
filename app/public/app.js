@@ -679,9 +679,9 @@ function renderAutopilot(st) {
 // grip to cycle preset sizes (peek / half / full). Width + open state persist.
 const drawer = (() => {
   const layout = document.querySelector(".layout");
-  const grip = $("drawer-grip"), collapseBtn = $("drawer-collapse"), handle = $("drawer-handle"), dot = $("drawer-dot");
-  if (!layout || !grip) return null;
-  const MIN = 300, LSW = "jarvis.drawer.w", LSO = "jarvis.drawer.open";
+  const handle = $("drawer-handle"), dot = $("drawer-dot");
+  if (!layout || !handle) return null;
+  const MIN = 300, CLOSE_AT = 190, LSW = "jarvis.drawer.w", LSO = "jarvis.drawer.open";
   const maxW = () => Math.round(window.innerWidth * 0.72);
   const clamp = (w) => Math.max(MIN, Math.min(maxW(), Math.round(w)));
   let width = clamp(parseInt(localStorage.getItem(LSW) || "480", 10) || 480);
@@ -693,44 +693,29 @@ const drawer = (() => {
   }
   function setWidth(w, save) { width = clamp(w); if (save) localStorage.setItem(LSW, String(width)); apply(); }
   function setOpen(o) { open = !!o; localStorage.setItem(LSO, open ? "1" : "0"); apply(); }
-  // Live-resize drag (drawer is the RIGHT column, so width grows as the cursor moves left).
-  // Shared by the left grip (resize while open) and the right-edge handle (drag to open).
-  function beginResize() {
-    grip.classList.add("dragging"); layout.classList.add("resizing");
-    document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
-    const move = (ev) => setWidth(window.innerWidth - ev.clientX, false);
-    const up = () => {
-      grip.classList.remove("dragging"); layout.classList.remove("resizing");
-      document.body.style.userSelect = ""; document.body.style.cursor = "";
-      localStorage.setItem(LSW, String(width));
-      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
-  }
-  grip.addEventListener("mousedown", (e) => { if (!open) return; e.preventDefault(); beginResize(); });
-  // Double-click the grip: cycle peek → half → full.
-  grip.addEventListener("dblclick", () => {
-    const detents = [340, Math.round(window.innerWidth * 0.42), Math.min(maxW(), 640)].map(clamp);
-    setWidth(detents.find((d) => d > width + 8) || detents[0], true);
-  });
-  // Right-edge handle: drag LEFT to open + size the drawer; a plain click opens to last width.
-  if (handle) handle.addEventListener("mousedown", (e) => {
+  // The handle stays attached to the drawer's left edge. Click = toggle open/close.
+  // Drag = live resize; drag past the right edge closes it, drag out from the edge opens it.
+  handle.addEventListener("mousedown", (e) => {
     e.preventDefault();
-    const startX = e.clientX; let dragged = false;
+    const startX = e.clientX; let moved = false;
+    layout.classList.add("resizing");
+    document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
     const move = (ev) => {
-      if (!dragged && Math.abs(ev.clientX - startX) > 4) {   // it's a drag → open and hand off to live-resize
-        dragged = true;
-        window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
-        setOpen(true); setWidth(window.innerWidth - ev.clientX, false); beginResize();
-      }
+      if (!moved && Math.abs(ev.clientX - startX) > 4) moved = true;
+      if (!moved) return;
+      const raw = window.innerWidth - ev.clientX;   // desired drawer width under the cursor
+      if (raw < CLOSE_AT) { if (open) setOpen(false); }
+      else { if (!open) setOpen(true); setWidth(raw, false); }
     };
-    const up = () => {   // no drag → treat as a click: just open
+    const up = () => {
+      layout.classList.remove("resizing");
+      document.body.style.userSelect = ""; document.body.style.cursor = "";
       window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
-      if (!dragged) setOpen(true);
+      if (!moved) setOpen(!open);                       // click → toggle
+      else if (open) localStorage.setItem(LSW, String(width));   // persist the dragged width
     };
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
   });
-  if (collapseBtn) collapseBtn.addEventListener("click", () => setOpen(false));
   window.addEventListener("resize", () => setWidth(width, false));   // keep within new bounds
   apply();
   return {
