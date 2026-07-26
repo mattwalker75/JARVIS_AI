@@ -27,7 +27,7 @@ messagesEl.addEventListener("click", (e) => {
     .then(() => { btn.textContent = "✓"; setTimeout(() => (btn.textContent = "⧉"), 1200); }).catch(() => {});
 });
 const activityEl = $("activity"), modelBadge = $("model-badge");
-const micMode = $("mic-mode"), micState = $("mic-state"), selftestBtn = $("selftest-btn");
+const micMode = $("mic-mode"), micState = $("mic-state");
 const micBtn = $("mic-btn");
 const desktop = $("desktop"), desktopLink = $("desktop-link");
 // Re-establish the embedded desktop connection. Opening the desktop in a new tab (or
@@ -562,11 +562,6 @@ document.addEventListener("keydown", (e) => {
   else if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); inputEl.focus(); }
 });
 
-selftestBtn.addEventListener("click", async () => {
-  addActivity("selftest", "running…");
-  try { const r = await fetch("/api/selftest"); addActivity("selftest →", undefined, await r.json()); }
-  catch (e) { addActivity("selftest →", undefined, { error: String(e) }); }
-});
 
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
   document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
@@ -684,7 +679,7 @@ function renderAutopilot(st) {
 // grip to cycle preset sizes (peek / half / full). Width + open state persist.
 const drawer = (() => {
   const layout = document.querySelector(".layout");
-  const grip = $("drawer-grip"), toggleBtn = $("drawer-toggle"), collapseBtn = $("drawer-collapse"), dot = $("drawer-dot");
+  const grip = $("drawer-grip"), collapseBtn = $("drawer-collapse"), handle = $("drawer-handle"), dot = $("drawer-dot");
   if (!layout || !grip) return null;
   const MIN = 300, LSW = "jarvis.drawer.w", LSO = "jarvis.drawer.open";
   const maxW = () => Math.round(window.innerWidth * 0.72);
@@ -694,14 +689,13 @@ const drawer = (() => {
   function apply() {
     layout.style.setProperty("--drawer-w", width + "px");
     layout.classList.toggle("drawer-collapsed", !open);
-    if (toggleBtn) toggleBtn.classList.toggle("open", open);
     if (open && dot) dot.hidden = true;   // opening clears the "activity while hidden" badge
   }
   function setWidth(w, save) { width = clamp(w); if (save) localStorage.setItem(LSW, String(width)); apply(); }
   function setOpen(o) { open = !!o; localStorage.setItem(LSO, open ? "1" : "0"); apply(); }
-  // Drag to resize (drawer is the RIGHT column, so width grows as the cursor moves left).
-  grip.addEventListener("mousedown", (e) => {
-    if (!open) return; e.preventDefault();
+  // Live-resize drag (drawer is the RIGHT column, so width grows as the cursor moves left).
+  // Shared by the left grip (resize while open) and the right-edge handle (drag to open).
+  function beginResize() {
     grip.classList.add("dragging"); layout.classList.add("resizing");
     document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
     const move = (ev) => setWidth(window.innerWidth - ev.clientX, false);
@@ -712,14 +706,30 @@ const drawer = (() => {
       window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
     };
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
-  });
+  }
+  grip.addEventListener("mousedown", (e) => { if (!open) return; e.preventDefault(); beginResize(); });
   // Double-click the grip: cycle peek → half → full.
   grip.addEventListener("dblclick", () => {
     const detents = [340, Math.round(window.innerWidth * 0.42), Math.min(maxW(), 640)].map(clamp);
-    const next = detents.find((d) => d > width + 8) || detents[0];
-    setWidth(next, true);
+    setWidth(detents.find((d) => d > width + 8) || detents[0], true);
   });
-  if (toggleBtn) toggleBtn.addEventListener("click", () => setOpen(!open));
+  // Right-edge handle: drag LEFT to open + size the drawer; a plain click opens to last width.
+  if (handle) handle.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const startX = e.clientX; let dragged = false;
+    const move = (ev) => {
+      if (!dragged && Math.abs(ev.clientX - startX) > 4) {   // it's a drag → open and hand off to live-resize
+        dragged = true;
+        window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+        setOpen(true); setWidth(window.innerWidth - ev.clientX, false); beginResize();
+      }
+    };
+    const up = () => {   // no drag → treat as a click: just open
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      if (!dragged) setOpen(true);
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  });
   if (collapseBtn) collapseBtn.addEventListener("click", () => setOpen(false));
   window.addEventListener("resize", () => setWidth(width, false));   // keep within new bounds
   apply();
@@ -727,7 +737,7 @@ const drawer = (() => {
     isOpen: () => open,
     open: () => setOpen(true),
     toggle: () => setOpen(!open),
-    notifyActivity: () => { if (!open && dot) dot.hidden = false; },   // badge when work happens while closed
+    notifyActivity: () => { if (!open && dot) dot.hidden = false; },   // badge the handle when work happens while closed
   };
 })();
 

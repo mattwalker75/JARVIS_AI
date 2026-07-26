@@ -14,7 +14,10 @@
 html, body { height: 100%; margin: 0; }
 body { font-family: var(--font); background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; }
 
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--edge); }
+/* Ensure the HTML `hidden` attribute always wins, even over class rules that set display
+   (e.g. .autopilot-bar{display:flex}) — otherwise a "hidden" bar renders anyway. */
+[hidden] { display: none !important; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--edge); }
 .brand { display: flex; align-items: center; gap: 12px; }
 .arc { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--accent); box-shadow: 0 0 14px var(--accent); animation: pulse 2.4s infinite; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 8px var(--accent); } 50% { box-shadow: 0 0 18px var(--accent); } }
@@ -37,7 +40,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 @media (prefers-reduced-motion: reduce) { .jstatus .jdot { animation: none !important; } }
 .model { font-size: .75rem; color: var(--muted); }
 .usage { font-size: .68rem; color: var(--muted); opacity: .75; }
-.controls { display: flex; align-items: center; gap: 12px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .mic { font-size: .78rem; color: var(--muted); min-width: 78px; text-align: right; }
 .ctl-ic { font-size: 1.05rem; line-height: 1; cursor: default; }
 .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
@@ -91,7 +94,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .switch input:checked + .slider:before { transform: translateX(22px); }
 
 :root { --drawer-w: 480px; }
-.layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--drawer-w); gap: 0; min-height: 0; transition: grid-template-columns .18s ease; }
+.layout { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--drawer-w); gap: 0; min-height: 0; transition: grid-template-columns .18s ease; }
 .layout.resizing { transition: none; }                      /* no lag while dragging the grip */
 .layout.drawer-collapsed { grid-template-columns: minmax(0, 1fr) 0px; }
 .layout.drawer-collapsed .side { overflow: hidden; }
@@ -104,9 +107,18 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .drawer-grip:hover::after, .drawer-grip.dragging::after { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
 .drawer-collapse { flex: 0 0 auto; background: transparent; border: 1px solid transparent; color: var(--muted); padding: 8px 10px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 1rem; line-height: 1; }
 .drawer-collapse:hover { color: var(--text); }
-.drawer-toggle { position: relative; }
-.drawer-toggle .dot { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: jstatpulse 1s infinite; }
-.drawer-toggle.open { color: var(--accent); border-color: var(--accent); }
+/* Right-edge handle: the ONLY thing visible when the drawer is closed — grab it and drag
+   left to open (or click to open to the last width). */
+.drawer-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 20px; z-index: 7; cursor: w-resize;
+  display: none; align-items: center; justify-content: flex-end; }
+.layout.drawer-collapsed .drawer-handle { display: flex; }
+.drawer-handle::before { content: "‹"; display: flex; align-items: center; justify-content: center;
+  width: 16px; height: 66px; border-radius: 9px 0 0 9px;
+  background: var(--panel); border: 1px solid var(--edge); border-right: none;
+  color: var(--accent); font-size: 1.15rem; font-weight: 800; line-height: 1;
+  transition: box-shadow .15s, border-color .15s, background .15s; }
+.drawer-handle:hover::before { border-color: var(--accent); background: rgba(54,211,255,.10); box-shadow: -3px 0 14px rgba(54,211,255,.4); }
+.drawer-handle .dot { position: absolute; top: calc(50% - 40px); right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: jstatpulse 1s infinite; }
 /* mode toggles: watchdog (accent when on) + plan (amber when on) */
 .mode-toggle { position: relative; }
 #watchdog-toggle.mode-on { color: var(--accent); border-color: var(--accent); }

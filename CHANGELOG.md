@@ -106,6 +106,24 @@ infrastructure, security, documentation, or test-policy changes.
   premature "I'm done" stops. (`app/src/llm.js`.)
 
 ### Fixed
+- 2026-07-26: **Phantom "RUNNING" Autopilot bar on an idle app.** The `.autopilot-bar`
+  CSS set `display:flex`, which (author > UA cascade) overrode the HTML `hidden`
+  attribute, so the bar rendered with its default "running" text even with no run active.
+  Added a global `[hidden] { display: none !important; }` guard. (`app/public/style.css`.)
+
+### Changed
+- 2026-07-26: **Side panel is now a pure drag-handle drawer.** Removed the header "▥ Panel"
+  button; the drawer is opened by a grab handle on the right edge of the screen (click to
+  open to the last width, or drag left to open and size it) and closed with the in-panel »
+  chevron or by dragging the grip. The "work happening while closed" badge moved to the
+  handle. (`app/public/{index.html,app.js,style.css}`.)
+- 2026-07-26: **Header controls wrap** instead of overflowing — as the window narrows, the
+  toolbar buttons flow onto additional rows so they stay on screen. (`app/public/style.css`.)
+- 2026-07-26: **Removed the "System self-test" button** from the UI (it's a CLI/`curl`
+  concern); the `GET /api/selftest` endpoint stays for command-line use.
+  (`app/public/{index.html,app.js}`.)
+
+### Fixed
 - 2026-07-25: **Tool calls written as TEXT now actually run — a top cause of "said it
   did it but didn't."** The chat model (Qwen3 via Ollama) intermittently emitted a
   tool call as plain text — `<tool_call>run_shell <parameter=command>…</parameter>`
