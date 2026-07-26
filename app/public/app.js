@@ -338,6 +338,8 @@ function connectWS() {
       addRetry();
     } else if (d.type === "plan") {
       renderPlan(d.plan);
+    } else if (d.type === "autopilot") {
+      renderAutopilot(d.status);
     } else if (d.type === "notification") {
       showNotification(d.note);
     } else if (d.type === "task_run") {
@@ -612,6 +614,47 @@ function renderPlan(plan) {
     try { await fetch("/api/plan", { method: "DELETE" }); } catch (_) {}
     banner.hidden = true;
   });
+})();
+
+// --- Autopilot: launch + live status bar -------------------------------------
+let apTick = null;
+function fmtLeft(s) { s = Math.max(0, s | 0); const m = Math.floor(s / 60), ss = s % 60; return m > 0 ? `${m}m ${ss}s` : `${ss}s`; }
+function renderAutopilot(st) {
+  const bar = $("autopilot-bar"); if (!bar) return;
+  if (!st || !st.active) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
+  bar.hidden = false;
+  bar.classList.toggle("paused", st.status === "stopping");
+  const state = $("ap-state"); if (state) state.textContent = st.status === "stopping" ? "stopping…" : "running";
+  const obj = $("ap-barobj"); if (obj) { obj.textContent = st.objective || ""; obj.title = st.objective || ""; }
+  let secs = Number(st.seconds_left) || 0;
+  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)} left`; };
+  paint();
+  if (apTick) clearInterval(apTick);
+  apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);
+}
+(function initAutopilot() {
+  const btn = $("autopilot-btn"), drop = $("ap-drop");
+  if (btn && drop) {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) $("ap-objective").focus(); });
+    document.addEventListener("click", (e) => { if (!drop.hidden && !drop.contains(e.target) && e.target !== btn) drop.hidden = true; });
+  }
+  const start = $("ap-start");
+  if (start) start.addEventListener("click", async () => {
+    const objective = ($("ap-objective").value || "").trim();
+    if (!objective) { $("ap-objective").focus(); return; }
+    const minutes = Number($("ap-minutes").value) || 30;
+    const autonomy = $("ap-autonomy").value || "guarded";
+    start.disabled = true;
+    try {
+      const st = await (await fetch("/api/autopilot/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, minutes, autonomy }) })).json();
+      if (st.error) addMessage("assistant", "Autopilot: " + st.error, "error");
+      else { if (drop) drop.hidden = true; renderAutopilot(st); addMessage("assistant", `🛫 Autopilot started (${autonomy}, up to ${minutes} min) — working on: ${objective}`, "notice"); }
+    } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); }
+    finally { start.disabled = false; }
+  });
+  const wrap = $("ap-wrapup"), stop = $("ap-stop");
+  if (wrap) wrap.addEventListener("click", async () => { try { renderAutopilot(await (await fetch("/api/autopilot/wrapup", { method: "POST" })).json()); } catch (_) {} });
+  if (stop) stop.addEventListener("click", async () => { if (!confirm("Stop Autopilot now?")) return; try { renderAutopilot(await (await fetch("/api/autopilot/stop", { method: "POST" })).json()); } catch (_) {} });
 })();
 
 // --- Mode toggles: stream watchdog + plan mode -------------------------------
@@ -993,6 +1036,11 @@ async function init() {
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
   try { renderPlan(await (await fetch("/api/plan")).json()); } catch (_) {}          // restore the active plan ledger
+  if (cfg.autopilot) {                                                                // prefill Autopilot launcher defaults
+    const mi = $("ap-minutes"); if (mi && cfg.autopilot.default_minutes) mi.value = cfg.autopilot.default_minutes;
+    const au = $("ap-autonomy"); if (au && cfg.autopilot.autonomy) au.value = cfg.autopilot.autonomy;
+  }
+  try { renderAutopilot(await (await fetch("/api/autopilot")).json()); } catch (_) {}  // reflect an in-progress run
   modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
   if (cfg.workbench_url) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }

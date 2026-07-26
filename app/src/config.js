@@ -100,6 +100,7 @@ function publicConfig() {
     personas: Object.keys(config.personas || {}),
     skills_autohint: config.skills_autohint !== false,
     stall_seconds: Number((config.ui || {}).stall_seconds) || 25,
+    autopilot: { autonomy: ((config.autopilot || {}).autonomy === "full") ? "full" : "guarded", default_minutes: Number((config.autopilot || {}).default_minutes) || 30 },
   };
 }
 

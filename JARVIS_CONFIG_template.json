@@ -81,6 +81,12 @@
   "ui": {
     "stall_seconds": 25
   },
+  "_autopilot_note": "Autopilot runs a large objective autonomously (build -> test -> refine loop) until done, the time budget is reached, it gets stuck, or you stop it. autonomy: 'guarded' (default — full freedom to build/test in /workspace, but it will NOT send email/post/purchase/delete your files outside /workspace on its own; those become blocked steps) or 'full' (no restrictions). default_minutes: the time budget prefilled in the launcher. max_cycles: a safety cap on build/test iterations regardless of time.",
+  "autopilot": {
+    "autonomy": "guarded",
+    "default_minutes": 30,
+    "max_cycles": 100
+  },
   "_logging_note": "Debug logging to JARVIS_AI/Logs/. level: 0 off (default) .. 1 errors, 2 warn, 3 info (turns+tools), 4 verbose (full tool args/results), 5 debug (full LLM requests/responses + browser actions). Read live — change from the Config tab and it applies immediately, no --reload. Secrets are redacted.",
   "logging": {
     "level": 0

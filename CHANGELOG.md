@@ -24,6 +24,21 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Autopilot — kick off a big objective and walk away.** Give an objective
+  and a time budget; JARVIS drafts a plan (the Planner ledger) and then drives it
+  autonomously in back-to-back build → test → refine → fix cycles until the objective is
+  complete, the time budget is reached, it gets stuck, or you stop it. It runs
+  SERVER-SIDE (like scheduled tasks), so you can close the tab and leave — it notifies you
+  (in-app + desktop + spoken) with a summary when it's done. Controls: a header launcher
+  (objective, "stop after N min", autonomy), a live status bar (state · cycle · countdown)
+  with **Wrap up** (graceful — finish the current step, summarize, stop) and **Stop**
+  (immediate, which also kills in-flight workbench commands via the hard-stop path). Runs
+  in **patient mode** (watchdog off) so slow local cycles aren't killed, and stuck-detection
+  pauses it after several cycles with no plan progress instead of thrashing. Autonomy is a
+  config toggle: **guarded** (default — free to build/test in `/workspace`, but won't send
+  email / post / spend / delete your files outside `/workspace` on its own; those become
+  blocked steps) or **full** (no restrictions). (`app/src/autopilot.js` (new),
+  `app/server.js`, `app/src/config.js`, frontend, `JARVIS_CONFIG_template.json`.)
 - 2026-07-26: **Planner / persistent task ledger — JARVIS stops forgetting what it was
   doing.** For multi-step jobs the model now keeps an on-disk plan (objective + ordered
   checklist) via new `plan_create` / `plan_update` / `plan_add_step` / `plan_show` /

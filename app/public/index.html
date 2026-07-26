@@ -58,6 +58,19 @@
           <div id="sessions-items"><div class="hint">No saved sessions.</div></div>
         </div>
       </div>
+      <div class="ap-menu">
+        <button id="autopilot-btn" class="ghost">🛫 Autopilot</button>
+        <div class="ap-drop" id="ap-drop" hidden>
+          <div class="apd-title">Run an objective autonomously</div>
+          <textarea id="ap-objective" rows="3" placeholder="Objective — e.g. Build a web app that lets me browse and tag my photos…"></textarea>
+          <div class="apd-row">
+            <label>Stop after <input id="ap-minutes" type="number" min="1" max="720" value="30"> min</label>
+            <label>Autonomy <select id="ap-autonomy"><option value="guarded">guarded (safe)</option><option value="full">full</option></select></label>
+          </div>
+          <button id="ap-start" class="apd-start">🛫 Start Autopilot</button>
+          <div class="apd-hint">Runs on the server — you can close the tab and walk away. You'll be notified when it finishes, hits its time budget, or gets stuck. <b>Guarded</b> won't send email / post / spend / delete your files on its own.</div>
+        </div>
+      </div>
       <button id="watchdog-toggle" class="ghost mode-toggle">🐕 Watchdog</button>
       <button id="plan-toggle" class="ghost mode-toggle">🗺 Plan</button>
       <button id="selftest-btn" class="ghost">System self-test</button>
@@ -67,6 +80,14 @@
 
   <main class="layout">
     <section class="chat">
+      <div class="autopilot-bar" id="autopilot-bar" hidden>
+        <span class="ap-ico">🛫</span>
+        <span class="ap-state" id="ap-state">running</span>
+        <span class="ap-meta" id="ap-meta"></span>
+        <span class="ap-obj" id="ap-barobj"></span>
+        <button class="ap-ctl" id="ap-wrapup" title="Finish the current step, summarize, then stop for review">Wrap up</button>
+        <button class="ap-ctl danger" id="ap-stop" title="Stop immediately">Stop</button>
+      </div>
       <div class="plan-banner" id="plan-banner" hidden>
         <div class="pb-head">
           <span class="pb-title">🗂 Plan</span>
