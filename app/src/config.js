@@ -50,14 +50,22 @@ const CODING_RULE =
   "To CHANGE an existing file, use edit_workbench_file (a targeted find-and-replace of an exact snippet) instead of rewriting the whole file with write_workbench_file — whole-file rewrites are slow and tend to reintroduce bugs. Use write_workbench_file only to CREATE a file or replace a small one. " +
   "To DEBUG a web app that renders wrong/blank or misbehaves at RUNTIME: serve it, then browser_goto its URL and call browser_console to read the actual JavaScript error + console output (browser_goto also reports load-time errors). Do NOT try to diagnose a runtime rendering bug by only re-reading the static HTML/JS — you cannot see a runtime error that way. " +
   "After you CREATE or EDIT code, quickly syntax-check it before moving on (e.g. run_shell `node -c file.js`, `python3 -m py_compile file.py`, `bash -n script.sh`, or just run it) — this catches typos and undefined variables you introduced, instead of shipping a silently-broken file.";
+// The ACTIVE prompt lives in editable files: /Prompts/default_master.prompt + default_system.prompt.
+// Read fresh (small files) so edits apply on the next turn without a restart; fall back to the
+// config values (then a built-in default) if a file is absent.
+const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/Prompts";
+function readPromptFile(name) { try { return fs.readFileSync(path.join(PROMPTS_DIR, name), "utf8"); } catch (_) { return null; } }
 function systemPrompt(persona) {
   const llm = config.llm || {};
-  let sp = llm.system_prompt || "You are {assistant_name}, a helpful AI assistant.";
+  let sp = readPromptFile("default_system.prompt");
+  if (sp == null) sp = llm.system_prompt || "You are {assistant_name}, a helpful AI assistant.";
+  let master = readPromptFile("default_master.prompt");
+  if (master == null) master = llm.master_prompt || "";
+  master = master.trim();
   const p = persona && config.personas && config.personas[persona];
   if (p && p.system_prompt) sp = p.system_prompt;
   else if (p && p.append) sp = sp + "\n\n" + p.append;
   // Order: MASTER (identity/mission) -> SYSTEM (operating instructions) -> constant guardrails.
-  const master = (llm.master_prompt || "").trim();
   const base = (master ? master + "\n\n" : "") + sp;
   return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
 }

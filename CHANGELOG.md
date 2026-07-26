@@ -8,6 +8,17 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-26: **Prompts are now editable files in a top-level `/Prompts` directory.** Replaces
+  the earlier inline/`data` approach. The ACTIVE prompt = `Prompts/default_master.prompt` +
+  `Prompts/default_system.prompt`, read LIVE each turn (edits apply next turn, no reload), with
+  the model receiving master -> system -> built-in tool/planner/coding rules. The Config
+  **Prompts** section edits these; **Save as active** writes the default pair, **Save as… / Load /
+  Delete** manage named sets `Prompts/<name>_master.prompt` + `<name>_system.prompt` (hand-editable
+  outside the app). Ships a starter library: coder, researcher, concise, ops, creative, tutor.
+  `/Prompts` is bind-mounted into the app (compose change -> recreate the container).
+  (`app/src/config.js`, `app/server.js`, frontend, `docker-compose.yml`, `Prompts/`.)
+
 ### Fixed
 - 2026-07-25: **File tools can now reach the workbench build area.**
   `list_dir`/`read_file`/`write_file`/`analyze_image` were restricted to the

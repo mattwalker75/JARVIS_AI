@@ -118,35 +118,39 @@ app.post("/api/summarize", async (req, res) => {
   try { res.json({ summary: await llm.chat({ messages, tier: "smart", noTools: true }) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Prompt library — master+system prompt sets saved as EXTERNAL, hand-editable files under
-// ./data/prompts/<name>.prompt (a plain text file; the two parts are split by a ===SYSTEM===
-// delimiter). Loading one populates the Config editor; you then Save configuration + --reload.
-const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/data/prompts";
-const PROMPT_SEP = "===SYSTEM===";
+// Prompt library — each set is TWO editable files in /Prompts: <name>_master.prompt and
+// <name>_system.prompt. The ACTIVE prompt is the "default" set (default_master/default_system);
+// saving it applies on the next turn (config.systemPrompt reads these files live). Other names
+// are the saved library you can load or export to.
+const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/Prompts";
 function safePromptName(n) { n = String(n || "").trim(); return /^[\w.\- ]{1,80}$/.test(n) ? n : null; }
-app.get("/api/prompts", (_req, res) => {
-  try { fs.mkdirSync(PROMPTS_DIR, { recursive: true }); const prompts = fs.readdirSync(PROMPTS_DIR).filter((f) => f.endsWith(".prompt")).map((f) => f.replace(/\.prompt$/, "")).sort(); res.json({ dir: PROMPTS_DIR, prompts }); }
-  catch (e) { res.json({ dir: PROMPTS_DIR, prompts: [], error: e.message }); }
+function readPart(name, part) { try { return fs.readFileSync(path.join(PROMPTS_DIR, `${name}_${part}.prompt`), "utf8"); } catch (_) { return ""; } }
+function writeSet(name, master, system) {
+  fs.mkdirSync(PROMPTS_DIR, { recursive: true });
+  fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_master.prompt`), String(master || ""));
+  fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_system.prompt`), String(system || ""));
+}
+app.get("/api/prompts", (_req, res) => {   // list saved set NAMES (excluding the active 'default')
+  try {
+    fs.mkdirSync(PROMPTS_DIR, { recursive: true });
+    const names = [...new Set(fs.readdirSync(PROMPTS_DIR).map((f) => (f.match(/^(.+)_(?:master|system)\.prompt$/) || [])[1]).filter(Boolean))]
+      .filter((n) => n !== "default").sort();
+    res.json({ dir: PROMPTS_DIR, prompts: names });
+  } catch (e) { res.json({ dir: PROMPTS_DIR, prompts: [], error: e.message }); }
 });
 app.get("/api/prompts/:name", (req, res) => {
   const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
-  try {
-    const txt = fs.readFileSync(path.join(PROMPTS_DIR, n + ".prompt"), "utf8");
-    const i = txt.indexOf(PROMPT_SEP);
-    const master = i >= 0 ? txt.slice(0, i).replace(/\s+$/, "") : "";
-    const system = i >= 0 ? txt.slice(i + PROMPT_SEP.length).replace(/^\s+/, "") : txt;
-    res.json({ name: n, master, system });
-  } catch (e) { res.status(404).json({ error: e.message }); }
+  res.json({ name: n, master: readPart(n, "master"), system: readPart(n, "system") });
 });
 app.post("/api/prompts/:name", (req, res) => {
   const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
   const b = req.body || {};
-  try { fs.mkdirSync(PROMPTS_DIR, { recursive: true }); fs.writeFileSync(path.join(PROMPTS_DIR, n + ".prompt"), String(b.master || "").trim() + "\n\n" + PROMPT_SEP + "\n\n" + String(b.system || "")); res.json({ saved: n }); }
+  try { writeSet(n, b.master, b.system); res.json({ saved: n, files: [`${n}_master.prompt`, `${n}_system.prompt`] }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete("/api/prompts/:name", (req, res) => {
-  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
-  try { fs.rmSync(path.join(PROMPTS_DIR, n + ".prompt"), { force: true }); res.json({ deleted: n }); }
+  const n = safePromptName(req.params.name); if (!n || n === "default") return res.status(400).json({ error: "invalid name" });
+  try { for (const part of ["master", "system"]) fs.rmSync(path.join(PROMPTS_DIR, `${n}_${part}.prompt`), { force: true }); res.json({ deleted: n }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));

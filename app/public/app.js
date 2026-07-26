@@ -1151,8 +1151,6 @@ const CFG_FIELDS = [
   ["cfg-temperature", "llm.temperature", "num"],
   ["cfg-max-tokens", "llm.max_tokens", "num"],
   ["cfg-context-window", "llm.context_window", "num"],
-  ["cfg-master-prompt", "llm.master_prompt", "str"],
-  ["cfg-system-prompt", "llm.system_prompt", "str"],
   ["cfg-completion-checks", "llm.completion_checks", "num"],
   ["cfg-idle-timeout", "llm.idle_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
@@ -1261,43 +1259,44 @@ async function listConfigModels() {
   finally { if (btn) btn.disabled = false; }
 }
 
-// --- prompt library: save/load master+system prompts as EXTERNAL FILES (./data/prompts/*.prompt) ---
-async function renderPromptPresets() {
+// --- prompt library: active = /Prompts/default_{master,system}.prompt; saved sets = <name>_* ---
+const pMaster = () => $("cfg-master-prompt"), pSystem = () => $("cfg-system-prompt");
+async function loadActivePrompts() {   // fill the editor from the active (default) set
+  try { const d = await (await fetch("/api/prompts/default")).json(); if (pMaster()) pMaster().value = d.master || ""; if (pSystem()) pSystem().value = d.system || ""; } catch (_) {}
+}
+async function renderPromptPresets() {   // list saved set names (excludes 'default')
   const sel = $("cfg-prompt-preset"); if (!sel) return;
   const cur = sel.value;
   let list = [];
   try { const d = await (await fetch("/api/prompts")).json(); list = d.prompts || []; } catch (_) {}
-  sel.innerHTML = '<option value="">— saved prompt files —</option>';
+  sel.innerHTML = '<option value="">— saved prompt sets —</option>';
   list.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
   if (cur && list.includes(cur)) sel.value = cur;
 }
 (function initPromptLibrary() {
-  const sel = $("cfg-prompt-preset"), master = $("cfg-master-prompt"), system = $("cfg-system-prompt");
-  const saveB = $("cfg-prompt-save"), loadB = $("cfg-prompt-load"), delB = $("cfg-prompt-del");
+  const sel = $("cfg-prompt-preset");
+  const saveActiveB = $("cfg-prompt-saveactive"), saveAsB = $("cfg-prompt-save"), loadB = $("cfg-prompt-load"), delB = $("cfg-prompt-del");
   const toast = (msg, ok) => { const r = $("cfg-result"); if (r) { r.className = "cfg-result " + (ok ? "ok" : "err"); r.textContent = msg; } };
-  if (saveB) saveB.addEventListener("click", async () => {
-    const name = (prompt("Save master + system prompt to a file named:", (sel && sel.value) || "") || "").trim();
-    if (!name) return;
-    try {
-      const d = await (await fetch("/api/prompts/" + encodeURIComponent(name), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ master: master ? master.value : "", system: system ? system.value : "" }) })).json();
-      if (d.error) return toast("Save failed: " + d.error, false);
-      await renderPromptPresets(); if (sel) sel.value = name;
-      toast(`Saved to file "${name}.prompt" (in ./data/prompts).`, true);
-    } catch (e) { toast("Save failed: " + e.message, false); }
+  const body = () => JSON.stringify({ master: pMaster() ? pMaster().value : "", system: pSystem() ? pSystem().value : "" });
+  const put = (name) => fetch("/api/prompts/" + encodeURIComponent(name), { method: "POST", headers: { "Content-Type": "application/json" }, body: body() }).then((r) => r.json());
+  if (saveActiveB) saveActiveB.addEventListener("click", async () => {
+    try { const d = await put("default"); if (d.error) return toast("Save failed: " + d.error, false); toast("Saved as ACTIVE — applies on the next turn (Prompts/default_*.prompt).", true); }
+    catch (e) { toast("Save failed: " + e.message, false); }
+  });
+  if (saveAsB) saveAsB.addEventListener("click", async () => {
+    const name = (prompt("Save this prompt set as (name):", "") || "").trim();
+    if (!name || name.toLowerCase() === "default") return;
+    try { const d = await put(name); if (d.error) return toast("Save failed: " + d.error, false); await renderPromptPresets(); if (sel) sel.value = name; toast(`Saved set "${name}" (Prompts/${name}_master.prompt + ${name}_system.prompt).`, true); }
+    catch (e) { toast("Save failed: " + e.message, false); }
   });
   if (loadB) loadB.addEventListener("click", async () => {
     const name = sel && sel.value; if (!name) return;
-    try {
-      const p = await (await fetch("/api/prompts/" + encodeURIComponent(name))).json();
-      if (p.error) return toast("Load failed: " + p.error, false);
-      if (master) master.value = p.master || ""; if (system) system.value = p.system || "";
-      setPath(cfgObj, "llm.master_prompt", p.master || ""); setPath(cfgObj, "llm.system_prompt", p.system || ""); renderRawConfig();
-      toast(`Loaded "${name}". Click Save configuration below, then run --reload to apply it.`, true);
-    } catch (e) { toast("Load failed: " + e.message, false); }
+    try { const p = await (await fetch("/api/prompts/" + encodeURIComponent(name))).json(); if (p.error) return toast("Load failed: " + p.error, false); if (pMaster()) pMaster().value = p.master || ""; if (pSystem()) pSystem().value = p.system || ""; toast(`Loaded "${name}" into the editor. Click “Save as active” to use it.`, true); }
+    catch (e) { toast("Load failed: " + e.message, false); }
   });
   if (delB) delB.addEventListener("click", async () => {
     const name = sel && sel.value; if (!name) return;
-    if (!confirm(`Delete the prompt file "${name}.prompt"?`)) return;
+    if (!confirm(`Delete the saved set "${name}" (both files)?`)) return;
     try { await fetch("/api/prompts/" + encodeURIComponent(name), { method: "DELETE" }); await renderPromptPresets(); toast(`Deleted "${name}".`, true); }
     catch (e) { toast("Delete failed: " + e.message, false); }
   });
@@ -1314,7 +1313,8 @@ async function loadConfig() {
   populateProviderSelect(getPath(cfgObj, "llm.provider"));
   populateStructured();
   syncProviderUI();
-  renderPromptPresets();   // list external prompt files
+  renderPromptPresets();   // list saved prompt sets
+  loadActivePrompts();     // fill the master/system editor from the active (default) set
   renderRawConfig();
   renderRawSecrets();
 }

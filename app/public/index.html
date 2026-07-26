@@ -206,18 +206,21 @@
           </div>
 
           <div class="cfg-section">
-            <h5>Prompts <span class="cfg-badge">needs --reload</span></h5>
+            <h5>Prompts <span class="cfg-badge">applies live</span></h5>
             <div class="cfg-prompt-presets">
-              <select id="cfg-prompt-preset"><option value="">— saved presets —</option></select>
-              <button id="cfg-prompt-load" class="ghost" type="button">Load</button>
-              <button id="cfg-prompt-save" class="ghost" type="button">Save as…</button>
-              <button id="cfg-prompt-del" class="ghost" type="button">Delete</button>
+              <select id="cfg-prompt-preset"><option value="">— saved prompt sets —</option></select>
+              <button id="cfg-prompt-load" class="ghost" type="button" title="Load this set into the editor below">Load</button>
+              <button id="cfg-prompt-del" class="ghost" type="button" title="Delete this saved set">Delete</button>
             </div>
             <label>Master prompt <span class="cfg-hint-inline">who JARVIS is + its mission (short, stable)</span>
               <textarea id="cfg-master-prompt" rows="3" placeholder="You are JARVIS, my personal AI assistant. Be direct, proactive, and thorough…"></textarea></label>
             <label>System prompt <span class="cfg-hint-inline">detailed operating instructions (tools, workflows, formatting)</span>
               <textarea id="cfg-system-prompt" rows="10"></textarea></label>
-            <div class="hint">Sent to the model as: <b>master → system → built-in tool/planner/coding rules</b> (the rules are always appended). <b>Save as…</b> / <b>Load</b> keep prompt sets as editable files in <code>./data/prompts/*.prompt</code>. After editing or loading, click <b>Save configuration</b> below, then run <code>./JARVIS.sh --reload</code> to apply.</div>
+            <div class="cfg-prompt-presets">
+              <button id="cfg-prompt-saveactive" class="ghost" type="button" title="Make the editor's prompts the ACTIVE prompt (applies next turn)">💾 Save as active</button>
+              <button id="cfg-prompt-save" class="ghost" type="button" title="Save the editor's prompts to a named set (for later)">Save as…</button>
+            </div>
+            <div class="hint">The active prompt = <code>Prompts/default_master.prompt</code> + <code>default_system.prompt</code>. Sent to the model as <b>master → system → built-in tool/planner/coding rules</b> (rules always appended). <b>Save as active</b> applies on the next turn (no reload). <b>Save as…</b> / <b>Load</b> use named sets <code>Prompts/&lt;name&gt;_master.prompt</code> + <code>&lt;name&gt;_system.prompt</code> — editable outside the app.</div>
           </div>
 
           <div class="cfg-section">

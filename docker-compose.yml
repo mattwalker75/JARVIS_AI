@@ -108,6 +108,7 @@ services:
       - ./READ_WRITE_FILES:/READ_WRITE_FILES
       - ./data:/data
       - ./Logs:/logs
+      - ./Prompts:/Prompts   # active + saved system/master prompt files (editable outside the app)
       - jarvis_workbench_work:/workspace   # so file tools (list_dir/read_file/analyze_image/write_file) can reach the AI's workbench build area
       - /var/run/docker.sock:/var/run/docker.sock
 
