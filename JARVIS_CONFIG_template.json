@@ -10,6 +10,8 @@
     "model": "gpt-4o-mini",
     "_model_mode_comment": "ARCHITECTURE SWITCH between single- and multi-model. 'single' = every task uses 'model' above; the 'models' tiers are ignored (leave them or delete them). 'multi' = use the per-task 'models' tiers below. Omit this key to auto-detect (multi if a 'models' block is present, else single).",
     "model_mode": "multi",
+    "_master_prompt_note": "Optional short IDENTITY/mission statement, prepended ABOVE system_prompt. The final prompt sent to the model is: master_prompt -> system_prompt -> built-in tool/planner/coding rules (auto-appended). Edit both in the Config tab; save/load prompt sets as external files under ./data/prompts/*.prompt.",
+    "master_prompt": "",
     "_models_comment": "Used ONLY in multi-model mode. Each tier may be ANY model_name from litellm/config.yaml (any provider): chat = default conversation; cheap = background/scheduled tasks; vision = auto-selected when screenshots are in context (must be vision-capable); smart = hard reasoning. Any omitted tier falls back to models.chat, then to llm.model. For single-model, set model_mode to 'single' (this block is then ignored).",
     "models": {
       "chat": "gpt-4o-mini",

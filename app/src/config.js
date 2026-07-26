@@ -51,11 +51,15 @@ const CODING_RULE =
   "To DEBUG a web app that renders wrong/blank or misbehaves at RUNTIME: serve it, then browser_goto its URL and call browser_console to read the actual JavaScript error + console output (browser_goto also reports load-time errors). Do NOT try to diagnose a runtime rendering bug by only re-reading the static HTML/JS — you cannot see a runtime error that way. " +
   "After you CREATE or EDIT code, quickly syntax-check it before moving on (e.g. run_shell `node -c file.js`, `python3 -m py_compile file.py`, `bash -n script.sh`, or just run it) — this catches typos and undefined variables you introduced, instead of shipping a silently-broken file.";
 function systemPrompt(persona) {
-  let sp = (config.llm && config.llm.system_prompt) || "You are {assistant_name}, a helpful AI assistant.";
+  const llm = config.llm || {};
+  let sp = llm.system_prompt || "You are {assistant_name}, a helpful AI assistant.";
   const p = persona && config.personas && config.personas[persona];
   if (p && p.system_prompt) sp = p.system_prompt;
   else if (p && p.append) sp = sp + "\n\n" + p.append;
-  return sp.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
+  // Order: MASTER (identity/mission) -> SYSTEM (operating instructions) -> constant guardrails.
+  const master = (llm.master_prompt || "").trim();
+  const base = (master ? master + "\n\n" : "") + sp;
+  return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
 }
 
 // "single" => every task tier uses llm.model (the models block is ignored).

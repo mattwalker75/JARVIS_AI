@@ -206,6 +206,21 @@
           </div>
 
           <div class="cfg-section">
+            <h5>Prompts <span class="cfg-badge">needs --reload</span></h5>
+            <div class="cfg-prompt-presets">
+              <select id="cfg-prompt-preset"><option value="">— saved presets —</option></select>
+              <button id="cfg-prompt-load" class="ghost" type="button">Load</button>
+              <button id="cfg-prompt-save" class="ghost" type="button">Save as…</button>
+              <button id="cfg-prompt-del" class="ghost" type="button">Delete</button>
+            </div>
+            <label>Master prompt <span class="cfg-hint-inline">who JARVIS is + its mission (short, stable)</span>
+              <textarea id="cfg-master-prompt" rows="3" placeholder="You are JARVIS, my personal AI assistant. Be direct, proactive, and thorough…"></textarea></label>
+            <label>System prompt <span class="cfg-hint-inline">detailed operating instructions (tools, workflows, formatting)</span>
+              <textarea id="cfg-system-prompt" rows="10"></textarea></label>
+            <div class="hint">Sent to the model as: <b>master → system → built-in tool/planner/coding rules</b> (the rules are always appended). <b>Save as…</b> / <b>Load</b> keep prompt sets as editable files in <code>./data/prompts/*.prompt</code>. After editing or loading, click <b>Save configuration</b> below, then run <code>./JARVIS.sh --reload</code> to apply.</div>
+          </div>
+
+          <div class="cfg-section">
             <h5>Behavior <span class="cfg-badge">applies live</span></h5>
             <div class="cfg-grid">
               <label>Completion checks<input id="cfg-completion-checks" type="number" min="0" max="6" title="How many times to re-verify 'is the job really done?' before accepting a final answer (0 = off)."></label>

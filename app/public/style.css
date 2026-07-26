@@ -340,6 +340,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .cfg-section label { display: flex; flex-direction: column; gap: 4px; font-size: .74rem; color: var(--muted); margin-bottom: 9px; }
 .cfg-section label:last-child { margin-bottom: 0; }
 .cfg-models-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.cfg-prompt-presets { display: flex; gap: 6px; margin-bottom: 9px; flex-wrap: wrap; }
+.cfg-prompt-presets select { flex: 1; min-width: 120px; }
+.cfg-section textarea { width: 100%; background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px; font: inherit; font-size: .8rem; resize: vertical; line-height: 1.4; }
+.cfg-section textarea:focus { outline: none; border-color: var(--accent); }
 .cfg-hint-inline { font-size: .72rem; color: var(--muted); }
 .cfg-section input[type=text], .cfg-section input:not([type]), .cfg-section input[type=number], .cfg-section input[type=password], .cfg-section select {
   padding: 7px 9px; border: 1px solid var(--edge); background: var(--bg); color: var(--text);

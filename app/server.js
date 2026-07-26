@@ -118,6 +118,37 @@ app.post("/api/summarize", async (req, res) => {
   try { res.json({ summary: await llm.chat({ messages, tier: "smart", noTools: true }) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Prompt library — master+system prompt sets saved as EXTERNAL, hand-editable files under
+// ./data/prompts/<name>.prompt (a plain text file; the two parts are split by a ===SYSTEM===
+// delimiter). Loading one populates the Config editor; you then Save configuration + --reload.
+const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/data/prompts";
+const PROMPT_SEP = "===SYSTEM===";
+function safePromptName(n) { n = String(n || "").trim(); return /^[\w.\- ]{1,80}$/.test(n) ? n : null; }
+app.get("/api/prompts", (_req, res) => {
+  try { fs.mkdirSync(PROMPTS_DIR, { recursive: true }); const prompts = fs.readdirSync(PROMPTS_DIR).filter((f) => f.endsWith(".prompt")).map((f) => f.replace(/\.prompt$/, "")).sort(); res.json({ dir: PROMPTS_DIR, prompts }); }
+  catch (e) { res.json({ dir: PROMPTS_DIR, prompts: [], error: e.message }); }
+});
+app.get("/api/prompts/:name", (req, res) => {
+  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  try {
+    const txt = fs.readFileSync(path.join(PROMPTS_DIR, n + ".prompt"), "utf8");
+    const i = txt.indexOf(PROMPT_SEP);
+    const master = i >= 0 ? txt.slice(0, i).replace(/\s+$/, "") : "";
+    const system = i >= 0 ? txt.slice(i + PROMPT_SEP.length).replace(/^\s+/, "") : txt;
+    res.json({ name: n, master, system });
+  } catch (e) { res.status(404).json({ error: e.message }); }
+});
+app.post("/api/prompts/:name", (req, res) => {
+  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  const b = req.body || {};
+  try { fs.mkdirSync(PROMPTS_DIR, { recursive: true }); fs.writeFileSync(path.join(PROMPTS_DIR, n + ".prompt"), String(b.master || "").trim() + "\n\n" + PROMPT_SEP + "\n\n" + String(b.system || "")); res.json({ saved: n }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete("/api/prompts/:name", (req, res) => {
+  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  try { fs.rmSync(path.join(PROMPTS_DIR, n + ".prompt"), { force: true }); res.json({ deleted: n }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
 app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
 const autopilot = require("./src/autopilot");

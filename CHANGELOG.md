@@ -24,6 +24,14 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Prompt editor + external prompt-file library.** The Config tab has a new
+  **Prompts** section with a **Master prompt** (identity/mission) and **System prompt**
+  (operating instructions) editor. The model receives them as master -> system -> the
+  built-in tool/planner/coding rules (always auto-appended). Prompt sets save/load as
+  hand-editable external files `./data/prompts/<name>.prompt` (master on top, a
+  `===SYSTEM===` delimiter, system below) via `GET/POST/DELETE /api/prompts[/:name]`, so you
+  can version/share them and swap whole prompt sets. `llm.master_prompt` added.
+  (`app/src/config.js`, `app/server.js`, frontend, `JARVIS_CONFIG_template.json`.)
 - 2026-07-26: **Context window is configurable + auto-detected.** New **Context window** field
   in the Config tab (blank/0 = auto). `GET /api/context-window` resolves the meter's ceiling:
   a manual `llm.context_window` wins; otherwise AUTO — local Ollama uses `ollama.context_length`
