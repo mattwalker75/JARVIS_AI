@@ -24,6 +24,14 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Collapsible, resizable side drawer.** The right-hand panel (Activity,
+  Tasks, Memory, Files, Workbench, Config) is now an adjustable drawer: a **▥ Panel**
+  toggle in the header (and a **»** chevron in the tab row) collapse it so chat goes
+  full-width; drag the left-edge grip to any width; double-click the grip to cycle
+  preset sizes (peek / half / full). Width + open/closed state persist across reloads
+  (localStorage). Picking a tab re-opens it if closed, and the toggle shows a pulsing
+  dot when a tool runs while the drawer is hidden, so you can keep it closed and still
+  know work is happening. (`app/public/{index.html,app.js,style.css}`.)
 - 2026-07-25: **Working/idle status — you never have to guess if JARVIS is busy.**
   An always-visible pill in the header shows **Idle** (green), **Working** (amber,
   pulsing dot), or **Stalled?** (red) driven by the streamed turn/tool events. A

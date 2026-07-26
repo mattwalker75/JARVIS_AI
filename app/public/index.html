@@ -59,6 +59,7 @@
         </div>
       </div>
       <button id="selftest-btn" class="ghost">System self-test</button>
+      <button id="drawer-toggle" class="ghost drawer-toggle" title="Show / hide the side panel (Activity, Tasks, Memory, …)">▥ Panel<span class="dot" id="drawer-dot" hidden></span></button>
     </div>
   </header>
 
@@ -81,6 +82,7 @@
     </section>
 
     <aside class="side">
+      <div class="drawer-grip" id="drawer-grip" title="Drag to resize · double-click to cycle size"></div>
       <div class="tabs">
         <button class="tab active" data-tab="activity">Activity</button>
         <button class="tab" data-tab="tasks">Tasks</button>
@@ -88,6 +90,7 @@
         <button class="tab" data-tab="files">Files</button>
         <button class="tab" data-tab="workbench">Workbench</button>
         <button class="tab" data-tab="config">Config</button>
+        <button class="drawer-collapse" id="drawer-collapse" title="Collapse panel">»</button>
       </div>
       <div class="panel active" id="panel-activity">
         <div class="activity" id="activity">

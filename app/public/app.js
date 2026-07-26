@@ -281,6 +281,7 @@ function addActivity(tool, input, output) {
   if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre>`;
   e.innerHTML = html; activityEl.appendChild(e); activityEl.scrollTop = activityEl.scrollHeight;
   while (activityEl.children.length > 200) activityEl.removeChild(activityEl.firstChild); // cap DOM growth
+  if (typeof drawer !== "undefined" && drawer) drawer.notifyActivity();   // badge the toggle if the drawer is closed
 }
 
 let wsBackoff = 1000, connLost = false;
@@ -561,11 +562,64 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
   document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
   t.classList.add("active"); $("panel-" + t.dataset.tab).classList.add("active");
+  if (drawer && !drawer.isOpen()) drawer.open();   // picking a tab reveals the drawer if it was closed
   if (t.dataset.tab === "tasks") { refreshTasks(); refreshNotes(); }
   if (t.dataset.tab === "memory") refreshMemories();
   if (t.dataset.tab === "files") refreshFiles();
   if (t.dataset.tab === "config") loadConfig();
 }));
+
+// --- Resizable / collapsible side drawer -------------------------------------
+// Closed (chat full-width), or open at any width you drag it to. Double-click the
+// grip to cycle preset sizes (peek / half / full). Width + open state persist.
+const drawer = (() => {
+  const layout = document.querySelector(".layout");
+  const grip = $("drawer-grip"), toggleBtn = $("drawer-toggle"), collapseBtn = $("drawer-collapse"), dot = $("drawer-dot");
+  if (!layout || !grip) return null;
+  const MIN = 300, LSW = "jarvis.drawer.w", LSO = "jarvis.drawer.open";
+  const maxW = () => Math.round(window.innerWidth * 0.72);
+  const clamp = (w) => Math.max(MIN, Math.min(maxW(), Math.round(w)));
+  let width = clamp(parseInt(localStorage.getItem(LSW) || "480", 10) || 480);
+  let open = localStorage.getItem(LSO) !== "0";
+  function apply() {
+    layout.style.setProperty("--drawer-w", width + "px");
+    layout.classList.toggle("drawer-collapsed", !open);
+    if (toggleBtn) toggleBtn.classList.toggle("open", open);
+    if (open && dot) dot.hidden = true;   // opening clears the "activity while hidden" badge
+  }
+  function setWidth(w, save) { width = clamp(w); if (save) localStorage.setItem(LSW, String(width)); apply(); }
+  function setOpen(o) { open = !!o; localStorage.setItem(LSO, open ? "1" : "0"); apply(); }
+  // Drag to resize (drawer is the RIGHT column, so width grows as the cursor moves left).
+  grip.addEventListener("mousedown", (e) => {
+    if (!open) return; e.preventDefault();
+    grip.classList.add("dragging"); layout.classList.add("resizing");
+    document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
+    const move = (ev) => setWidth(window.innerWidth - ev.clientX, false);
+    const up = () => {
+      grip.classList.remove("dragging"); layout.classList.remove("resizing");
+      document.body.style.userSelect = ""; document.body.style.cursor = "";
+      localStorage.setItem(LSW, String(width));
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  });
+  // Double-click the grip: cycle peek → half → full.
+  grip.addEventListener("dblclick", () => {
+    const detents = [340, Math.round(window.innerWidth * 0.42), Math.min(maxW(), 640)].map(clamp);
+    const next = detents.find((d) => d > width + 8) || detents[0];
+    setWidth(next, true);
+  });
+  if (toggleBtn) toggleBtn.addEventListener("click", () => setOpen(!open));
+  if (collapseBtn) collapseBtn.addEventListener("click", () => setOpen(false));
+  window.addEventListener("resize", () => setWidth(width, false));   // keep within new bounds
+  apply();
+  return {
+    isOpen: () => open,
+    open: () => setOpen(true),
+    toggle: () => setOpen(!open),
+    notifyActivity: () => { if (!open && dot) dot.hidden = false; },   // badge when work happens while closed
+  };
+})();
 
 // --- Tasks panel ---
 const tasksList = $("tasks-list"), notesList = $("notes-list"), tasksRefresh = $("tasks-refresh");

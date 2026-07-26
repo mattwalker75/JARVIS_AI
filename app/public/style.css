@@ -90,8 +90,23 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .switch input:checked + .slider { background: var(--accent); }
 .switch input:checked + .slider:before { transform: translateX(22px); }
 
-.layout { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: 0; }
+:root { --drawer-w: 480px; }
+.layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--drawer-w); gap: 0; min-height: 0; transition: grid-template-columns .18s ease; }
+.layout.resizing { transition: none; }                      /* no lag while dragging the grip */
+.layout.drawer-collapsed { grid-template-columns: minmax(0, 1fr) 0px; }
+.layout.drawer-collapsed .side { overflow: hidden; }
+.layout.drawer-collapsed .drawer-grip { display: none; }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
+
+/* Resizable / collapsible side drawer */
+.drawer-grip { position: absolute; left: 0; top: 0; bottom: 0; width: 9px; margin-left: -5px; z-index: 6; cursor: col-resize; }
+.drawer-grip::after { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--edge); transition: background .15s, box-shadow .15s; }
+.drawer-grip:hover::after, .drawer-grip.dragging::after { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.drawer-collapse { flex: 0 0 auto; background: transparent; border: 1px solid transparent; color: var(--muted); padding: 8px 10px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 1rem; line-height: 1; }
+.drawer-collapse:hover { color: var(--text); }
+.drawer-toggle { position: relative; }
+.drawer-toggle .dot { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: jstatpulse 1s infinite; }
+.drawer-toggle.open { color: var(--accent); border-color: var(--accent); }
 
 .chat { position: relative; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--edge); }
 .chat.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; }
@@ -203,7 +218,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .composer button.stop-btn { background: var(--danger); color: #2a0b0b; }
 .composer button.stop-btn:hover { filter: brightness(1.08); }
 
-.side { display: flex; flex-direction: column; min-height: 0; }
+.side { position: relative; display: flex; flex-direction: column; min-height: 0; }
 .tabs { display: flex; gap: 4px; padding: 8px 8px 0; background: var(--panel); border-bottom: 1px solid var(--edge); }
 .tab { flex: 1; background: transparent; border: 1px solid transparent; border-bottom: none; color: var(--muted); padding: 8px; border-radius: 8px 8px 0 0; cursor: pointer; }
 .tab.active { color: var(--text); background: var(--bg); border-color: var(--edge); }
