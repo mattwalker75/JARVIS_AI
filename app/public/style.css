@@ -114,6 +114,30 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 #plan-toggle.mode-on { color: #ffb03a; border-color: #ffb03a; box-shadow: 0 0 8px rgba(255,176,58,.35); }
 
 .chat { position: relative; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--edge); }
+
+/* Persistent PLAN ledger banner — the current objective + checklist, updated live so you
+   always see what JARVIS is working on and where it is. */
+.plan-banner { flex: 0 0 auto; margin: 8px 10px 0; border: 1px solid rgba(54,211,255,.35); border-radius: 10px;
+  background: linear-gradient(180deg, rgba(54,211,255,.07), rgba(54,211,255,.02)); overflow: hidden; }
+.pb-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; }
+.pb-title { font-weight: 800; font-size: .78rem; letter-spacing: .5px; color: var(--accent); white-space: nowrap; }
+.pb-obj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pb-prog { font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pb-btn { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; padding: 2px 5px; border-radius: 5px; }
+.pb-btn:hover { color: var(--text); background: rgba(255,255,255,.06); }
+.plan-banner.collapsed .pb-steps { display: none; }
+.plan-banner.collapsed #pb-collapse { transform: rotate(-90deg); }
+.pb-steps { list-style: none; margin: 0; padding: 0 10px 8px; max-height: 34vh; overflow-y: auto; }
+.pb-step { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: .86rem; line-height: 1.35; }
+.pb-step .pb-ico { flex: 0 0 auto; width: 15px; text-align: center; font-weight: 700; }
+.pb-step .pb-txt { flex: 1; min-width: 0; }
+.pb-step .pb-note { color: var(--muted); font-size: .8em; }
+.pb-step.done .pb-txt { color: var(--muted); text-decoration: line-through; }
+.pb-step.done .pb-ico { color: #3ad07a; }
+.pb-step.active .pb-ico { color: var(--accent); }
+.pb-step.active .pb-txt { color: var(--text); font-weight: 600; }
+.pb-step.blocked .pb-ico { color: var(--danger); }
+.pb-step.pending .pb-ico, .pb-step.pending .pb-txt { color: var(--muted); }
 .chat.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
 .msg { display: flex; min-width: 0; }

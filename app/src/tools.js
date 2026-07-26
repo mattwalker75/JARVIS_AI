@@ -736,6 +736,31 @@ const toolDefs = [
   { type: "function", function: { name: "notify_user",
     description: "Send a notification to the user (shows in the app and as a desktop notification). Use it to alert the user about a result or when a monitored condition is met.",
     parameters: { type: "object", properties: { message: { type: "string" }, level: { type: "string", enum: ["info", "warning", "error"] } }, required: ["message"] } } },
+  { type: "function", function: { name: "plan_create",
+    description: "Start a persistent PLAN (task ledger) for a multi-step job — anything that will take several tool calls (build/fix an app, research + produce a report, multi-file changes). Give a one-line 'objective' and an ordered 'steps' array of short step descriptions. The plan is saved to disk and shown to you at the START of EVERY following turn, so you never lose track and resume from the first incomplete step even after an interruption. Creating a new plan replaces any previous one. Do NOT use for trivial one-shot requests.",
+    parameters: { type: "object", properties: {
+      objective: { type: "string", description: "One-line statement of the overall goal." },
+      steps: { type: "array", items: { type: "string" }, description: "Ordered list of short, concrete, verifiable steps." },
+    }, required: ["objective", "steps"] } } },
+  { type: "function", function: { name: "plan_update",
+    description: "Update a step in the active plan as you work — call this AS SOON AS a step's status changes so the ledger stays accurate. 'step' is the step number. 'status' is one of pending | active | done | blocked. Optionally attach a short 'note' (result, blocker reason, or link). Marking a step done auto-activates the next one.",
+    parameters: { type: "object", properties: {
+      step: { type: "number", description: "The step number to update." },
+      status: { type: "string", enum: ["pending", "active", "done", "blocked"], description: "New status for the step." },
+      note: { type: "string", description: "Optional short note (result/blocker)." },
+    }, required: ["step"] } } },
+  { type: "function", function: { name: "plan_add_step",
+    description: "Add a new step to the active plan when the work turns out to need one you didn't foresee. Optionally pass 'after' (an existing step number) to insert it right after that step; otherwise it's appended at the end.",
+    parameters: { type: "object", properties: {
+      text: { type: "string", description: "The new step description." },
+      after: { type: "number", description: "Insert after this step number (optional)." },
+    }, required: ["text"] } } },
+  { type: "function", function: { name: "plan_show",
+    description: "Return the current active plan (objective + steps with their statuses). Use it if you need to re-check where things stand.",
+    parameters: { type: "object", properties: {}, required: [] } } },
+  { type: "function", function: { name: "plan_clear",
+    description: "Clear/close the active plan when the whole objective is complete or abandoned.",
+    parameters: { type: "object", properties: {}, required: [] } } },
 
   { type: "function", function: { name: "post_to_chat",
     description: "Post a message directly into the user's live chat conversation window (it appears as a message from you in the web chat). Use this when a task should speak up in the conversation, e.g. to report an outcome or ask a follow-up. For a passive alert/badge instead, use notify_user.",
@@ -825,6 +850,11 @@ async function _execTool(name, args, signal) {
     case "get_secret": return getSecret(args.name);
     case "schedule_task": return require("./scheduler").schedule(args);
     case "list_tasks": return require("./scheduler").list();
+    case "plan_create": return require("./planner").create(args);
+    case "plan_update": return require("./planner").updateStep(args);
+    case "plan_add_step": return require("./planner").addStep(args);
+    case "plan_show": return require("./planner").get() || { note: "no active plan" };
+    case "plan_clear": return require("./planner").clear();
     case "update_task": return require("./scheduler").update(args);
     case "cancel_task": return require("./scheduler").cancel(args.id);
     case "notify_user": return require("./scheduler").pushNotification({ message: args.message, level: args.level });

@@ -336,6 +336,8 @@ function connectWS() {
       hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
       addMessage("assistant", "Error: " + d.error, "error");
       addRetry();
+    } else if (d.type === "plan") {
+      renderPlan(d.plan);
     } else if (d.type === "notification") {
       showNotification(d.note);
     } else if (d.type === "task_run") {
@@ -574,6 +576,43 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   if (t.dataset.tab === "files") refreshFiles();
   if (t.dataset.tab === "config") loadConfig();
 }));
+
+// --- Persistent PLAN ledger banner -------------------------------------------
+const PB_ICON = { done: "✓", active: "▸", pending: "○", blocked: "✕" };
+function renderPlan(plan) {
+  const banner = $("plan-banner"); if (!banner) return;
+  if (!plan || plan.status !== "active" || !Array.isArray(plan.steps) || !plan.steps.length) { banner.hidden = true; return; }
+  banner.hidden = false;
+  const obj = $("pb-obj"); if (obj) { obj.textContent = plan.objective || ""; obj.title = plan.objective || ""; }
+  const done = plan.steps.filter((s) => s.status === "done").length;
+  const prog = $("pb-prog"); if (prog) prog.textContent = done + "/" + plan.steps.length;
+  const list = $("pb-steps");
+  if (list) {
+    list.innerHTML = "";
+    for (const s of plan.steps) {
+      const li = document.createElement("li");
+      li.className = "pb-step " + (s.status || "pending");
+      li.innerHTML = `<span class="pb-ico">${PB_ICON[s.status] || "○"}</span>` +
+        `<span class="pb-txt">${esc(s.text || "")}` + (s.note ? ` <span class="pb-note">— ${esc(s.note)}</span>` : "") + `</span>`;
+      list.appendChild(li);
+    }
+  }
+  if (drawer) drawer.notifyActivity && drawer.notifyActivity();
+}
+(function initPlanBanner() {
+  const banner = $("plan-banner"); if (!banner) return;
+  if (localStorage.getItem("jarvis.plan.collapsed") === "1") banner.classList.add("collapsed");
+  const col = $("pb-collapse"), clr = $("pb-clear");
+  if (col) col.addEventListener("click", () => {
+    banner.classList.toggle("collapsed");
+    localStorage.setItem("jarvis.plan.collapsed", banner.classList.contains("collapsed") ? "1" : "0");
+  });
+  if (clr) clr.addEventListener("click", async () => {
+    if (!confirm("Clear the current plan?")) return;
+    try { await fetch("/api/plan", { method: "DELETE" }); } catch (_) {}
+    banner.hidden = true;
+  });
+})();
 
 // --- Mode toggles: stream watchdog + plan mode -------------------------------
 (function initModeToggles() {
@@ -953,6 +992,7 @@ async function init() {
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
+  try { renderPlan(await (await fetch("/api/plan")).json()); } catch (_) {}          // restore the active plan ledger
   modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
   if (cfg.workbench_url) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }

@@ -40,12 +40,14 @@ function assistantName() {
 const TOOL_USE_RULE =
   "\n\nIMPORTANT — tool use: always invoke tools through the real function/tool-call mechanism. " +
   "NEVER write a tool call as text in your reply (no <tool_call> tags, no <parameter=…> blocks, no JSON pretending to be a call) — text like that does NOT execute, it just gets shown to the user. If you want to run something, actually call the tool.";
+const PLANNER_RULE =
+  "\n\nPLANS (task ledger): for any MULTI-STEP job (build/fix an app, research then produce something, changes across several files/steps), FIRST call plan_create(objective, steps) to lay out an ordered checklist. Then, as you work, call plan_update(step, status) the moment a step's status changes (active → done, or blocked). Your active plan is shown to you at the start of every turn, so this is how you keep your place and RESUME correctly after any interruption — never restart steps already marked done. Add unforeseen steps with plan_add_step, and call plan_clear when the whole objective is finished. Skip the ledger for trivial one-shot requests.";
 function systemPrompt(persona) {
   let sp = (config.llm && config.llm.system_prompt) || "You are {assistant_name}, a helpful AI assistant.";
   const p = persona && config.personas && config.personas[persona];
   if (p && p.system_prompt) sp = p.system_prompt;
   else if (p && p.append) sp = sp + "\n\n" + p.append;
-  return sp.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE;
+  return sp.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE;
 }
 
 // "single" => every task tier uses llm.model (the models block is ignored).

@@ -120,6 +120,11 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       const h = require("./skills").hint(convo[lastUserIdx].content);
       if (h) { notes.push("(" + h + ")"); log.verbose("skill", "auto-hint", { hint: h }); }
     }
+    // Active PLAN ledger: if a persistent plan is in flight, show it at the top of every turn
+    // so the model always knows the objective + where it is and resumes from the first
+    // incomplete step (survives stalls/restarts — it's on disk). This is the core fix for
+    // "forgets what it was working on."
+    try { const pn = require("./planner").contextNote(); if (pn) notes.push("[" + pn + "]"); } catch (_) {}
     // Planning mode: steer the model to clarify → plan → execute step by step. Injected as
     // part of the volatile user-message suffix (NOT the system block) so the cached prefix
     // stays byte-stable whether plan mode is on or off.

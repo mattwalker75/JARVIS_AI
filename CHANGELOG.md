@@ -24,6 +24,18 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Planner / persistent task ledger — JARVIS stops forgetting what it was
+  doing.** For multi-step jobs the model now keeps an on-disk plan (objective + ordered
+  checklist) via new `plan_create` / `plan_update` / `plan_add_step` / `plan_show` /
+  `plan_clear` tools. The active plan is re-injected at the top of EVERY turn, so JARVIS
+  always knows the goal and its place and **resumes from the first incomplete step after
+  any interruption** (a stall, a Stop, even an app restart — the ledger is in
+  `/data/plan.json`, not the lost in-turn context). This is the core fix for the
+  "forgets what it was working on" behavior. A live banner above the chat shows the
+  objective, per-step status (done/active/pending/blocked), progress, and notes, updating
+  in real time; collapse or clear it from the banner. `GET/DELETE /api/plan`.
+  (`app/src/planner.js` (new), `app/src/tools.js`, `app/src/llm.js`, `app/src/config.js`,
+  `app/server.js`, frontend.)
 - 2026-07-26: **Stream-watchdog switch (🐕) — patient mode for long tasks.** The 120s
   idle watchdog that stops a stalled stream can now be toggled per message from the
   header. ON (default) = current behavior, best for chat and quick tasks. OFF = patient

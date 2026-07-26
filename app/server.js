@@ -48,6 +48,8 @@ app.post("/api/notifications/clear", (_req, res) => res.json(scheduler.clearNoti
 app.delete("/api/notifications/:id", (req, res) => res.json(scheduler.dismissNotification(req.params.id)));
 app.get("/api/tasks", (_req, res) => res.json(scheduler.list()));
 app.post("/api/tasks/cancel", (req, res) => res.json(scheduler.cancel((req.body || {}).id)));
+app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
+app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
 app.post("/api/tasks/add", (req, res) => {
   try { res.json(scheduler.schedule(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -238,6 +240,7 @@ function broadcast(obj) {
 scheduler.setNotifyCallback((note) => broadcast({ type: "notification", note }));
 scheduler.setRunCallback((run) => broadcast({ type: "task_run", run }));
 scheduler.setChatCallback((message) => broadcast({ type: "chat_post", message }));
+require("./src/planner").setOnChange((plan) => broadcast({ type: "plan", plan }));   // live plan ledger updates
 scheduler.start();
 
 wss.on("connection", (ws) => {
