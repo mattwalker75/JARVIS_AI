@@ -201,6 +201,7 @@
               <label>Temperature<input id="cfg-temperature" type="number" step="0.1" min="0" max="2"></label>
               <label>Max tokens<input id="cfg-max-tokens" type="number" min="1"></label>
             </div>
+            <label>Context window <span class="cfg-badge">meter</span><input id="cfg-context-window" type="number" min="0" step="1024" placeholder="auto — from Ollama num_ctx / the model"></label>
             <div class="hint">Pick a provider to fill the endpoint URL, add its API key, then <b>List models</b> to populate the model pickers below (type to filter). “Generic” lets you point at any OpenAI-compatible URL.</div>
           </div>
 

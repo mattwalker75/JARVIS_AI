@@ -24,6 +24,12 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Context window is configurable + auto-detected.** New **Context window** field
+  in the Config tab (blank/0 = auto). `GET /api/context-window` resolves the meter's ceiling:
+  a manual `llm.context_window` wins; otherwise AUTO — local Ollama uses `ollama.context_length`
+  (the loaded num_ctx, i.e. the real effective ceiling, not the model's theoretical max which
+  would mislead), and cloud via the LiteLLM gateway asks `/model/info`; else a default. Endpoint
+  detection is best-effort (verify live). (`app/server.js`, frontend, `JARVIS_CONFIG_template.json`.)
 - 2026-07-26: **"Summarize & continue" — real context compaction.** When the meter passes
   ~60%, a 🗜 Summarize button appears; it asks the model (smart tier, no tools) to write a
   complete-but-terse summary of the conversation, then REPLACES the sent history with that

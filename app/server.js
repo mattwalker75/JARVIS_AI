@@ -23,6 +23,36 @@ app.get("/api/config", (_req, res) => {
   res.json(publicConfig());
 });
 
+// Resolve the context-window ceiling for the meter. Manual (llm.context_window) wins; else
+// AUTO: local Ollama -> the loaded num_ctx (the effective ceiling); cloud via the LiteLLM
+// gateway -> /model/info; else a default. Best-effort — degrades to the config value.
+app.get("/api/context-window", async (_req, res) => {
+  const { config: cfg, modelFor } = require("./src/config");
+  const llm = cfg.llm || {};
+  const explicit = Number(llm.context_window);
+  if (explicit > 0) return res.json({ context_window: explicit, source: "configured" });
+  const provider = String(llm.provider || "").toLowerCase();
+  const base = (llm.base_url || "").replace(/\/+$/, "");
+  const numCtx = Number((cfg.ollama || {}).context_length);
+  const isLocal = provider === "ollama" || /ollama|litellm|11434|localhost|127\.0\.0\.1|host\.docker/.test(base);
+  if (isLocal && numCtx > 0) return res.json({ context_window: numCtx, source: "ollama num_ctx" });
+  // Cloud (e.g. via the LiteLLM gateway): ask the endpoint for the model's real window.
+  try {
+    const headers = llm.api_key && provider !== "ollama" ? { Authorization: "Bearer " + llm.api_key } : {};
+    const r = await fetch(base.replace(/\/v1$/, "") + "/model/info", { headers, signal: AbortSignal.timeout(4000) });
+    if (r.ok) {
+      const d = await r.json();
+      const model = modelFor("chat");
+      const list = d.data || d.models || [];
+      const hit = list.find((m) => m.model_name === model || (m.litellm_params && String(m.litellm_params.model || "").includes(model))) || (list.length === 1 ? list[0] : null);
+      const info = hit && hit.model_info;
+      const cw = info && (info.max_input_tokens || info.context_window || info.max_tokens);
+      if (Number(cw) > 0) return res.json({ context_window: Number(cw), source: "model/info" });
+    }
+  } catch (_) {}
+  res.json({ context_window: numCtx > 0 ? numCtx : 8192, source: "default" });
+});
+
 // Exercises the LLM's three capabilities without needing a model (offline check).
 app.get("/api/selftest", async (_req, res) => {
   const out = {};

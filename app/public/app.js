@@ -1092,7 +1092,8 @@ async function init() {
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
-  if (Number(cfg.context_window) > 0) ctxWindow = Number(cfg.context_window);        // context-meter ceiling
+  if (Number(cfg.context_window) > 0) ctxWindow = Number(cfg.context_window);        // context-meter ceiling (immediate)
+  try { const d = await (await fetch("/api/context-window")).json(); if (Number(d.context_window) > 0) ctxWindow = Number(d.context_window); } catch (_) {}   // refine: manual override / auto-detect (Ollama num_ctx / model)
   try { renderPlan(await (await fetch("/api/plan")).json()); } catch (_) {}          // restore the active plan ledger
   if (cfg.autopilot) {                                                                // prefill Autopilot launcher defaults
     const mi = $("ap-minutes"); if (mi && cfg.autopilot.default_minutes) mi.value = cfg.autopilot.default_minutes;
@@ -1149,6 +1150,7 @@ const CFG_FIELDS = [
   ["cfg-tier-vision", "llm.models.vision", "str"],
   ["cfg-temperature", "llm.temperature", "num"],
   ["cfg-max-tokens", "llm.max_tokens", "num"],
+  ["cfg-context-window", "llm.context_window", "num"],
   ["cfg-completion-checks", "llm.completion_checks", "num"],
   ["cfg-idle-timeout", "llm.idle_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
