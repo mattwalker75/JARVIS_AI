@@ -24,6 +24,20 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Autopilot: pause / resume / modify / extend, plus anti-loop fixes.** The
+  live status bar now has **⏸ Pause** (freezes the time budget; **▶ Resume** later),
+  **+15m** (extend the budget — also rescues a run about to stop on time), and **Modify**
+  (change the objective mid-run; the next cycle re-checks its plan against it), alongside
+  the existing Wrap up / Stop. Backend gains `pause`/`resume`/`modify`/`extend`.
+  **Log-review-driven fixes for a real re-read loop:** a session showed Autopilot re-reading
+  the same file 40+ times and repeatedly narrating "now I'll build X" without building it
+  (the model itself noticed "I've been calling plan_update without building anything"). Two
+  fixes: each cycle now carries a **one-line recap of the previous cycle** ("continue from
+  there — don't re-read what you already did"), and an **anti-thrash push** kicks in after a
+  couple of cycles that only read/plan without writing files ("STOP re-reading, make the
+  change NOW"). `plan_show` is discouraged in its description and the injected ledger note
+  (it was called 36× redundantly since the plan is already shown every turn).
+  (`app/src/autopilot.js`, `app/src/planner.js`, `app/src/tools.js`, `app/server.js`, frontend.)
 - 2026-07-26: **Config tab: provider picker + live model listing.** The "Model & LLM"
   section now has a **Provider / endpoint** dropdown with presets (OpenAI, OpenRouter,
   Groq, Together, Mistral, DeepSeek, xAI, Perplexity, Google Gemini, Ollama, the bundled
@@ -117,6 +131,13 @@ infrastructure, security, documentation, or test-policy changes.
   premature "I'm done" stops. (`app/src/llm.js`.)
 
 ### Fixed
+- 2026-07-26: **Bare URLs in chat are now clickable.** When the model posts a plain link
+  (e.g. `http://localhost:9101` for a served app), it now renders as a clickable link.
+  Existing markdown links and URLs inside inline code are left as-is. (`app/public/app.js`.)
+- 2026-07-26: **Autopilot objective box no longer closes when you select its text.** The
+  launcher closed on any outside click, including a text-selection drag that ended outside
+  the box — so clearing the field was painful. It now only closes when the press *started*
+  outside. (`app/public/app.js`.)
 - 2026-07-26: **Phantom "RUNNING" Autopilot bar on an idle app.** The `.autopilot-bar`
   CSS set `display:flex`, which (author > UA cascade) overrode the HTML `hidden`
   attribute, so the bar rendered with its default "running" text even with no run active.

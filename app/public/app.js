@@ -169,6 +169,14 @@ function fmt(s) {
   s = s.replace(/__([^_]+)__/g, "<u>$1</u>");
   s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   s = s.replace(/~~([^~]+)~~/g, "<s>$1</s>");
+  // Auto-link BARE URLs (e.g. a http://localhost:9101 the model posts) so they are clickable.
+  // Protect existing <a>/<code> spans first so we do not double-link or link inside code.
+  {
+    const prot = [];
+    s = s.replace(/<a [^>]*>[\s\S]*?<\/a>|<code>[\s\S]*?<\/code>/g, function (m) { prot.push(m); return "\u0000L" + (prot.length - 1) + "\u0000"; });
+    s = s.replace(/(^|[\s(>])((?:https?:\/\/|www\.)[^\s<)]+[a-zA-Z0-9\/#=_&-])/g, function (m, pre, url) { return pre + '<a href="' + (url.indexOf("http") === 0 ? url : "https://" + url) + '" target="_blank" rel="noopener">' + url + "</a>"; });
+    s = s.replace(/\u0000L(\d+)\u0000/g, function (m, i) { return prot[Number(i)] || ""; });
+  }
   s = renderLists(s);
   // 3) Restore code blocks (content re-escaped) with a copy button.
   s = s.replace(/\u0000C(\d+)\u0000/g, (m, i) => `<div class="code-wrap"><button class="code-copy" title="Copy code">⧉</button><pre><code>${esc(blocks[Number(i)] || "")}</code></pre></div>`);
@@ -618,20 +626,26 @@ function renderAutopilot(st) {
   const bar = $("autopilot-bar"); if (!bar) return;
   if (!st || !st.active) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
   bar.hidden = false;
-  bar.classList.toggle("paused", st.status === "stopping");
-  const state = $("ap-state"); if (state) state.textContent = st.status === "stopping" ? "stopping…" : "running";
+  const paused = !!st.paused, stopping = st.status === "stopping" || st.status === "pausing";
+  bar.classList.toggle("paused", paused || stopping);
+  const state = $("ap-state"); if (state) state.textContent = st.status === "pausing" ? "pausing…" : st.status === "stopping" ? "stopping…" : st.status;
   const obj = $("ap-barobj"); if (obj) { obj.textContent = st.objective || ""; obj.title = st.objective || ""; }
+  const pauseBtn = $("ap-pause"); if (pauseBtn) { pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause"; pauseBtn.dataset.act = paused ? "resume" : "pause"; }
   let secs = Number(st.seconds_left) || 0;
-  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)} left`; };
+  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}`; };
   paint();
-  if (apTick) clearInterval(apTick);
-  apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);
+  if (apTick) { clearInterval(apTick); apTick = null; }
+  if (st.status === "running") apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);  // freeze while paused/stopping
 }
 (function initAutopilot() {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
   if (btn && drop) {
     btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) $("ap-objective").focus(); });
-    document.addEventListener("click", (e) => { if (!drop.hidden && !drop.contains(e.target) && e.target !== btn) drop.hidden = true; });
+    // Close on an outside click — but only if the press STARTED outside. Otherwise selecting
+    // text in the objective box (drag that ends outside) would wrongly close the panel.
+    let downInside = false;
+    document.addEventListener("mousedown", (e) => { downInside = drop.contains(e.target) || e.target === btn; });
+    document.addEventListener("click", (e) => { if (!drop.hidden && !downInside && !drop.contains(e.target) && e.target !== btn) drop.hidden = true; });
   }
   const start = $("ap-start");
   if (start) start.addEventListener("click", async () => {
@@ -647,9 +661,17 @@ function renderAutopilot(st) {
     } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); }
     finally { start.disabled = false; }
   });
-  const wrap = $("ap-wrapup"), stop = $("ap-stop");
-  if (wrap) wrap.addEventListener("click", async () => { try { renderAutopilot(await (await fetch("/api/autopilot/wrapup", { method: "POST" })).json()); } catch (_) {} });
-  if (stop) stop.addEventListener("click", async () => { if (!confirm("Stop Autopilot now?")) return; try { renderAutopilot(await (await fetch("/api/autopilot/stop", { method: "POST" })).json()); } catch (_) {} });
+  const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
+  const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify");
+  if (wrap) wrap.addEventListener("click", () => apPost("wrapup"));
+  if (stop) stop.addEventListener("click", () => { if (confirm("Stop Autopilot now?")) apPost("stop"); });
+  if (pauseB) pauseB.addEventListener("click", () => apPost(pauseB.dataset.act === "resume" ? "resume" : "pause"));
+  if (extendB) extendB.addEventListener("click", () => apPost("extend", { minutes: 15 }));
+  if (modifyB) modifyB.addEventListener("click", () => {
+    const cur = ($("ap-barobj").textContent || "").trim();
+    const next = prompt("Change the Autopilot objective — the next cycle will re-check its plan against it:", cur);
+    if (next && next.trim() && next.trim() !== cur) apPost("modify", { objective: next.trim() });
+  });
 })();
 
 // --- Mode toggles: stream watchdog + plan mode -------------------------------

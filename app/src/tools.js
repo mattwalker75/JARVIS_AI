@@ -756,7 +756,7 @@ const toolDefs = [
       after: { type: "number", description: "Insert after this step number (optional)." },
     }, required: ["text"] } } },
   { type: "function", function: { name: "plan_show",
-    description: "Return the current active plan (objective + steps with their statuses). Use it if you need to re-check where things stand.",
+    description: "Return the current active plan (objective + steps with their statuses). NOTE: your active plan is ALREADY shown to you at the top of every turn, so you rarely need this — do not call it just to re-read the plan; only use it in a fresh/standalone context where the plan isn't already in view.",
     parameters: { type: "object", properties: {}, required: [] } } },
   { type: "function", function: { name: "plan_clear",
     description: "Clear/close the active plan when the whole objective is complete or abandoned.",

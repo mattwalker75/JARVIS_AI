@@ -95,7 +95,7 @@ function contextNote() {
   const cur = plan.steps.find((s) => s.status === "active") || plan.steps.find((s) => s.status !== "done");
   return `ACTIVE PLAN — "${plan.objective}"\n${lines.join("\n")}\n` +
     (cur ? `Resume from step ${cur.id}. ` : "") +
-    "Keep this ledger current: call plan_update(step, status) as you finish each step (status: done | active | blocked). Do NOT redo completed steps. When every step is done, give your final summary.";
+    "Keep this ledger current: call plan_update(step, status) as you finish each step (status: done | active | blocked). Do NOT redo completed steps, and do NOT call plan_show — this plan is already shown to you every turn. When every step is done, give your final summary.";
 }
 
 module.exports = { create, updateStep, addStep, clear, get, contextNote, setOnChange };
