@@ -24,6 +24,22 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Browser console capture — JARVIS can now debug a RUNNING web app.** The
+  browser daemon captures the page's JavaScript console output + uncaught runtime errors,
+  and `browser_goto` auto-includes any load-time errors in its result. New `browser_console`
+  tool returns the messages + errors on demand. This closes the exact gap that stumped a
+  coding session ("everything is black — fix the lighting"): the model kept re-reading the
+  static HTML because it couldn't see the runtime error; now it can `browser_goto` the served
+  app and read "Uncaught TypeError: … at render()" directly. (`app/src/browserd.py`,
+  `app/src/tools.js`.)
+- 2026-07-26: **`edit_workbench_file` — targeted edits instead of whole-file rewrites.** A
+  string-replace edit tool (find an exact unique `old_string`, replace with `new_string`;
+  `replace_all` optional) for workbench files. The model was rewriting entire large files
+  with `write_workbench_file` and reintroducing bugs (undefined vars, malformed rows) each
+  time; targeted edits are safer and cheaper. Reads via the shared `/workspace` mount (no
+  truncation) and writes back reliably as root. `write_workbench_file`'s description now
+  steers to it for edits. Literal-safe (a `$&` in `new_string` is not interpreted).
+  (`app/src/tools.js`.)
 - 2026-07-26: **Autopilot: pause / resume / modify / extend, plus anti-loop fixes.** The
   live status bar now has **⏸ Pause** (freezes the time budget; **▶ Resume** later),
   **+15m** (extend the budget — also rescues a run about to stop on time), and **Modify**

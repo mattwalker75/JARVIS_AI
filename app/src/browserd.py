@@ -15,6 +15,26 @@ from playwright.sync_api import sync_playwright
 PORT = 9251
 pw = ctx = page = None
 refs = {}   # ref id -> element handle from the LAST snapshot (stale after navigation)
+console_log = []   # captured console messages + uncaught page errors (for debugging running apps)
+_console_page = None
+
+
+def _attach_console(p):
+    # Capture console messages + uncaught JS errors so the agent can debug a running web app
+    # (e.g. a blank canvas caused by a runtime error it can't see from the static HTML).
+    def on_console(msg):
+        try:
+            console_log.append({"type": msg.type, "text": msg.text})
+        except Exception:
+            pass
+        del console_log[:-300]
+
+    def on_pageerror(err):
+        console_log.append({"type": "pageerror", "text": str(err)})
+        del console_log[:-300]
+
+    p.on("console", on_console)
+    p.on("pageerror", on_pageerror)
 
 INTERACTIVE = ("a[href], button, input, textarea, select, [role='button'], "
                "[role='link'], [role='tab'], [role='menuitem'], [role='checkbox'], "
@@ -40,6 +60,10 @@ def ensure_page():
             java_script_enabled=True,   # explicit: many sites require JS (safe — sandboxed in the container)
         )
     page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    global _console_page
+    if _console_page is not page:   # (re)attach console listeners when the page is (re)created
+        _attach_console(page)
+        _console_page = page
     return page
 
 
@@ -116,8 +140,21 @@ def handle(d):
     op = d.get("op")
     p = ensure_page()
     if op == "goto":
+        del console_log[:]   # fresh capture for THIS navigation
         p.goto(d["url"], wait_until="domcontentloaded", timeout=30000)
-        return state(p)
+        p.wait_for_timeout(900)   # let initial scripts run so console errors/logs fire
+        st = state(p)
+        errs = [m for m in console_log if m["type"] in ("error", "pageerror")]
+        if errs:
+            st["console_errors"] = errs[-20:]   # surface load-time JS errors right away
+        return st
+    if op == "console":
+        limit = int(d.get("limit") or 100)
+        msgs = console_log[-limit:]
+        errs = [m for m in console_log if m["type"] in ("error", "pageerror")]
+        if d.get("clear"):
+            del console_log[:]
+        return {"messages": msgs, "errors": errs[-50:], "count": len(msgs)}
     if op == "snapshot":
         return snapshot()
     if op == "click":

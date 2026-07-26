@@ -98,6 +98,30 @@ async function writeWorkbenchFile(p, content) {
   return { written: p, bytes: parseInt((r.output || "0").trim(), 10) || 0 };
 }
 
+// Targeted string-replace edit of an existing workbench file — avoids error-prone whole-file
+// rewrites. Reads via the shared /workspace mount when possible (no truncation), else base64
+// out of the container; writes back reliably as root via writeWorkbenchFile.
+async function editWorkbenchFile(p, oldStr, newStr, replaceAll) {
+  if (!p || !String(p).startsWith("/")) throw new Error("path must be an absolute workbench path, e.g. /workspace/doom.html");
+  if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
+  newStr = newStr == null ? "" : String(newStr);
+  let content;
+  try { content = fs.readFileSync(p, "utf8"); }               // /workspace + shared dirs are mounted into the app
+  catch (_) {
+    const r = await runShell(`base64 -w0 < ${shq(p)} 2>/dev/null || base64 < ${shq(p)}`);
+    if (r.exit_code) throw new Error(`cannot read ${p}: ${(r.output || "").slice(0, 200)}`);
+    content = Buffer.from((r.output || "").replace(/\s+/g, ""), "base64").toString("utf8");
+  }
+  const occurrences = content.split(oldStr).length - 1;
+  if (occurrences === 0) throw new Error(`old_string not found in ${p}. It must match EXACTLY (including whitespace/indentation) — read the file first and copy the snippet verbatim.`);
+  if (occurrences > 1 && !replaceAll) throw new Error(`old_string appears ${occurrences} times in ${p}. Add more surrounding context to make it unique, or pass replace_all=true.`);
+  let updated;
+  if (replaceAll) updated = content.split(oldStr).join(newStr);
+  else { const i = content.indexOf(oldStr); updated = content.slice(0, i) + newStr + content.slice(i + oldStr.length); }
+  const w = await writeWorkbenchFile(p, updated);
+  return { edited: p, replacements: replaceAll ? occurrences : 1, bytes: w.bytes };
+}
+
 // --- shared files (read-only + read-write dirs) ---
 function resolveShared(p, mustWrite) {
   const ro = config.shared.read_only_dir;
@@ -585,8 +609,16 @@ const toolDefs = [
     description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
     parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer", description: "Max seconds before the command is killed (default 120, max 600)." } }, required: ["command"] } } },
   { type: "function", function: { name: "write_workbench_file",
-    description: "Write a text/code file to an absolute path in your workbench (e.g. /workspace/app.py). Use THIS to create code/config files for the workbench — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
+    description: "Write a text/code file to an absolute path in your workbench (e.g. /workspace/app.py). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
     parameters: { type: "object", properties: { path: { type: "string", description: "Absolute workbench path, e.g. /workspace/app.py" }, content: { type: "string" } }, required: ["path", "content"] } } },
+  { type: "function", function: { name: "edit_workbench_file",
+    description: "Make a TARGETED edit to an existing workbench file by replacing an exact snippet — STRONGLY PREFER this over rewriting the whole file with write_workbench_file when changing existing code. It's safer and cheaper: you only emit the small piece that changes, so you don't reintroduce bugs elsewhere or waste tokens re-writing the whole file. Provide old_string = the exact text to find (copy it verbatim, including indentation/whitespace; include enough surrounding context to be UNIQUE) and new_string = what to replace it with. Fails if old_string is missing or appears more than once (then add more context or set replace_all=true). Read the file first so old_string matches exactly.",
+    parameters: { type: "object", properties: {
+      path: { type: "string", description: "Absolute workbench path, e.g. /workspace/doom.html" },
+      old_string: { type: "string", description: "Exact text to replace (must be unique in the file unless replace_all)." },
+      new_string: { type: "string", description: "Replacement text (use \"\" to delete the old text)." },
+      replace_all: { type: "boolean", description: "Replace every occurrence instead of requiring a unique match." },
+    }, required: ["path", "old_string", "new_string"] } } },
   { type: "function", function: { name: "serve_app",
     description: "Run a web app/server inside the workbench and expose it so the USER can open it in their OWN browser to preview/test it (e.g. before you hand over the code). The app MUST serve a real, interactive HTML page at GET / (a working UI the user can actually use) — NOT just JSON/API endpoints, or the browser shows 'Cannot GET /' and it looks broken. Build the app under /workspace, then call this with the command that starts the server BOUND TO 0.0.0.0 on one of the preview ports (9101-9150). The tool reports whether GET / returned 200 (ok_homepage); if it didn't, add the homepage UI and call again BEFORE telling the user it's ready. Returns http://localhost:<port> for the user to visit; the server keeps running in the background. Bind-correct examples: 'python3 -m http.server 9101 --bind 0.0.0.0' (serves files incl. index.html); a Node/Express app that serves a page at '/' and listens on 0.0.0.0:9102; 'flask run --host 0.0.0.0 --port 9103'. Also save the final code to /READ_WRITE_FILES.",
     parameters: { type: "object", properties: {
@@ -662,6 +694,9 @@ const toolDefs = [
   { type: "function", function: { name: "browser_extract",
     description: "Extract the visible TEXT of the current page in the agent browser (or of one element via a CSS selector). Long text is paged via offset. Use this to READ page content — it is exact, unlike the vision screenshot.",
     parameters: { type: "object", properties: { selector: { type: "string", description: "Optional CSS selector (default: whole page body)." }, offset: { type: "integer", description: "Character offset for paging." } }, required: [] } } },
+  { type: "function", function: { name: "browser_console",
+    description: "Get the browser's JavaScript CONSOLE output + uncaught runtime errors for the page currently open in the agent browser. THE way to debug a running web app that renders wrong or blank (e.g. a black canvas): browser_goto the app, then call this to see the exact error (e.g. 'Uncaught TypeError: … at render()') instead of guessing from the static HTML. browser_goto also auto-includes load-time errors in its result. Returns recent messages + the error/pageerror entries.",
+    parameters: { type: "object", properties: { limit: { type: "integer", description: "Max recent messages to return (default 100)." }, clear: { type: "boolean", description: "Clear the buffer after reading." } }, required: [] } } },
   { type: "function", function: { name: "ui_actions",
     description: "Perform a SEQUENCE of desktop UI actions in ONE call — far fewer round-trips than separate click/type/key calls. After a screenshot gives you element coordinates, use this to run the whole plan at once, e.g. click a field → type text → press Enter. A short settle delay runs between steps; the sequence STOPS at the first failing step and reports it. Screen is 1024x768; screenshot again afterward to verify. Each step is one of: {action:'click'|'double_click'|'right_click'|'move', x, y} , {action:'type', text} , {action:'key', keys:'Return'} , {action:'scroll', direction:'up'|'down', amount} , {action:'sleep', ms}. NOTE: for actions INSIDE a web page, prefer the browser_* tools (deterministic selectors) over pixel clicking.",
     parameters: { type: "object", properties: { actions: { type: "array", items: { type: "object" }, description: "Ordered list of action steps to perform in sequence." } }, required: ["actions"] } } },
@@ -818,6 +853,7 @@ async function _execTool(name, args, signal) {
     case "update_memory": return await updateMemory(args.id, args.text);
     case "run_shell": return await runShell(args.command, args.timeout_s, signal);
     case "write_workbench_file": return await writeWorkbenchFile(args.path, args.content);
+    case "edit_workbench_file": return await editWorkbenchFile(args.path, args.old_string, args.new_string, args.replace_all);
     case "serve_app": return await serveApp(args.command, args.port, args.cwd);
     case "list_dir": return await listDir(args.path);
     case "read_file": return await readFile(args.path, args.offset, args.max_chars);
@@ -837,6 +873,7 @@ async function _execTool(name, args, signal) {
     case "browser_click": return await browserCmd("click", { target: args.target });
     case "browser_fill": return await browserCmd("fill", { target: args.target, text: args.text, press_enter: args.press_enter });
     case "browser_extract": return await browserCmd("extract", { selector: args.selector, offset: args.offset });
+    case "browser_console": return await browserCmd("console", { limit: args.limit, clear: args.clear });
     case "open_url": return await openUrl(args.url);
     case "open_app": return await openApp(args.command);
     case "click": return await clickAt(args.x, args.y, 1);
@@ -911,7 +948,7 @@ require("./mcp").init().then((defs) => { for (const d of defs) toolDefs.push(d);
 
 // Retryability lives WITH the tool (read-only/idempotent tools only — mutating tools
 // are never auto-retried to avoid double execution).
-const RETRYABLE = new Set(["fetch_url", "web_search", "search_memory", "list_memories", "screenshot", "read_file", "read_document", "list_dir", "browser_snapshot", "browser_extract", "check_email", "read_email"]);
+const RETRYABLE = new Set(["fetch_url", "web_search", "search_memory", "list_memories", "screenshot", "read_file", "read_document", "list_dir", "browser_snapshot", "browser_extract", "browser_console", "check_email", "read_email"]);
 function isRetryable(name) {
   if (RETRYABLE.has(name)) return true;
   const c = customRegistry[name];
