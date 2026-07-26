@@ -73,6 +73,21 @@ app.post("/api/models/probe", async (req, res) => {
   } catch (e) { return res.json({ models: [], error: "Could not reach the endpoint: " + e.message }); }
   return res.json({ models: [], error: "No model list returned by that endpoint." });
 });
+// Summarize the conversation so it can CONTINUE with a smaller context (the frontend then
+// replaces its history with this summary). No tools; uses the 'smart' tier for a good summary.
+app.post("/api/summarize", async (req, res) => {
+  const all = Array.isArray((req.body || {}).messages)
+    ? req.body.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    : [];
+  if (all.length < 2) return res.json({ summary: "" });
+  const messages = [
+    { role: "system", content: "You compress a conversation so it can CONTINUE with less context. Write a concise but COMPLETE summary: the user's goal(s), key decisions and facts established, files/code created or changed and their paths, what is done, and what remains to do. Use terse bullet points grouped under short headings. This summary REPLACES the earlier messages, so include everything needed to continue seamlessly — omit nothing important. No preamble, no sign-off, no commentary." },
+    ...all.slice(-40),
+    { role: "user", content: "Summarize the conversation so far per your instructions, so we can continue with a smaller context." },
+  ];
+  try { res.json({ summary: await llm.chat({ messages, tier: "smart", noTools: true }) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
 app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
 const autopilot = require("./src/autopilot");

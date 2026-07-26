@@ -62,10 +62,10 @@ function estimateCost(model, u) {
   return +(((u.prompt_tokens || 0) / 1000) * pi + ((u.completion_tokens || 0) / 1000) * po).toFixed(6);
 }
 
-async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode }) {
+async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode, noTools }) {
   const llm = config.llm || {};
   if ((llm.provider || "").toLowerCase() === "mock") return mockChat(messages);
-  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal, watchdog, planMode);
+  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal, watchdog, planMode, noTools);
 }
 
 // Some chat templates (notably strict Qwen3 derivatives) raise
@@ -90,9 +90,9 @@ function oneSystemAtFront(msgs) {
   return [{ role: "system", content: sys.join("\n\n") }, ...rest];
 }
 
-async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode) {
+async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode, noTools) {
   const excluded = new Set(excludeTools || []);
-  const toolset = excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs;
+  const toolset = noTools ? [] : (excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs);
   const llm = config.llm || {};
   const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = base + "/chat/completions";
@@ -162,8 +162,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       messages: oneSystemAtFront(convo),
       temperature: llm.temperature ?? 0.4,
       max_tokens: llm.max_tokens ?? 1200,
-      tools: toolset,
-      tool_choice: "auto",
+      ...(toolset.length ? { tools: toolset, tool_choice: "auto" } : {}),   // omit tools entirely when disabled
       stream_options: { include_usage: true },
     };
     log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}`);

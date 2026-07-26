@@ -83,7 +83,28 @@ function updateContextMeter(tok) {
   const k = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n));
   label.textContent = `${pct}% · ${k(tok)}/${k(ctxWindow)}`;
   m.title = `Context window: ${pct}% used (${tok.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens). A fresh chat resets it.`;
+  const sb = $("ctx-summarize"); if (sb) sb.hidden = pct < 60;   // offer "Summarize & continue" once it's getting full
 }
+// Summarize the conversation and REPLACE the sent context with that summary, so the window
+// actually shrinks (a pure "please summarize" wouldn't free anything) and we keep going.
+async function summarizeAndContinue() {
+  const btn = $("ctx-summarize");
+  if (history.length < 2) return;
+  if (btn) { btn.disabled = true; btn.textContent = "…summarizing"; }
+  try {
+    const d = await (await fetch("/api/summarize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: history }) })).json();
+    if (d.error || !d.summary) { addMessage("assistant", "Couldn't summarize: " + (d.error || "empty result"), "error"); return; }
+    messagesEl.innerHTML = "";                       // replace the transcript with the compact summary
+    history.length = 0;
+    const msg = { role: "assistant", content: "📋 **Context compacted to continue.** Summary of the conversation so far:\n\n" + d.summary };
+    history.push(msg); saveHistory();
+    addMessage(msg.role, msg.content);
+    const m = $("ctx-meter"); if (m) m.classList.remove("warn", "high");   // meter recomputes on the next turn
+    if (btn) btn.hidden = true;
+  } catch (e) { addMessage("assistant", "Summarize failed: " + e.message, "error"); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = "🗜 Summarize"; } }
+}
+(function () { const b = document.getElementById("ctx-summarize"); if (b) b.addEventListener("click", summarizeAndContinue); })();
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
 let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)

@@ -24,6 +24,12 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **"Summarize & continue" — real context compaction.** When the meter passes
+  ~60%, a 🗜 Summarize button appears; it asks the model (smart tier, no tools) to write a
+  complete-but-terse summary of the conversation, then REPLACES the sent history with that
+  summary so the window actually shrinks and JARVIS keeps going with its own summary as
+  memory (a plain "please summarize" wouldn't free anything). `POST /api/summarize`; llm.chat
+  gains a `noTools` option. (`app/server.js`, `app/src/llm.js`, frontend.)
 - 2026-07-26: **Context-window meter.** A small bar under the title shows how full the
   conversation context is (green <60%, amber <85%, red ≥85%) — e.g. `64% · 21k/33k` — driven
   by each turn's actual prompt size (`context_tokens`, the latest single call, not the per-turn

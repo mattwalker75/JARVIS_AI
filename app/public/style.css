@@ -30,6 +30,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .ctx-meter.high .ctx-fill { background: var(--danger); }
 .ctx-label { font-size: .64rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctx-meter.high .ctx-label { color: var(--danger); }
+.ctx-sum { background: transparent; border: 1px solid var(--edge); color: var(--muted); border-radius: 6px; padding: 1px 6px; font-size: .62rem; cursor: pointer; white-space: nowrap; }
+.ctx-sum:hover { color: var(--accent); border-color: var(--accent); }
+.ctx-meter.high .ctx-sum { color: var(--danger); border-color: rgba(255,90,90,.5); }
 .titlerow { display: flex; align-items: center; gap: 10px; }
 /* Always-visible working/idle status pill — so you never have to guess whether JARVIS
    is busy. Green dot = idle, amber pulsing = working, red pulsing = seems stalled. */
