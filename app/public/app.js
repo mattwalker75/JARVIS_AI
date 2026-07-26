@@ -74,7 +74,8 @@ function updateSessUsage() {
 function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
 let ctxWindow = 32768;   // context-window ceiling (from config); the meter is context_tokens / this
 function updateContextMeter(tok) {
-  const m = $("ctx-meter"), fill = $("ctx-fill"), label = $("ctx-label"); if (!m || !tok) return;
+  const m = $("ctx-meter"), fill = $("ctx-fill"), label = $("ctx-label"); if (!m) return;
+  tok = Math.max(0, Math.round(tok || 0));                     // always show — 0% is valid
   const pct = Math.min(100, Math.round((tok / ctxWindow) * 100));
   m.hidden = false;
   fill.style.width = pct + "%";
@@ -105,6 +106,10 @@ async function summarizeAndContinue() {
   finally { if (btn) { btn.disabled = false; btn.textContent = "🗜 Summarize"; } }
 }
 (function () { const b = document.getElementById("ctx-summarize"); if (b) b.addEventListener("click", summarizeAndContinue); })();
+// Rough estimate so the meter shows a sensible value on load/refresh before the first turn's
+// exact usage arrives (0 on a fresh chat; ~4 chars/token + the fixed system+tools prefix otherwise).
+function estimateContextTokens() { return history.length ? Math.round(history.reduce((n, m) => n + ((m.content || "").length), 0) / 4) + 8000 : 0; }
+function refreshContextMeter() { updateContextMeter(estimateContextTokens()); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
 let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
@@ -880,7 +885,7 @@ async function refreshSessions() {
 function loadConversation(messages) {
   messagesEl.innerHTML = ""; history.length = 0;
   (messages || []).forEach((m) => { addMessage(m.role, m.content); history.push({ role: m.role, content: m.content }); });
-  saveHistory(); resetSessUsage();   // keep persisted copy in sync + reset usage for the loaded convo
+  saveHistory(); resetSessUsage(); refreshContextMeter();   // reset usage + show the loaded convo's context estimate
 }
 async function saveCurrent() {
   const name = prompt("Save conversation as:", currentSession.name || "Session " + new Date().toLocaleString());
@@ -892,7 +897,7 @@ async function saveCurrent() {
 }
 function newSession() {
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
-  saveHistory(); resetSessUsage();   // clear persisted conversation + reset the usage counter
+  saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
   addMessage("assistant", "New session. JARVIS online — ask me anything.");
 }
 const newChatBtn = $("new-chat");
@@ -1118,6 +1123,7 @@ async function init() {
   }
   try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (_) {}
   restoreHistory();   // bring back the conversation after a refresh
+  refreshContextMeter();   // always show the meter (0% on a fresh chat; an estimate after a refresh)
   refreshTasks(); refreshNotes(); setupDropZone(); loadModels();
   connectWS();
   inputEl.focus();

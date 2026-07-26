@@ -192,6 +192,10 @@ infrastructure, security, documentation, or test-policy changes.
   premature "I'm done" stops. (`app/src/llm.js`.)
 
 ### Fixed
+- 2026-07-26: **Context meter now always visible (even at 0%).** It was hidden until the
+  first turn reported usage, so a fresh or just-refreshed chat showed nothing. It now renders
+  on load — 0% on a new chat, and a rough estimate after a refresh / when loading a saved
+  session — and the exact value replaces the estimate on the next turn. (`app/public/app.js`.)
 - 2026-07-26: **Bare URLs in chat are now clickable.** When the model posts a plain link
   (e.g. `http://localhost:9101` for a served app), it now renders as a clickable link.
   Existing markdown links and URLs inside inline code are left as-is. (`app/public/app.js`.)
