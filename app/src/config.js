@@ -109,6 +109,7 @@ function publicConfig() {
     skills_autohint: config.skills_autohint !== false,
     stall_seconds: Number((config.ui || {}).stall_seconds) || 25,
     autopilot: { autonomy: ((config.autopilot || {}).autonomy === "full") ? "full" : "guarded", default_minutes: Number((config.autopilot || {}).default_minutes) || 30 },
+    context_window: Number((config.llm || {}).context_window) || Number((config.ollama || {}).context_length) || 32768,
   };
 }
 

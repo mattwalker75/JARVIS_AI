@@ -147,7 +147,9 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   let workedSinceCheck = false; // did the model call a tool since the last completion check?
   let leakedFixes = 0;         // budget for salvaging/correcting tool calls emitted as TEXT
   let lastModel = modelFor(tier);
-  const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; } };
+  // context_tokens = the MOST RECENT single call's prompt size (not the per-turn sum) — that's
+  // what actually reflects how full the context window is right now, for the UI meter.
+  const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; if (u.prompt_tokens) usage.context_tokens = u.prompt_tokens; } };
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
 
   for (let i = 0; i <= maxIter; i++) {

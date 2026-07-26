@@ -22,6 +22,14 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .arc { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--accent); box-shadow: 0 0 14px var(--accent); animation: pulse 2.4s infinite; }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 8px var(--accent); } 50% { box-shadow: 0 0 18px var(--accent); } }
 .title { font-weight: 800; letter-spacing: 2px; }
+/* context-window meter: how full the conversation context is (green<60% amber<85% red) */
+.ctx-meter { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.ctx-bar { width: 92px; height: 6px; border-radius: 4px; background: rgba(255,255,255,.10); overflow: hidden; }
+.ctx-fill { height: 100%; width: 0; background: #3ad07a; transition: width .3s ease, background .3s; }
+.ctx-meter.warn .ctx-fill { background: #ffb03a; }
+.ctx-meter.high .ctx-fill { background: var(--danger); }
+.ctx-label { font-size: .64rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctx-meter.high .ctx-label { color: var(--danger); }
 .titlerow { display: flex; align-items: center; gap: 10px; }
 /* Always-visible working/idle status pill — so you never have to guess whether JARVIS
    is busy. Green dot = idle, amber pulsing = working, red pulsing = seems stalled. */

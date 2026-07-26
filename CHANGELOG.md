@@ -24,6 +24,12 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Context-window meter.** A small bar under the title shows how full the
+  conversation context is (green <60%, amber <85%, red ≥85%) — e.g. `64% · 21k/33k` — driven
+  by each turn's actual prompt size (`context_tokens`, the latest single call, not the per-turn
+  sum) against `context_window` (from `llm.context_window` or `ollama.context_length`). Makes
+  context-fill — a quiet cause of the model "forgetting"/degrading on long sessions — visible.
+  (`app/src/llm.js`, `app/src/config.js`, frontend.)
 - 2026-07-26: **Autopilot survives an app restart (persist + auto-resume).** The run state
   is now written to `/data/autopilot.json` on every change, so if the app crashes or is
   restarted mid-run, it **auto-resumes on startup** instead of dying silently — closing the

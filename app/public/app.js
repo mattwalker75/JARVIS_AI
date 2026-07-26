@@ -72,6 +72,18 @@ function updateSessUsage() {
   el.textContent = `session: ${k} tok` + (sessCost > 0 ? ` · ~$${sessCost.toFixed(3)}` : "");
 }
 function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
+let ctxWindow = 32768;   // context-window ceiling (from config); the meter is context_tokens / this
+function updateContextMeter(tok) {
+  const m = $("ctx-meter"), fill = $("ctx-fill"), label = $("ctx-label"); if (!m || !tok) return;
+  const pct = Math.min(100, Math.round((tok / ctxWindow) * 100));
+  m.hidden = false;
+  fill.style.width = pct + "%";
+  m.classList.toggle("warn", pct >= 60 && pct < 85);
+  m.classList.toggle("high", pct >= 85);
+  const k = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n));
+  label.textContent = `${pct}% · ${k(tok)}/${k(ctxWindow)}`;
+  m.title = `Context window: ${pct}% used (${tok.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens). A fresh chat resets it.`;
+}
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
 let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
@@ -313,6 +325,7 @@ function connectWS() {
     else if (d.type === "usage") {
       addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
       sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
+      if (d.usage && d.usage.context_tokens) updateContextMeter(d.usage.context_tokens);
     }
     else if (d.type === "reasoning") {
       const pre = ensureThink();
@@ -1053,6 +1066,7 @@ async function init() {
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
+  if (Number(cfg.context_window) > 0) ctxWindow = Number(cfg.context_window);        // context-meter ceiling
   try { renderPlan(await (await fetch("/api/plan")).json()); } catch (_) {}          // restore the active plan ledger
   if (cfg.autopilot) {                                                                // prefill Autopilot launcher defaults
     const mi = $("ap-minutes"); if (mi && cfg.autopilot.default_minutes) mi.value = cfg.autopilot.default_minutes;
