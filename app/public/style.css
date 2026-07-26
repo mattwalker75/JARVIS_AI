@@ -107,6 +107,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .drawer-toggle { position: relative; }
 .drawer-toggle .dot { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: jstatpulse 1s infinite; }
 .drawer-toggle.open { color: var(--accent); border-color: var(--accent); }
+/* mode toggles: watchdog (accent when on) + plan (amber when on) */
+.mode-toggle { position: relative; }
+#watchdog-toggle.mode-on { color: var(--accent); border-color: var(--accent); }
+#watchdog-toggle:not(.mode-on) { opacity: .55; text-decoration: line-through; }   /* OFF = patient mode */
+#plan-toggle.mode-on { color: #ffb03a; border-color: #ffb03a; box-shadow: 0 0 8px rgba(255,176,58,.35); }
 
 .chat { position: relative; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--edge); }
 .chat.drag-over { outline: 2px dashed var(--accent); outline-offset: -8px; }

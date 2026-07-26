@@ -24,6 +24,29 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Stream-watchdog switch (🐕) — patient mode for long tasks.** The 120s
+  idle watchdog that stops a stalled stream can now be toggled per message from the
+  header. ON (default) = current behavior, best for chat and quick tasks. OFF = patient
+  mode: JARVIS keeps waiting through slow local cold-loads/prefills instead of erroring
+  out with "stream idle >120s" (the real cause of it "losing its brains" mid-task and
+  restarting). Stop/Esc still interrupts. Diagnosed from logs: every stall fired at
+  ~125s and the same context succeeded in ~1-3s on the immediate retry — i.e. a slow
+  cold model, not a dead one. Backend honors a per-request `watchdog` flag (default
+  from `llm.idle_watchdog`); state persists client-side. (`app/src/llm.js`,
+  `app/server.js`, frontend.)
+- 2026-07-26: **Plan mode (🗺).** A header toggle that makes JARVIS clarify first, lay
+  out a concise high-level plan, then execute it step by step — the plan-first workflow.
+  Implemented as a per-turn steer injected into the volatile user-message suffix (keeps
+  the cached system prefix byte-stable), sent via a per-message `planMode` flag; state
+  persists. (`app/src/llm.js`, `app/server.js`, frontend.)
+- 2026-07-26: **New Config-tab "Behavior" section + skill-hint logging + leak
+  prevention.** Config tab now exposes completion checks, idle-timeout ms, the watchdog
+  default, and the "model is slow" warning delay (`ui.stall_seconds`, wired through
+  `publicConfig`). The chosen skill auto-hint is now logged at level 4 (`skill`
+  category). Every system prompt carries a constant rule to always use the real
+  tool-call mechanism (reduces the "tool call written as text" leak at the source; the
+  harness still salvages any that slip through). (`app/src/config.js`, frontend,
+  `JARVIS_CONFIG_template.json`.)
 - 2026-07-26: **Collapsible, resizable side drawer.** The right-hand panel (Activity,
   Tasks, Memory, Files, Workbench, Config) is now an adjustable drawer: a **▥ Panel**
   toggle in the header (and a **»** chevron in the tab row) collapse it so chat goes

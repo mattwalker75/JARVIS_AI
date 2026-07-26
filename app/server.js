@@ -279,7 +279,7 @@ wss.on("connection", (ws) => {
 
     const ac = new AbortController(); ws._abort = ac;
     try {
-      const reply = await llm.chat({ messages, emit, signal: ac.signal });
+      const reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: data.watchdog, planMode: data.planMode });
       chatlog.record("assistant", reply);
       emit({ type: "reply", text: reply });
     } catch (e) {

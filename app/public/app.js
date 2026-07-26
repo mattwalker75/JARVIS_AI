@@ -2,6 +2,12 @@
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input"), stopBtn = $("stop");
 const statusEl = $("jarvis-status");   // always-visible working/idle pill in the header
+// Per-message mode flags (set by the topbar toggles, wired near the bottom).
+let chatWatchdog = localStorage.getItem("jarvis.watchdog") !== "0";   // default ON (kill stalled streams)
+let chatPlan = localStorage.getItem("jarvis.plan") === "1";           // default OFF (plan-first mode)
+function sendChatWS(extra) {
+  ws.send(JSON.stringify({ type: "chat", watchdog: chatWatchdog, planMode: chatPlan, ...extra }));
+}
 
 // Auto-scroll only when the user is already at the bottom. If they scroll up to read
 // while the AI is streaming, stop yanking them back down; re-engage when they return.
@@ -68,7 +74,7 @@ function updateSessUsage() {
 function resetSessUsage() { sessTokens = 0; sessCost = 0; updateSessUsage(); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
-const STALL_MS = 25000;                                        // no streamed progress for this long ⇒ "seems stuck"
+let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
 // Update the always-visible header pill. state: "idle" | "working" | "stalled".
 function setStatus(state, text) {
   if (!statusEl) return;
@@ -442,7 +448,7 @@ function regenerate() {
   }
   if (!history.length || history[history.length - 1].role !== "user") { addMessage("assistant", "Nothing to regenerate yet.", "notice"); return; }
   stickBottom = true; showWorking("working…");
-  ws.send(JSON.stringify({ type: "chat", messages: history }));
+  sendChatWS({ messages: history });
 }
 const regenBtn = $("regen"); if (regenBtn) regenBtn.addEventListener("click", regenerate);
 
@@ -510,7 +516,7 @@ function resend() {
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected — reconnecting…", "error"); return; }
   if (!history.length || history[history.length - 1].role !== "user") return;
   showWorking("working…");
-  ws.send(JSON.stringify({ type: "chat", messages: history }));
+  sendChatWS({ messages: history });
 }
 function addRetry() {
   if (!history.length || history[history.length - 1].role !== "user") return;
@@ -527,7 +533,7 @@ function send(text) {
   stickBottom = true;                     // a fresh send always snaps to the bottom
   addMessage("user", text); history.push({ role: "user", content: text }); saveHistory();
   inputEl.value = ""; autoGrow(); showWorking("working…");
-  ws.send(JSON.stringify({ type: "chat", messages: history, persona: currentPersona || undefined }));
+  sendChatWS({ messages: history, persona: currentPersona || undefined });
 }
 
 // Grow the textarea with its content (up to the CSS max-height, then scroll).
@@ -568,6 +574,28 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
   if (t.dataset.tab === "files") refreshFiles();
   if (t.dataset.tab === "config") loadConfig();
 }));
+
+// --- Mode toggles: stream watchdog + plan mode -------------------------------
+(function initModeToggles() {
+  const wd = $("watchdog-toggle"), pl = $("plan-toggle");
+  function paint() {
+    if (wd) {
+      wd.classList.toggle("mode-on", chatWatchdog);
+      wd.title = chatWatchdog
+        ? "Stream watchdog ON — a stalled model is stopped after the idle timeout. Best for chat and quick tasks. Click to turn OFF for long coding runs."
+        : "Stream watchdog OFF — patient mode: JARVIS keeps waiting through slow local generations (press Stop/Esc to interrupt). Best for long coding tasks. Click to turn ON.";
+    }
+    if (pl) {
+      pl.classList.toggle("mode-on", chatPlan);
+      pl.title = chatPlan
+        ? "Plan mode ON — JARVIS asks any clarifying questions, lays out a high-level plan, then executes step by step. Click to turn OFF."
+        : "Plan mode OFF. Click to turn ON — JARVIS will clarify and plan the work before executing.";
+    }
+  }
+  if (wd) wd.addEventListener("click", () => { chatWatchdog = !chatWatchdog; localStorage.setItem("jarvis.watchdog", chatWatchdog ? "1" : "0"); paint(); });
+  if (pl) pl.addEventListener("click", () => { chatPlan = !chatPlan; localStorage.setItem("jarvis.plan", chatPlan ? "1" : "0"); paint(); });
+  paint();
+})();
 
 // --- Resizable / collapsible side drawer -------------------------------------
 // Closed (chat full-width), or open at any width you drag it to. Double-click the
@@ -924,6 +952,7 @@ function setupDropZone() {
 async function init() {
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
+  if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
   modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
   if (cfg.workbench_url) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }
@@ -972,6 +1001,10 @@ const CFG_FIELDS = [
   ["cfg-tier-vision", "llm.models.vision", "str"],
   ["cfg-temperature", "llm.temperature", "num"],
   ["cfg-max-tokens", "llm.max_tokens", "num"],
+  ["cfg-completion-checks", "llm.completion_checks", "num"],
+  ["cfg-idle-timeout", "llm.idle_timeout_ms", "num"],
+  ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
+  ["cfg-stall-seconds", "ui.stall_seconds", "num"],
   ["cfg-ollama-manage", "ollama.manage", "bool"],
   ["cfg-ollama-ctx", "ollama.context_length", "num"],
   ["cfg-ollama-keep", "ollama.keep_alive", "str"],

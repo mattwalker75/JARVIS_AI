@@ -62,10 +62,10 @@ function estimateCost(model, u) {
   return +(((u.prompt_tokens || 0) / 1000) * pi + ((u.completion_tokens || 0) / 1000) * po).toFixed(6);
 }
 
-async function chat({ messages, emit, tier, excludeTools, signal }) {
+async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode }) {
   const llm = config.llm || {};
   if ((llm.provider || "").toLowerCase() === "mock") return mockChat(messages);
-  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal);
+  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal, watchdog, planMode);
 }
 
 // Some chat templates (notably strict Qwen3 derivatives) raise
@@ -90,7 +90,7 @@ function oneSystemAtFront(msgs) {
   return [{ role: "system", content: sys.join("\n\n") }, ...rest];
 }
 
-async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal) {
+async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode) {
   const excluded = new Set(excludeTools || []);
   const toolset = excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs;
   const llm = config.llm || {};
@@ -118,10 +118,20 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     // toggle with the skills_autohint config flag / the /hints UI command).
     if (config.skills_autohint !== false) {
       const h = require("./skills").hint(convo[lastUserIdx].content);
-      if (h) notes.push("(" + h + ")");
+      if (h) { notes.push("(" + h + ")"); log.verbose("skill", "auto-hint", { hint: h }); }
+    }
+    // Planning mode: steer the model to clarify → plan → execute step by step. Injected as
+    // part of the volatile user-message suffix (NOT the system block) so the cached prefix
+    // stays byte-stable whether plan mode is on or off.
+    if (planMode) {
+      notes.push("(PLANNING MODE is ON. Before doing the work: (1) if ANYTHING about my request is ambiguous or underspecified, ASK your clarifying questions FIRST and stop for my answer — do not guess or start yet; (2) once it's clear, lay out a concise numbered HIGH-LEVEL PLAN of the steps; (3) then execute the plan step by step with your tools, briefly noting after each step what is done and what's next, and keep going until every step is genuinely complete.)");
     }
     convo[lastUserIdx] = { ...convo[lastUserIdx], content: notes.join("\n") + "\n\n" + convo[lastUserIdx].content };
   }
+  // Idle watchdog: default from config, overridable per request (the UI switch). When OFF
+  // the stream waits as long as the model needs (patient mode for long coding tasks); Stop
+  // still interrupts. When ON, a >idle_timeout stall is treated as a dead stream.
+  const watchdogOn = watchdog != null ? !!watchdog : ((config.llm || {}).idle_watchdog !== false);
 
   const maxIter = llm.max_tool_iterations || 8;
   const maxCompletionChecks = Number.isFinite(Number(llm.completion_checks)) ? Number(llm.completion_checks) : 2;
@@ -153,7 +163,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     log.debug("llm", "request", { model: lastModel, tool_names: toolset.map((t) => t.function && t.function.name), messages: body.messages });
     let msg, turnUsage, finish;
     try {
-      ({ message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal));
+      ({ message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal, watchdogOn));
     } catch (e) {
       log.error("llm", `request failed: ${e.message}`, { model: lastModel });
       throw e;
@@ -327,7 +337,7 @@ async function fetchWithRetry(url, options, tries = 4) {
 
 // One streamed /chat/completions call. Emits {type:"token"} per content delta,
 // assembles streamed tool-call deltas, captures usage. Returns {message, usage}.
-async function streamChatCompletion(url, headers, body, emit, signal) {
+async function streamChatCompletion(url, headers, body, emit, signal, watchdogOn = true) {
   const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify({ ...body, stream: true }), signal });
   if (!resp.ok || !resp.body) {
     const t = resp.body ? await resp.text() : "";
@@ -340,8 +350,12 @@ async function streamChatCompletion(url, headers, body, emit, signal) {
   let done = false;
   // Idle watchdog: if the model sends NO data for this long, treat the stream as stalled
   // and abort (a healthy stream — even a slow reasoning model — sends tokens continuously).
+  // When the watchdog is OFF (patient mode), we wait indefinitely — a slow cold-load/prefill
+  // on a local model is NOT a dead stream, and there is no per-token cost locally. Stop still
+  // interrupts because the underlying fetch is bound to `signal`.
   const IDLE_MS = (config.llm && config.llm.idle_timeout_ms) || 120000;
   async function readWithIdle() {
+    if (!watchdogOn) return await reader.read();
     let timer;
     const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`stream idle >${Math.round(IDLE_MS / 1000)}s — the model stopped sending data`)), IDLE_MS); });
     try { return await Promise.race([reader.read(), timeout]); } finally { clearTimeout(timer); }

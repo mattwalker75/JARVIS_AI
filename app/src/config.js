@@ -34,12 +34,18 @@ function assistantName() {
 // Optional personas (config.personas.<name>) override or extend the base prompt:
 //   "personas": { "work": { "system_prompt": "..." },          // full replacement
 //                 "brief": { "append": "Answer in 2 sentences max." } }  // addition
+// Always-present, constant rule appended to every system prompt. Stays byte-stable so it
+// doesn't hurt KV-cache reuse. Reduces the "tool call written as text" failure at the source
+// (the harness also salvages/executes such calls — see llm.js parseTextToolCalls).
+const TOOL_USE_RULE =
+  "\n\nIMPORTANT — tool use: always invoke tools through the real function/tool-call mechanism. " +
+  "NEVER write a tool call as text in your reply (no <tool_call> tags, no <parameter=…> blocks, no JSON pretending to be a call) — text like that does NOT execute, it just gets shown to the user. If you want to run something, actually call the tool.";
 function systemPrompt(persona) {
   let sp = (config.llm && config.llm.system_prompt) || "You are {assistant_name}, a helpful AI assistant.";
   const p = persona && config.personas && config.personas[persona];
   if (p && p.system_prompt) sp = p.system_prompt;
   else if (p && p.append) sp = sp + "\n\n" + p.append;
-  return sp.replace(/\{assistant_name\}/g, assistantName());
+  return sp.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE;
 }
 
 // "single" => every task tier uses llm.model (the models block is ignored).
@@ -91,6 +97,7 @@ function publicConfig() {
     workbench_url: (config.workbench && config.workbench.desktop_url) || "",
     personas: Object.keys(config.personas || {}),
     skills_autohint: config.skills_autohint !== false,
+    stall_seconds: Number((config.ui || {}).stall_seconds) || 25,
   };
 }
 
