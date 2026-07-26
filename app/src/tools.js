@@ -208,6 +208,25 @@ async function writeFile(p, content, append) {
   return { [append ? "appended" : "written"]: abs, bytes: Buffer.byteLength(data) };
 }
 
+// Targeted string-replace edit of a shared (user-facing) file — the /READ_WRITE_FILES
+// counterpart of edit_workbench_file. Prefer over rewriting the whole file.
+async function editFile(p, oldStr, newStr, replaceAll) {
+  const abs = resolveShared(p, true);
+  if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
+  newStr = newStr == null ? "" : String(newStr);
+  let content;
+  try { content = fs.readFileSync(abs, "utf8"); }
+  catch (e) { throw new Error(`cannot read ${path.basename(abs)}: ${e.message}`); }
+  const occ = content.split(oldStr).length - 1;
+  if (occ === 0) throw new Error(`old_string not found in ${path.basename(abs)} — it must match EXACTLY (including whitespace/indentation). Read the file first and copy the snippet verbatim.`);
+  if (occ > 1 && !replaceAll) throw new Error(`old_string appears ${occ} times; add more surrounding context to make it unique, or pass replace_all=true.`);
+  let updated;
+  if (replaceAll) updated = content.split(oldStr).join(newStr);
+  else { const i = content.indexOf(oldStr); updated = content.slice(0, i) + newStr + content.slice(i + oldStr.length); }
+  fs.writeFileSync(abs, updated);
+  return { edited: abs, replacements: replaceAll ? occ : 1, bytes: Buffer.byteLength(updated) };
+}
+
 // Append one consistently-formatted log line. The CODE owns the format so every
 // entry looks the same regardless of how the model phrases it: an ISO-8601 UTC
 // timestamp, a " | " separator, the message collapsed to a single line, and a
@@ -633,8 +652,16 @@ const toolDefs = [
     description: "Read a TEXT file from the shared folders. Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document).",
     parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "integer", description: "Character offset to start from (for long files)." }, max_chars: { type: "integer", description: "Max characters to return (default 50000)." } }, required: ["path"] } } },
   { type: "function", function: { name: "write_file",
-    description: "Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /workspace, use run_shell (with `>>` to append).",
+    description: "Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /workspace, use write_workbench_file. To CHANGE part of an existing shared file, prefer edit_file.",
     parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, append: { type: "boolean", description: "Append to the end instead of overwriting (default false)." } }, required: ["path", "content"] } } },
+  { type: "function", function: { name: "edit_file",
+    description: "Make a TARGETED edit to an existing shared file (in /READ_WRITE_FILES) by replacing an exact snippet — prefer this over rewriting the whole file with write_file. old_string must match verbatim (including whitespace) and be unique unless replace_all=true; new_string is what to put in its place (\"\" deletes). (For workbench /workspace files, use edit_workbench_file.)",
+    parameters: { type: "object", properties: {
+      path: { type: "string" },
+      old_string: { type: "string", description: "Exact text to replace (unique unless replace_all)." },
+      new_string: { type: "string", description: "Replacement text (\"\" to delete)." },
+      replace_all: { type: "boolean", description: "Replace every occurrence." },
+    }, required: ["path", "old_string", "new_string"] } } },
   { type: "function", function: { name: "append_log",
     description: "Append ONE consistently-formatted line to a log file in the read-write shared folder. ALWAYS PREFER THIS over write_file/run_shell for recurring logs (e.g. periodic price checks): the code stamps a uniform ISO-8601 UTC timestamp, keeps each entry to exactly one newline-terminated line, and never lets entries run together — so every run produces identical formatting. Just pass the message (and optional structured fields); do NOT include your own timestamp.",
     parameters: { type: "object", properties: {
@@ -862,6 +889,7 @@ async function _execTool(name, args, signal) {
     case "read_email": return await require("./email").readEmail(args);
     case "send_email": return await require("./email").sendEmail(args);
     case "write_file": return await writeFile(args.path, args.content, args.append);
+    case "edit_file": return await editFile(args.path, args.old_string, args.new_string, args.replace_all);
     case "append_log": return await appendLog(args.path, args.message, args.fields);
     case "fetch_url": return await fetchUrl(args.url, { method: args.method, headers: args.headers, body: args.body, json: args.json, timeout_s: args.timeout_s, offset: args.offset, save_to: args.save_to });
     case "web_search": return await webSearch(args.query, args.limit);

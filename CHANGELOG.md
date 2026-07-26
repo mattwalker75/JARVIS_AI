@@ -24,6 +24,22 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Test suite for the tool loop + core modules.** New `app/test/` with a
+  deterministic harness that stubs the LLM transport (scripted SSE) and `execTool` to assert
+  the `llm.js` guardrails (tool-call-as-text salvage, follow-through nudge, completion loop,
+  repeat-tool guard), plus planner, autopilot (completion/budget/stuck/pause/resume/extend/
+  modify + anti-loop), and edit/linkify logic. Run with `npm test` (`node test/run.js`); a
+  `test/smoke.sh` checks the live HTTP surface + carries a model-behaviour checklist. 31
+  assertions across 4 suites, all passing on the host (no container needed).
+- 2026-07-26: **`edit_file` for shared files** — the `/READ_WRITE_FILES` counterpart of
+  `edit_workbench_file` (targeted string-replace instead of rewriting the whole file).
+  `write_file`'s description now steers to it. (`app/src/tools.js`.)
+- 2026-07-26: **Coding-habit guidance baked into the system prompt** (cache-safe constant),
+  from weaknesses the small model exposed: build in `/workspace` not `/READ_WRITE_FILES`;
+  prefer `edit_workbench_file` over whole-file rewrites; and to debug a runtime rendering bug,
+  `browser_goto` + `browser_console` to read the actual error rather than re-reading static
+  HTML. `plan_show` is also discouraged in the planner rule (it's shown every turn).
+  (`app/src/config.js`.)
 - 2026-07-26: **Browser console capture — JARVIS can now debug a RUNNING web app.** The
   browser daemon captures the page's JavaScript console output + uncaught runtime errors,
   and `browser_goto` auto-includes any load-time errors in its result. New `browser_console`

@@ -5,7 +5,8 @@
   "description": "JARVIS orchestrator: chat UI + LLM tool-calling (memory DB, root workbench, shared files)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run.js"
   },
   "dependencies": {
     "dockerode": "^4.0.2",
