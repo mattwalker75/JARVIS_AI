@@ -177,20 +177,27 @@
 
           <div class="cfg-section">
             <h5>Model &amp; LLM</h5>
-            <label>Provider<input id="cfg-provider" autocomplete="off"></label>
-            <label>Gateway base URL<input id="cfg-base-url" autocomplete="off"></label>
+            <label>Provider / endpoint<select id="cfg-provider"></select></label>
+            <label id="cfg-row-baseurl">Endpoint URL<input id="cfg-base-url" autocomplete="off" placeholder="https://…/v1"></label>
+            <label id="cfg-row-apikey">API key<input id="cfg-api-key" type="password" autocomplete="off" placeholder="sk-…"></label>
+            <div class="cfg-models-row">
+              <button id="cfg-list-models" type="button" class="ghost">🔄 List models</button>
+              <span class="cfg-hint-inline" id="cfg-models-status"></span>
+            </div>
+            <datalist id="cfg-model-list"></datalist>
             <label>Model mode<select id="cfg-model-mode"><option value="single">single</option><option value="multi">multi</option></select></label>
-            <label>Model (single mode)<input id="cfg-model" autocomplete="off"></label>
+            <label>Model (single mode)<input id="cfg-model" list="cfg-model-list" autocomplete="off"></label>
             <div class="cfg-grid">
-              <label>chat tier<input id="cfg-tier-chat" autocomplete="off"></label>
-              <label>cheap tier<input id="cfg-tier-cheap" autocomplete="off"></label>
-              <label>smart tier<input id="cfg-tier-smart" autocomplete="off"></label>
-              <label>vision tier<input id="cfg-tier-vision" autocomplete="off"></label>
+              <label>chat tier<input id="cfg-tier-chat" list="cfg-model-list" autocomplete="off"></label>
+              <label>cheap tier<input id="cfg-tier-cheap" list="cfg-model-list" autocomplete="off"></label>
+              <label>smart tier<input id="cfg-tier-smart" list="cfg-model-list" autocomplete="off"></label>
+              <label>vision tier<input id="cfg-tier-vision" list="cfg-model-list" autocomplete="off"></label>
             </div>
             <div class="cfg-grid">
               <label>Temperature<input id="cfg-temperature" type="number" step="0.1" min="0" max="2"></label>
               <label>Max tokens<input id="cfg-max-tokens" type="number" min="1"></label>
             </div>
+            <div class="hint">Pick a provider to fill the endpoint URL, add its API key, then <b>List models</b> to populate the model pickers below (type to filter). “Generic” lets you point at any OpenAI-compatible URL.</div>
           </div>
 
           <div class="cfg-section">
@@ -204,7 +211,7 @@
             <div class="hint">Turn the watchdog OFF (🐕 in the header) for long coding tasks so slow local generations aren’t killed. Plan mode (🗺) makes JARVIS clarify + plan before executing.</div>
           </div>
 
-          <div class="cfg-section">
+          <div class="cfg-section" id="cfg-sec-ollama">
             <h5>Ollama <span class="cfg-badge">host · needs --reload</span></h5>
             <label class="cfg-check"><input type="checkbox" id="cfg-ollama-manage"> Let JARVIS manage Ollama on --reload</label>
             <div class="cfg-grid">

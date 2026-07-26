@@ -24,6 +24,17 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Config tab: provider picker + live model listing.** The "Model & LLM"
+  section now has a **Provider / endpoint** dropdown with presets (OpenAI, OpenRouter,
+  Groq, Together, Mistral, DeepSeek, xAI, Perplexity, Google Gemini, Ollama, the bundled
+  LiteLLM gateway, and Generic/custom). Picking one fills the endpoint URL and shows the
+  right fields — an **API key** input for cloud providers (hidden for keyless local
+  Ollama), and the **Ollama host-tuning** section only when a local Ollama endpoint is
+  selected (the "dynamic windows"). A **List models** button queries the chosen endpoint
+  (`POST /api/models/probe` with the entered URL + key) and loads the results into a shared
+  datalist, so the model + per-tier pickers autocomplete real model names (type to filter).
+  Generic points at any OpenAI-compatible URL with an optional key. (`app/server.js`,
+  `app/public/{index.html,app.js,style.css}`.)
 - 2026-07-26: **Autopilot — kick off a big objective and walk away.** Give an objective
   and a time budget; JARVIS drafts a plan (the Planner ledger) and then drives it
   autonomously in back-to-back build → test → refine → fix cycles until the objective is

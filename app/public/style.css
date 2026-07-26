@@ -328,7 +328,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .cfg-section > h5 { margin: 0 0 10px; font-size: .82rem; color: var(--accent); letter-spacing: .02em; text-transform: uppercase; }
 .cfg-section label { display: flex; flex-direction: column; gap: 4px; font-size: .74rem; color: var(--muted); margin-bottom: 9px; }
 .cfg-section label:last-child { margin-bottom: 0; }
-.cfg-section input[type=text], .cfg-section input:not([type]), .cfg-section input[type=number], .cfg-section select {
+.cfg-models-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+.cfg-hint-inline { font-size: .72rem; color: var(--muted); }
+.cfg-section input[type=text], .cfg-section input:not([type]), .cfg-section input[type=number], .cfg-section input[type=password], .cfg-section select {
   padding: 7px 9px; border: 1px solid var(--edge); background: var(--bg); color: var(--text);
   border-radius: 8px; font: inherit; font-size: .82rem; width: 100%; box-sizing: border-box;
 }

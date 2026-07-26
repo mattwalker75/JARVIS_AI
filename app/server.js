@@ -48,6 +48,31 @@ app.post("/api/notifications/clear", (_req, res) => res.json(scheduler.clearNoti
 app.delete("/api/notifications/:id", (req, res) => res.json(scheduler.dismissNotification(req.params.id)));
 app.get("/api/tasks", (_req, res) => res.json(scheduler.list()));
 app.post("/api/tasks/cancel", (req, res) => res.json(scheduler.cancel((req.body || {}).id)));
+// List models from an ARBITRARY endpoint (base_url + optional key), so the Config tab can
+// show a provider's models before you save. Tries the OpenAI-compatible /models, then the
+// Ollama /api/tags fallback.
+app.post("/api/models/probe", async (req, res) => {
+  const base = String((req.body || {}).base_url || "").replace(/\/+$/, "");
+  const key = (req.body || {}).api_key || "";
+  if (!base) return res.json({ models: [], error: "Enter an endpoint URL first." });
+  const headers = key ? { Authorization: "Bearer " + key } : {};
+  try {
+    const r = await fetch(base + "/models", { headers, signal: AbortSignal.timeout(9000) });
+    if (r.ok) {
+      const d = await r.json();
+      const names = (d.data || d.models || []).map((m) => m.id || m.name).filter(Boolean).sort();
+      if (names.length) return res.json({ models: names });
+    } else if (r.status === 401 || r.status === 403) {
+      return res.json({ models: [], error: `Auth failed (${r.status}) — check the API key.` });
+    }
+  } catch (_) {}
+  try {
+    const host = base.replace(/\/v1$/, "");
+    const r2 = await fetch(host + "/api/tags", { signal: AbortSignal.timeout(9000) });
+    if (r2.ok) { const d2 = await r2.json(); return res.json({ models: (d2.models || []).map((m) => m.name).filter(Boolean).sort() }); }
+  } catch (e) { return res.json({ models: [], error: "Could not reach the endpoint: " + e.message }); }
+  return res.json({ models: [], error: "No model list returned by that endpoint." });
+});
 app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
 app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
 const autopilot = require("./src/autopilot");

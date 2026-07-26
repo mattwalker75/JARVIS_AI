@@ -1076,6 +1076,7 @@ let cfgObj = {}, secretsObj = { secrets: {} };
 const CFG_FIELDS = [
   ["cfg-provider", "llm.provider", "str"],
   ["cfg-base-url", "llm.base_url", "str"],
+  ["cfg-api-key", "llm.api_key", "str"],
   ["cfg-model-mode", "llm.model_mode", "str"],
   ["cfg-model", "llm.model", "str"],
   ["cfg-tier-chat", "llm.models.chat", "str"],
@@ -1139,6 +1140,59 @@ function collectStructured() {
 function renderRawConfig() { $("cfg-json").value = JSON.stringify(cfgObj, null, 2); $("cfg-json-err").textContent = ""; }
 function renderRawSecrets() { $("cfg-secrets").value = JSON.stringify(secretsObj, null, 2); $("cfg-secrets-err").textContent = ""; }
 
+// Provider presets: pick one to fill the endpoint URL + reveal the right fields. All are
+// OpenAI-compatible (/chat/completions + /models), which is what the app speaks.
+const PROVIDERS = [
+  { id: "openai", label: "OpenAI", url: "https://api.openai.com/v1", key: true },
+  { id: "openrouter", label: "OpenRouter", url: "https://openrouter.ai/api/v1", key: true },
+  { id: "groq", label: "Groq", url: "https://api.groq.com/openai/v1", key: true },
+  { id: "together", label: "Together AI", url: "https://api.together.xyz/v1", key: true },
+  { id: "mistral", label: "Mistral", url: "https://api.mistral.ai/v1", key: true },
+  { id: "deepseek", label: "DeepSeek", url: "https://api.deepseek.com/v1", key: true },
+  { id: "xai", label: "xAI (Grok)", url: "https://api.x.ai/v1", key: true },
+  { id: "perplexity", label: "Perplexity", url: "https://api.perplexity.ai", key: true },
+  { id: "gemini", label: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: true },
+  { id: "ollama", label: "Ollama (local)", url: "http://host.docker.internal:11434/v1", key: false },
+  { id: "litellm", label: "LiteLLM gateway (this stack)", url: "http://jarvis-litellm:4000/v1", key: false },
+  { id: "generic", label: "Generic (custom OpenAI-compatible)", url: "", key: "optional" },
+];
+function populateProviderSelect(current) {
+  const sel = $("cfg-provider"); if (!sel) return;
+  sel.innerHTML = "";
+  for (const p of PROVIDERS) { const o = document.createElement("option"); o.value = p.id; o.textContent = p.label; sel.appendChild(o); }
+  if (current && !PROVIDERS.some((p) => p.id === current)) { const o = document.createElement("option"); o.value = current; o.textContent = current; sel.appendChild(o); }
+}
+// Show/hide fields for the selected provider (no value changes) — the "dynamic windows".
+function syncProviderUI() {
+  const p = PROVIDERS.find((x) => x.id === ($("cfg-provider") || {}).value);
+  const showKey = !p || p.key !== false;                 // hide the key for keyless local endpoints
+  const keyRow = $("cfg-row-apikey"); if (keyRow) keyRow.style.display = showKey ? "" : "none";
+  const local = p && (p.id === "ollama" || p.id === "litellm");
+  const oll = $("cfg-sec-ollama"); if (oll) oll.style.display = local ? "" : "none";  // host tuning only when using local Ollama
+}
+// User picked a provider → fill the endpoint URL (presets) and refresh the UI.
+function onProviderChange() {
+  const p = PROVIDERS.find((x) => x.id === $("cfg-provider").value);
+  if (p && p.id !== "generic" && p.url) $("cfg-base-url").value = p.url;
+  syncProviderUI();
+  collectStructured(); renderRawConfig();
+  const st = $("cfg-models-status"); if (st) st.textContent = "";
+}
+// Query the entered endpoint for its models and load them into the model pickers' datalist.
+async function listConfigModels() {
+  const st = $("cfg-models-status"), btn = $("cfg-list-models");
+  const base_url = ($("cfg-base-url").value || "").trim();
+  const api_key = ($("cfg-api-key") ? $("cfg-api-key").value : "").trim();
+  if (!base_url) { if (st) st.textContent = "Enter an endpoint URL first."; return; }
+  if (btn) btn.disabled = true; if (st) st.textContent = "Listing…";
+  try {
+    const d = await (await fetch("/api/models/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base_url, api_key }) })).json();
+    const dl = $("cfg-model-list"); if (dl) { dl.innerHTML = ""; (d.models || []).forEach((m) => { const o = document.createElement("option"); o.value = m; dl.appendChild(o); }); }
+    if (st) st.textContent = (d.models && d.models.length) ? `${d.models.length} models loaded — click a model field to pick/type one` : ("No models" + (d.error ? " — " + d.error : ""));
+  } catch (e) { if (st) st.textContent = "Failed: " + e.message; }
+  finally { if (btn) btn.disabled = false; }
+}
+
 async function loadConfig() {
   const result = $("cfg-result"); if (result) result.textContent = "";
   let d;
@@ -1147,7 +1201,9 @@ async function loadConfig() {
   if (d.config_error) { $("cfg-json-err").textContent = "Config file error: " + d.config_error; }
   cfgObj = d.config && typeof d.config === "object" ? d.config : {};
   secretsObj = d.secrets && typeof d.secrets === "object" ? d.secrets : { secrets: {} };
+  populateProviderSelect(getPath(cfgObj, "llm.provider"));
   populateStructured();
+  syncProviderUI();
   renderRawConfig();
   renderRawSecrets();
 }
@@ -1181,9 +1237,11 @@ async function saveConfig() {
 
 // Wiring
 CFG_FIELDS.forEach(([id]) => { const el = $(id); if (el) el.addEventListener("change", () => { collectStructured(); renderRawConfig(); }); });
+(() => { const s = $("cfg-provider"); if (s) s.addEventListener("change", onProviderChange); })();
+(() => { const b = $("cfg-list-models"); if (b) b.addEventListener("click", listConfigModels); })();
 (() => {
   const raw = $("cfg-json"); if (raw) raw.addEventListener("blur", () => {
-    try { cfgObj = JSON.parse(raw.value); populateStructured(); $("cfg-json-err").textContent = ""; }
+    try { cfgObj = JSON.parse(raw.value); populateProviderSelect(getPath(cfgObj, "llm.provider")); populateStructured(); syncProviderUI(); $("cfg-json-err").textContent = ""; }
     catch (e) { $("cfg-json-err").textContent = "Invalid JSON: " + e.message; }
   });
   const sraw = $("cfg-secrets"); if (sraw) sraw.addEventListener("blur", () => {
