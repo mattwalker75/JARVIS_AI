@@ -87,8 +87,10 @@
     "default_minutes": 30,
     "max_cycles": 100
   },
-  "_logging_note": "Debug logging to JARVIS_AI/Logs/. level: 0 off (default) .. 1 errors, 2 warn, 3 info (turns+tools), 4 verbose (full tool args/results), 5 debug (full LLM requests/responses + browser actions). Read live — change from the Config tab and it applies immediately, no --reload. Secrets are redacted.",
+  "_logging_note": "Debug logging to JARVIS_AI/Logs/. level: 0 off (default) .. 1 errors, 2 warn, 3 info (turns+tools), 4 verbose (full tool args/results), 5 debug (full LLM requests/responses + browser actions). Read live — change from the Config tab and it applies immediately, no --reload. Secrets are redacted. max_mb: roll the day's file once it exceeds this size (jarvis-<day>.N.log). retain_days: delete log files older than this on startup.",
   "logging": {
-    "level": 0
+    "level": 0,
+    "max_mb": 50,
+    "retain_days": 14
   }
 }

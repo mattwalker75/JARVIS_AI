@@ -21,10 +21,38 @@ const NAMES = { 1: "ERROR", 2: "WARN", 3: "INFO", 4: "VERBOSE", 5: "DEBUG" };
 const MAX_FIELD_CHARS = 20000; // cap a single logged payload so one turn can't dump MBs
 
 let dirReady = false;
+let writeCount = 0;
 function ensureDir() {
   if (dirReady) return true;
-  try { fs.mkdirSync(LOG_DIR, { recursive: true }); dirReady = true; return true; }
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); dirReady = true; cleanupOldLogs(); return true; }
   catch (_) { return false; }
+}
+
+// --- rotation + retention (level-5 logs grow fast; keep the dir bounded) ---
+function logCfg() { const l = (cfg.config && cfg.config.logging) || {}; return { maxMb: Number(l.max_mb) || 50, retainDays: Number(l.retain_days) || 14 }; }
+let _cleaned = false;
+function cleanupOldLogs() {
+  if (_cleaned) return; _cleaned = true;
+  try {
+    const { retainDays } = logCfg();
+    const cutoff = Date.now() - retainDays * 86400000;
+    for (const f of fs.readdirSync(LOG_DIR)) {
+      if (!/^jarvis-.*\.log$/.test(f)) continue;
+      const fp = path.join(LOG_DIR, f);
+      try { if (fs.statSync(fp).mtimeMs < cutoff) fs.rmSync(fp, { force: true }); } catch (_) {}
+    }
+  } catch (_) {}
+}
+// If today's file exceeds the size cap, roll it to jarvis-<day>.<n>.log so no single file grows unbounded.
+function rotateIfBig(file, day) {
+  try {
+    const { maxMb } = logCfg();
+    const st = fs.statSync(file);
+    if (st.size < maxMb * 1024 * 1024) return;
+    let n = 1;
+    while (fs.existsSync(path.join(LOG_DIR, `jarvis-${day}.${n}.log`))) n++;
+    fs.renameSync(file, path.join(LOG_DIR, `jarvis-${day}.${n}.log`));
+  } catch (_) {}
 }
 
 // Gather current secret values (vault + provider api keys) to scrub from output.
@@ -66,6 +94,7 @@ function write(lvl, category, message, data) {
     const ts = new Date().toISOString();
     const day = ts.slice(0, 10);
     const file = path.join(LOG_DIR, `jarvis-${day}.log`);
+    if ((++writeCount & 0x3f) === 0) rotateIfBig(file, day);   // check size ~every 64 writes
     const extra = data === undefined ? "" : " | " + serialize(data);
     fs.appendFileSync(file, `${ts} ${NAMES[lvl]} [${category}] ${redact(message)}${extra}\n`);
   } catch (_) { /* logging must never throw */ }

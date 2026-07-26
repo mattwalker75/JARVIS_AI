@@ -3,6 +3,7 @@
 // wrap-up, pause/resume, stop-while-paused, extend, and modify (+ cross-cycle recap and the
 // anti-thrash push). The LLM + scheduler are stubbed; the real planner drives progress.
 process.env.JARVIS_PLAN_FILE = "/tmp/_jarvis_ap_test.json";
+process.env.JARVIS_AUTOPILOT_FILE = "/tmp/_jarvis_ap_run.json";   // don't touch /data during tests
 const path = require("path");
 const fs = require("fs");
 const SRC = path.join(__dirname, "..", "src");
@@ -76,6 +77,21 @@ const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planne
   check("cross-cycle recap injected", instrs.some((i) => /Last cycle you reported/.test(i)));
   check("anti-thrash push injected", instrs.some((i) => /STOP re-reading/.test(i)));
 
+  // persistence: a 'running' run left on disk resumes on restore()
+  reset();
+  fs.writeFileSync(process.env.JARVIS_AUTOPILOT_FILE, JSON.stringify({ id: "ap_x", objective: "resume me", autonomy: "full", minutes: 60, deadline: Date.now() + 3600000, maxCycles: 100, cycles: 1, noProgress: 0, errors: 0, status: "running", tokens: 0, cost: 0 }));
+  llmBehavior = async () => { if (!planner.get()) planner.create({ objective: "o", steps: ["a"] }); planner.get().steps.forEach((st) => planner.updateStep({ step: st.id, status: "done" })); return "done"; };
+  ap.restore();
+  check("restore: resumes a persisted running run", /finished/.test(await waitDone()));
+
+  // persistence: a 'paused' run stays paused on restore()
+  reset();
+  fs.writeFileSync(process.env.JARVIS_AUTOPILOT_FILE, JSON.stringify({ id: "ap_y", objective: "paused one", autonomy: "full", minutes: 60, deadline: Date.now() + 3600000, pausedRemaining: 1800000, maxCycles: 100, cycles: 2, status: "paused", tokens: 0, cost: 0 }));
+  ap.restore();
+  check("restore: paused run stays paused", ap.status().status === "paused" && ap.status().active);
+  ap.requestStop(); await sleep(50);
+
+  fs.rmSync(process.env.JARVIS_AUTOPILOT_FILE, { force: true });
   fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true });
   console.log(fails ? `\nAUTOPILOT: ${fails} FAILURE(S)` : "\nAUTOPILOT: ALL PASSED");
   process.exit(fails ? 1 : 0);

@@ -24,6 +24,23 @@ infrastructure, security, documentation, or test-policy changes.
   served page fetched back `200`.
 
 ### Added
+- 2026-07-26: **Autopilot survives an app restart (persist + auto-resume).** The run state
+  is now written to `/data/autopilot.json` on every change, so if the app crashes or is
+  restarted mid-run, it **auto-resumes on startup** instead of dying silently — closing the
+  one real hole in "kick it off and walk away." A run that was paused stays paused for you
+  to resume. (`app/src/autopilot.js`, `app/server.js`.)
+- 2026-07-26: **Autopilot observability — cycle markers + token/cost.** Each cycle drops a
+  "🛫 Autopilot — cycle N" marker in the Activity tab, and the status bar shows the running
+  token count + estimated cost (matters on cloud models). (`app/src/autopilot.js`, frontend.)
+- 2026-07-26: **Log rotation + retention.** Level-5 logs grow fast; the day's file now rolls
+  to `jarvis-<day>.N.log` past a size cap (`logging.max_mb`, default 50) and files older than
+  `logging.retain_days` (default 14) are deleted on startup — the `Logs/` dir stays bounded.
+  (`app/src/logger.js`.)
+- 2026-07-26: **serve_app catches the wrong-directory mix-up.** If a static server is
+  pointed at a folder with no `index.html`, GET / returns a directory listing (a false
+  "it works"). serve_app now detects this, lists the HTML files it found, and tells the model
+  to fix the entry point / cwd instead of declaring success. Plus a system-prompt nudge to
+  syntax-check code right after creating/editing it. (`app/src/tools.js`, `app/src/config.js`.)
 - 2026-07-26: **Test suite for the tool loop + core modules.** New `app/test/` with a
   deterministic harness that stubs the LLM transport (scripted SSE) and `execTool` to assert
   the `llm.js` guardrails (tool-call-as-text salvage, follow-through nudge, completion loop,

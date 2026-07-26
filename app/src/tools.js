@@ -597,15 +597,23 @@ async function serveApp(command, port, cwd) {
     try { const r = await fetch(`http://jarvis-workbench:${port}/`, { signal: AbortSignal.timeout(2500) }); status = r.status; reachable = true; break; } catch (_) {}
   }
   const log = await runShell(`tail -n 20 /workspace/.preview_${port}.log 2>/dev/null`);
+  // What's actually in the served directory? Helps catch the common cwd/entry mix-up
+  // (serving a folder with no index.html so GET / is just a directory listing, not the app).
+  const ls = await runShell(`cd ${shq(dir)} 2>/dev/null && ls -1 2>/dev/null | grep -iE '\\.html?$' | head -20`);
+  const htmlFiles = (ls.output || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  const hasIndex = htmlFiles.some((f) => /^index\.html?$/i.test(f));
+  const staticServer = /http\.server|http-server|serve\b|python3? -m http/.test(command);
   let note;
   if (!reachable) {
     note = `NOT reachable: make sure the server binds to 0.0.0.0:${port} (NOT 127.0.0.1/localhost), and that it started without errors (see log). Do not tell the user it's ready.`;
   } else if (status >= 400) {
     note = `Server is UP but GET / returned ${status} — there is NO page at the root, so the user's browser will show an error. The user opens http://localhost:${port}/ in a browser, so you MUST serve an interactive HTML UI at GET / (a real page they can use), not only API endpoints. Add the homepage, restart, and re-check that GET / returns 200 before telling the user.`;
+  } else if (staticServer && !hasIndex) {
+    note = `Server is UP (HTTP ${status}) but the served folder ${dir} has NO index.html${htmlFiles.length ? ` (it has: ${htmlFiles.join(", ")})` : ""}, so GET / is showing a DIRECTORY LISTING, not your app. Fix it: rename your main file to index.html, OR serve the folder that actually contains your HTML (set cwd), OR point the user at http://localhost:${port}/${htmlFiles[0] || "yourfile.html"}. Do not call it done until the app itself loads at /.`;
   } else {
     note = `Live and serving a page at / (HTTP ${status}) — tell the user to open http://localhost:${port} in their browser to preview/test it.`;
   }
-  return { url: `http://localhost:${port}`, reachable, status, ok_homepage: reachable && status < 400, note, log: (log.output || "").slice(-1500) };
+  return { url: `http://localhost:${port}`, reachable, status, ok_homepage: reachable && status < 400 && !(staticServer && !hasIndex), served_dir: dir, html_files: htmlFiles, note, log: (log.output || "").slice(-1500) };
 }
 
 const toolDefs = [

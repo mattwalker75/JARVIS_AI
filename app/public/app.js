@@ -632,7 +632,8 @@ function renderAutopilot(st) {
   const obj = $("ap-barobj"); if (obj) { obj.textContent = st.objective || ""; obj.title = st.objective || ""; }
   const pauseBtn = $("ap-pause"); if (pauseBtn) { pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause"; pauseBtn.dataset.act = paused ? "resume" : "pause"; }
   let secs = Number(st.seconds_left) || 0;
-  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}`; };
+  const tokBit = st.tokens ? ` · ${st.tokens >= 1000 ? (st.tokens / 1000).toFixed(1) + "k" : st.tokens} tok` + (st.cost_usd ? ` ~$${st.cost_usd}` : "") : "";
+  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}${tokBit}`; };
   paint();
   if (apTick) { clearInterval(apTick); apTick = null; }
   if (st.status === "running") apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);  // freeze while paused/stopping

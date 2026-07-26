@@ -12,6 +12,8 @@ const planner = require("./planner");
 // braces on top of the safe-mode instruction). run_shell can't be withheld — Autopilot needs
 // it to build/test — so guarded mode is best-effort, backed by the instruction.
 const RISKY_TOOLS = ["send_email", "delete_memory", "set_secret", "delete_secret"];
+const persist = require("./persist");
+const FILE = process.env.JARVIS_AUTOPILOT_FILE || "/data/autopilot.json";
 
 let broadcast = () => {};
 function setBroadcast(fn) { broadcast = typeof fn === "function" ? fn : () => {}; }
@@ -22,6 +24,10 @@ let ac = null;    // AbortController for the in-flight cycle
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// Persist the run so a long unattended session survives an app restart/crash and auto-resumes
+// (the marquee "kick it off and walk away" promise — otherwise the in-memory loop dies silently).
+function save() { try { if (run) persist.writeJsonAtomic(FILE, run, true); else require("fs").rmSync(FILE, { force: true }); } catch (_) {} }
+
 function status() {
   if (!run) return { active: false, status: "idle" };
   return {
@@ -30,10 +36,24 @@ function status() {
     id: run.id, objective: run.objective, autonomy: run.autonomy,
     status: run.status, cycles: run.cycles, minutes: run.minutes,
     seconds_left: run.status === "paused" ? Math.round((run.pausedRemaining || 0) / 1000) : Math.max(0, Math.round((run.deadline - nowMs()) / 1000)),
+    tokens: run.tokens || 0, cost_usd: +(run.cost || 0).toFixed(4),
     started_at: run.startedAt,
   };
 }
-function emitStatus() { try { broadcast({ type: "autopilot", status: status() }); } catch (_) {} }
+function emitStatus() { save(); try { broadcast({ type: "autopilot", status: status() }); } catch (_) {} }
+
+// Called once on server startup — resume a run that was in flight when the app went down.
+function restore() {
+  if (run) return;
+  let saved; try { saved = persist.readJson(FILE, null); } catch (_) { saved = null; }
+  if (!saved || !saved.status) return;
+  if (["done", "budget", "stopped", "stuck", "error"].includes(saved.status)) { try { require("fs").rmSync(FILE, { force: true }); } catch (_) {} return; }
+  run = saved; ac = null;
+  if (run.status === "paused") { emitStatus(); return; }   // stay paused; the user resumes
+  run.pauseRequested = false; run.status = "running";       // was running/pausing/stopping -> continue
+  emitStatus();
+  startLoop();
+}
 
 function start({ objective, minutes, autonomy }) {
   if (run && (run.status === "running" || run.status === "stopping")) throw new Error("an Autopilot run is already active — stop it first");
@@ -47,7 +67,7 @@ function start({ objective, minutes, autonomy }) {
     id: "ap_" + nowMs().toString(36), objective, autonomy: mode, minutes: minutesN,
     deadline: nowMs() + minutesN * 60000, maxCycles, cycles: 0, noProgress: 0, errors: 0,
     status: "running", startedAt: new Date().toISOString(), wrapUp: false, budgetHit: false, hardStop: false,
-    pauseRequested: false, objectiveChanged: false, lastSummary: "", idleWork: 0,
+    pauseRequested: false, objectiveChanged: false, lastSummary: "", idleWork: 0, tokens: 0, cost: 0,
   };
   emitStatus();
   startLoop();
@@ -117,6 +137,7 @@ function finish(state, message, summary) {
     sched.pushNotification({ level, label: "Autopilot", message: `Autopilot ${verb}: ${message}\nObjective: ${label}` });
   } catch (_) {}
   run = null; ac = null;
+  try { require("fs").rmSync(FILE, { force: true }); } catch (_) {}
 }
 
 function guardClause(mode) {
@@ -153,12 +174,15 @@ async function loop() {
 
     ac = new AbortController();
     const messages = [{ role: "system", content: config.systemPrompt() }, { role: "user", content: instr }];
+    try { broadcast({ type: "tool", tool: `🛫 Autopilot — cycle ${run.cycles + 1}${run.wrapUp ? " (wrap-up)" : ""}`, input: run.objective }); } catch (_) {}   // cycle marker in Activity
     // Stream tool activity/usage to open clients; also detect whether this cycle actually
-    // WROTE anything (vs. just reading/planning) to drive the anti-thrash push above.
+    // WROTE anything (vs. just reading/planning) to drive the anti-thrash push above,
+    // and tally tokens/cost across the whole run.
     let wroteFiles = false;
     const emit = (ev) => {
       if (!ev) return;
       if (ev.type === "tool" && (ev.tool === "write_workbench_file" || ev.tool === "run_shell" || ev.tool === "write_file")) wroteFiles = true;
+      if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
       if (ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage") { try { broadcast(ev); } catch (_) {} }
     };
 
@@ -192,4 +216,4 @@ async function loop() {
   }
 }
 
-module.exports = { start, requestWrapUp, requestStop, pause, resume, modify, extend, status, setBroadcast, _RISKY_TOOLS: RISKY_TOOLS };
+module.exports = { start, requestWrapUp, requestStop, pause, resume, modify, extend, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };
