@@ -149,7 +149,7 @@ app.post("/api/prompts/:name", (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete("/api/prompts/:name", (req, res) => {
-  const n = safePromptName(req.params.name); if (!n || n === "default") return res.status(400).json({ error: "invalid name" });
+  const n = safePromptName(req.params.name); if (!n || n === "default" || n === "stock") return res.status(400).json({ error: "the active 'default' and reference 'stock' sets can't be deleted" });
   try { for (const part of ["master", "system"]) fs.rmSync(path.join(PROMPTS_DIR, `${n}_${part}.prompt`), { force: true }); res.json({ deleted: n }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
