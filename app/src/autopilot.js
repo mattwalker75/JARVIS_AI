@@ -203,6 +203,10 @@ async function loop() {
     // Anti-thrash: if recent cycles only read/planned without writing code, push hard to act.
     const pushWrite = run.idleWork >= 2 ? " ⚠ You have spent multiple cycles only READING/PLANNING without changing any files. STOP re-reading. Make the concrete code change NOW with write_workbench_file (or run_shell), then run/test it — do not just describe what you'll do." : "";
     const objChange = run.objectiveChanged ? ` NOTE: the objective was just UPDATED to «${run.objective}». Re-check your plan against it and adjust steps (add/remove) before continuing.` : "";
+    // Don't re-serve an app that's already running from an earlier cycle (a big source of wasted steps).
+    const servedNote = run.servedPort ? ` A preview server is ALREADY running on http://localhost:${run.servedPort} from an earlier cycle — do NOT call serve_app for it again; only re-open/screenshot it if you actually changed the files it serves.` : "";
+    // Converge: as soon as the work verifies, mark it complete and stop re-checking a working result.
+    const doneNudge = " IMPORTANT: the MOMENT every plan step is finished and your latest test/verification passed, call plan_update to mark the remaining steps done and give a one-line final summary — do NOT keep re-serving, re-screenshotting, or re-verifying a result that already works. If it works, you are DONE.";
 
     let instr;
     if (run.wrapUp) {
@@ -210,7 +214,7 @@ async function loop() {
     } else if (!before) {
       instr = `[AUTOPILOT] You are running AUTONOMOUSLY — the user is AWAY and cannot answer questions. Objective: «${run.objective}». Start now: call plan_create with a concrete, ordered plan (make reasonable assumptions where anything is unclear and note them — do NOT ask the user or wait), then begin executing it: build, run, and TEST your work, fix failures, refine, and keep the plan ledger up to date with plan_update.${guard}`;
     } else {
-      instr = `[AUTOPILOT] Continue AUTONOMOUSLY (the user is away — do not ask questions; make reasonable decisions). Work your active plan: do the next incomplete step(s), test what you build, fix issues, refine, and update the ledger as you go.${objChange}${recap}${pushWrite}${guard}`;
+      instr = `[AUTOPILOT] Continue AUTONOMOUSLY (the user is away — do not ask questions; make reasonable decisions). Work your active plan: do the next incomplete step(s), test what you build, fix issues, refine, and update the ledger as you go.${objChange}${recap}${servedNote}${pushWrite}${doneNudge}${guard}`;
     }
     run.objectiveChanged = false;
 
@@ -224,6 +228,11 @@ async function loop() {
     const emit = (ev) => {
       if (!ev) return;
       if (ev.type === "tool" && ev.tool && !NONPRODUCTIVE_TOOLS.has(ev.tool)) didWork = true;
+      // Remember a live preview server so LATER cycles don't waste steps re-serving the same app.
+      if (ev.type === "tool_result" && ev.tool === "serve_app" && ev.output) {
+        const m = String(ev.output).match(/localhost:(\d{4,5})/);
+        if (m) run.servedPort = m[1];
+      }
       if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
       // Always stream tool activity + usage; in VERBOSE mode also stream the model's live
       // thinking + tokens to the chat so you can watch what it's doing.
@@ -245,6 +254,15 @@ async function loop() {
       continue;
     }
     if (!run || run.ended) return;   // a force-stop ended the run while this cycle was in flight — drop its result silently
+    // Retry-on-empty: a cycle where the model returned NOTHING is a wasted cycle — retry it (up to
+    // twice) without counting it, rather than recording a blank summary and burning the budget.
+    if ((reply || "").includes("I wasn't able to produce a response") && (run.emptyStreak || 0) < 2) {
+      run.emptyStreak = (run.emptyStreak || 0) + 1;
+      try { broadcast({ type: "tool", tool: "↻ Autopilot — empty response, retrying", input: "" }); } catch (_) {}
+      await sleep(1000);
+      continue;   // does NOT increment cycles or idleWork
+    }
+    run.emptyStreak = 0;
     run.cycles++;
     run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
     run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();

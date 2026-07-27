@@ -8,6 +8,17 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-27: **Autopilot converges instead of burning cycles re-verifying.** Log review showed
+  runs repeatedly exhausting the per-cycle tool-step cap without ever declaring "done" — each
+  cycle restarted the whole serve→browse→screenshot→verify arc from scratch. Three fixes in
+  `autopilot.js`: (1) it now remembers a **live preview server** (port captured from `serve_app`)
+  and tells later cycles NOT to re-serve it; (2) an explicit **"if it works, you are DONE"** nudge
+  so a passing verification marks the plan complete and exits rather than looping to the step cap;
+  (3) **retry-on-empty** — a cycle where the model returns nothing is retried (up to twice) without
+  being counted, instead of wasting a cycle. Covered by new tests. (`app/src/autopilot.js`,
+  `app/test/autopilot.test.js`.)
+
 ### Changed
 - 2026-07-27: **Autopilot launcher + Modify are now floating modals.** Starting a run opens a
   centered floating window (dimmed backdrop, ✕/Esc/backdrop-click to close, roomier objective

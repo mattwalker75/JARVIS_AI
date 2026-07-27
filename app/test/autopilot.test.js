@@ -92,6 +92,33 @@ const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planne
   await waitDone();
   check("new objective starts a fresh plan (no stale DOOM)", capt[0] && /call plan_create/.test(capt[0]) && /SimCity/.test(capt[0]) && !/OLD DOOM/.test(capt[0]));
 
+  // retry-on-empty: a cycle where the model returns the empty-generation marker is retried
+  // WITHOUT being counted; a later real reply still completes the run.
+  reset(); { let n = 0;
+    llmBehavior = async () => {
+      n++;
+      if (n === 1) { planner.create({ objective: "o", steps: ["a"] }); return "⚠️ I wasn't able to produce a response to that. Please try again."; }
+      if (n === 2) return "⚠️ I wasn't able to produce a response to that. Please try again.";
+      planner.get().steps.forEach((st) => planner.updateStep({ step: st.id, status: "done" })); return "done";
+    };
+    ap.start({ objective: "E", minutes: 60, autonomy: "full" });
+    check("retry-on-empty -> still completes", /finished/.test(await waitDone()));
+    check("retry-on-empty not counted as a cycle", ap.status().cycles === 1);
+  }
+
+  // servedPort memory: a serve_app result teaches later cycles NOT to re-serve (instr note appears)
+  reset(); { let n = 0; let instr2 = "";
+    llmBehavior = async (o) => {
+      n++;
+      if (n === 1) { planner.create({ objective: "o", steps: ["a", "b"] }); o.emit({ type: "tool_result", tool: "serve_app", output: "Live at http://localhost:9101 (HTTP 200)" }); return "served"; }
+      instr2 = o.messages[1].content;
+      planner.get().steps.forEach((st) => planner.updateStep({ step: st.id, status: "done" })); return "done";
+    };
+    ap.start({ objective: "S", minutes: 60, autonomy: "full" });
+    check("servedPort -> completes", /finished/.test(await waitDone()));
+    check("servedPort note injected into later cycle", /already running on http:\/\/localhost:9101/i.test(instr2));
+  }
+
   // persistence: a 'running' run left on disk resumes on restore()
   reset();
   fs.writeFileSync(process.env.JARVIS_AUTOPILOT_FILE, JSON.stringify({ id: "ap_x", objective: "resume me", autonomy: "full", minutes: 60, deadline: Date.now() + 3600000, maxCycles: 100, cycles: 1, noProgress: 0, errors: 0, status: "running", tokens: 0, cost: 0 }));
