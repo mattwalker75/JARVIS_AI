@@ -163,6 +163,7 @@ app.post("/api/autopilot/start", (req, res) => {
 });
 app.post("/api/autopilot/wrapup", (_req, res) => res.json(autopilot.requestWrapUp()));
 app.post("/api/autopilot/stop", (_req, res) => res.json(autopilot.requestStop()));
+app.post("/api/autopilot/forcestop", (_req, res) => res.json(autopilot.forceStop()));
 app.post("/api/autopilot/pause", (_req, res) => res.json(autopilot.pause()));
 app.post("/api/autopilot/resume", (_req, res) => res.json(autopilot.resume()));
 app.post("/api/autopilot/modify", (req, res) => res.json(autopilot.modify(req.body || {})));
@@ -175,7 +176,7 @@ app.post("/api/autopilot/clarify", async (req, res) => {
   const objective = String((req.body || {}).objective || "").trim();
   if (!objective) return res.json({ ready: true, questions: "" });
   const messages = [
-    { role: "system", content: "You are about to carry out a task AUTONOMOUSLY and UNATTENDED — the user cannot answer questions once you start. FIRST, review the request and ask the clarifying questions you need to build the RIGHT thing: scope and must-have features; tech stack / ARCHITECTURE (e.g. a single self-contained HTML file vs. a client + backend server, what persistence/storage, any frameworks); where the finished output should go; constraints, preferences, and important edge cases. Ask them as a CONCISE numbered list — group related questions, and don't over-ask about trivia. If the request is already clear and specific enough to proceed with confidence, reply with EXACTLY the word READY and nothing else." },
+    { role: "system", content: "You are about to carry out a task AUTONOMOUSLY and UNATTENDED — the user cannot answer questions once you start. FIRST, review the request and ask the clarifying questions you need to build the RIGHT thing: scope and must-have features; tech stack / ARCHITECTURE (e.g. a single self-contained HTML file vs. a client + backend server, what persistence/storage, any frameworks); where the finished output should go; constraints, preferences, and important edge cases. Ask them as a CONCISE numbered list — group related questions, and don't over-ask about trivia. For almost ANY build/creation task there is at least one decision worth confirming (usually the ARCHITECTURE and WHERE the output should be saved) — ask it rather than assuming. Reply with EXACTLY the word READY and nothing else ONLY if the request is genuinely trivial or so fully specified that you would make no notable assumptions." },
     { role: "user", content: objective },
   ];
   try {

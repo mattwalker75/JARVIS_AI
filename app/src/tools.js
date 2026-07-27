@@ -583,6 +583,13 @@ async function updateMemory(id, text) {
 // --- web app preview: run a server in the workbench on a host-reachable port ---
 const tsleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PREVIEW_MIN = 9101, PREVIEW_MAX = 9150;
+// Best-effort cleanup for a forced Autopilot stop: free every preview port (9101-9150),
+// which kills whatever server was listening on it. Targeted to JARVIS's preview range so it
+// won't touch unrelated processes. Fire-and-forget.
+async function killWorkbenchJobs() {
+  try { await runShell(`for p in $(seq ${PREVIEW_MIN} ${PREVIEW_MAX}); do fuser -k \${p}/tcp 2>/dev/null; done; true`, 20); }
+  catch (_) {}
+}
 async function serveApp(command, port, cwd) {
   if (!command) throw new Error("command is required (the server start command)");
   port = parseInt(port, 10);
@@ -992,4 +999,4 @@ function isRetryable(name) {
 }
 
 // Only what's imported elsewhere is exported; everything else is reached via execTool.
-module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl };
+module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs };

@@ -98,6 +98,20 @@ function requestStop() {
   else { run.hardStop = true; run.status = "stopping"; if (ac) { try { ac.abort(); } catch (_) {} } emitStatus(); }
   return status();
 }
+// Forced stop: don't wait for the current cycle to unwind. End the run NOW (bar flips to the
+// ended state immediately), abort the in-flight call, and kill anything the run left running in
+// the workbench (preview servers on the 9101-9150 range). Used when a plain Stop is wedged on a
+// step that won't quit. The loop's post-cycle guard makes the orphaned cycle a no-op.
+function forceStop() {
+  if (!run) return status();
+  if (run.ended) return status();
+  run.hardStop = true;
+  if (ac) { try { ac.abort(); } catch (_) {} }
+  ac = null;
+  try { require("./tools").killWorkbenchJobs(); } catch (_) {}   // fire-and-forget cleanup
+  finish("stopped", `force-stopped after ${run.cycles} cycle(s).`, null);
+  return status();
+}
 // Pause: stop starting new cycles but keep the run alive so it can be resumed. Aborts the
 // in-flight cycle for responsiveness (the plan ledger + workbench files are the memory, so
 // nothing is lost — resume re-cycles from where the ledger stands).
@@ -135,7 +149,7 @@ function extend({ minutes }) {
 }
 
 function finish(state, message, summary) {
-  if (!run) return;
+  if (!run || run.ended) return;   // idempotent: a force-stop may end the run before the orphaned cycle unwinds
   const label = run.objective;
   run.status = state;   // done | budget | stopped | stuck | error
   run.ended = true; run.lastMessage = message; ac = null;
@@ -230,6 +244,7 @@ async function loop() {
       await sleep(1500);
       continue;
     }
+    if (!run || run.ended) return;   // a force-stop ended the run while this cycle was in flight — drop its result silently
     run.cycles++;
     run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
     run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
@@ -252,4 +267,4 @@ async function loop() {
   }
 }
 
-module.exports = { start, requestWrapUp, requestStop, pause, resume, modify, extend, continueRun, dismiss, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };
+module.exports = { start, requestWrapUp, requestStop, forceStop, pause, resume, modify, extend, continueRun, dismiss, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };

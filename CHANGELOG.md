@@ -9,6 +9,20 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-27: **Autopilot forced stop.** A plain **Stop** aborts the current step and ends the
+  run — but if it's wedged on a step that won't quit, the button now changes to **Force stop**
+  while it's stopping. Clicking it (with a confirm) ends the run *immediately* — the bar flips to
+  the ended state without waiting for the cycle to unwind — and kills anything the run left
+  running in the workbench (preview servers on ports 9101-9150). `POST /api/autopilot/forcestop`,
+  `tools.killWorkbenchJobs()`, `finish()` made idempotent + a post-cycle guard so the orphaned
+  cycle is a no-op. (`app/src/autopilot.js`, `app/src/tools.js`, `app/server.js`, frontend.)
+
+### Changed
+- 2026-07-27: **Autopilot clarify leans toward asking.** The pre-flight now confirms at least the
+  architecture and where output should be saved for build/creation tasks instead of replying
+  READY on a merely-specific request, so it asks a question more often than not. (`app/server.js`.)
+
+### Added
 - 2026-07-26: **Autopilot clarify-first.** Before it plans or builds, Autopilot now reviews
   your objective and asks any clarifying questions it needs (architecture, persistence,
   scope, where to save) so it builds the *right* thing instead of guessing. A checkbox

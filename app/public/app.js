@@ -663,12 +663,14 @@ function renderPlan(plan) {
 
 // --- Autopilot: launch + live status bar -------------------------------------
 let apTick = null;
+let apLastStatus = null;   // latest run status, so the Stop button can escalate to a forced stop
 function fmtLeft(s) { s = Math.max(0, s | 0); const m = Math.floor(s / 60), ss = s % 60; return m > 0 ? `${m}m ${ss}s` : `${ss}s`; }
 const AP_ENDED_LABEL = { done: "✅ done", budget: "⏱ time budget reached", stopped: "⏹ stopped", stuck: "⚠️ stuck", error: "⚠️ errored" };
 function renderAutopilot(st) {
   const bar = $("autopilot-bar"); if (!bar) return;
   if (!st || (!st.active && !st.ended)) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
   bar.hidden = false;
+  apLastStatus = st.status || null;
   const paused = !!st.paused, stopping = st.status === "stopping" || st.status === "pausing", ended = !!st.ended;
   bar.classList.toggle("paused", paused || stopping);
   bar.classList.toggle("ended", ended);
@@ -680,6 +682,7 @@ function renderAutopilot(st) {
   const show = (id, on) => { const b = $(id); if (b) b.hidden = !on; };
   show("ap-pause", !ended); show("ap-extend", !ended); show("ap-wrapup", !ended); show("ap-stop", !ended);
   show("ap-continue", ended && st.resumable); show("ap-dismiss", ended);
+  const stopBtn = $("ap-stop"); if (stopBtn) { stopBtn.textContent = stopping ? "Force stop" : "Stop"; stopBtn.title = stopping ? "Still stopping — click for a FORCED stop (aborts the current step now)" : "Stop immediately"; }
   let secs = Number(st.seconds_left) || 0;
   const tokBit = st.tokens ? ` · ${st.tokens >= 1000 ? (st.tokens / 1000).toFixed(1) + "k" : st.tokens} tok` + (st.cost_usd ? ` ~$${st.cost_usd}` : "") : "";
   const paint = () => { const m = $("ap-meta"); if (m) m.textContent = ended ? `${st.cycles || 0} cycles${tokBit}` : `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}${tokBit}`; };
@@ -780,7 +783,14 @@ function renderAutopilot(st) {
   const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
   const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify"), continueB = $("ap-continue"), dismissB = $("ap-dismiss");
   if (wrap) wrap.addEventListener("click", () => apPost("wrapup"));
-  if (stop) stop.addEventListener("click", () => { if (confirm("Stop Autopilot now?")) apPost("stop"); });
+  if (stop) stop.addEventListener("click", () => {
+    if (apLastStatus === "stopping") {
+      // A stop is already pending but the current step hasn't quit — offer the forced stop.
+      if (confirm("Autopilot is still finishing its current step and hasn't stopped yet.\n\nPerform a FORCED stop? This aborts the running step immediately and kills any preview servers it started (ports 9101-9150).")) apPost("forcestop");
+    } else {
+      if (confirm("Stop Autopilot? It aborts the current step and stops. (If it doesn't stop, click Stop again for a forced stop.)")) apPost("stop");
+    }
+  });
   if (pauseB) pauseB.addEventListener("click", () => apPost(pauseB.dataset.act === "resume" ? "resume" : "pause"));
   if (extendB) extendB.addEventListener("click", () => apPost("extend", { minutes: 15 }));
   if (continueB) continueB.addEventListener("click", () => apPost("continue", { minutes: 15 }));   // resume the SAME plan with a fresh budget
