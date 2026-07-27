@@ -23,9 +23,10 @@ tools add more at runtime.
 
 | Tool | Purpose |
 | --- | --- |
-| `run_shell(command, timeout_s?)` | Run bash as **root** in the workbench. Killed after `timeout_s` (default 120s, max 600). Long output keeps head **and tail** with a truncation marker. |
-| `write_workbench_file(path, content)` | Reliably write a file under `/workspace` (base64-piped — no quoting issues). |
-| `serve_app(command, port, cwd?)` | Start a web app in the workbench on a preview port (9101–9150) the browser can open. |
+| `run_shell(command, timeout_s?)` | Run bash as **root** in the workbench. Killed after `timeout_s` (default 120s, max 600). Long output keeps head **and tail** with a truncation marker. A hard Stop kills the in-flight command. |
+| `write_workbench_file(path, content)` | Reliably **create** a file under `/workspace` (base64-piped — no quoting issues). |
+| `edit_workbench_file(path, old_string, new_string, replace_all?)` | **Targeted** find-and-replace in an existing workbench file — preferred over rewriting the whole file (safer, cheaper, fewer new bugs). |
+| `serve_app(command, port, cwd?)` | Start a web app in the workbench on a preview port (9101–9150) the browser can open. Reports whether GET / serves a real page, and warns if a static server is pointed at a folder with no `index.html`. |
 
 ## Files (shared folders)
 
@@ -35,6 +36,7 @@ tools add more at runtime.
 | `read_file(path, offset?, max_chars?)` | Read a text file, paged. Errors on binary with a pointer to the right tool. |
 | `read_document(path, offset?, max_chars?)` | Extract text from PDF / DOCX / ODT / RTF / EPUB / HTML, paged. |
 | `write_file(path, content, append?)` | Write a file into the read-write shared folder (deliverables). |
+| `edit_file(path, old_string, new_string, replace_all?)` | Targeted find-and-replace in an existing shared file (the `/READ_WRITE_FILES` counterpart of `edit_workbench_file`). |
 | `append_log(path, message, fields?)` | Append one uniformly-formatted, timestamped log line. |
 
 ## Internet
@@ -52,11 +54,25 @@ by a persistent, **visible** Chromium in the workbench (logins persist under
 
 | Tool | Purpose |
 | --- | --- |
-| `browser_goto(url)` | Open a URL. |
+| `browser_goto(url)` | Open a URL. Also reports any load-time JavaScript errors. |
 | `browser_snapshot()` | See the page: URL, title, text preview, and interactive elements each with a short `ref` (e.g. `e3`). |
 | `browser_click(target)` | Click by `ref` or CSS/Playwright selector. |
 | `browser_fill(target, text, press_enter?)` | Type into a field (optionally submit). |
 | `browser_extract(selector?, offset?)` | Extract exact page/element text, paged. |
+| `browser_console(limit?, clear?)` | Get the page's JavaScript **console output + uncaught runtime errors** — the way to debug a running web app that renders wrong or blank. |
+
+## Planning (task ledger)
+
+Used to keep a persistent objective + checklist that survives interruptions. See
+[Autopilot & the Planner](autopilot.md).
+
+| Tool | Purpose |
+| --- | --- |
+| `plan_create(objective, steps[])` | Start a plan (replaces any existing one). |
+| `plan_update(step, status, note?)` | Set a step `pending`/`active`/`done`/`blocked` (done auto-activates the next). |
+| `plan_add_step(text, after?)` | Add a newly-discovered step. |
+| `plan_show()` | Return the current plan (rarely needed — it's shown every turn). |
+| `plan_clear()` | Close the plan when the objective is complete. |
 
 ## Vision & desktop (computer use)
 

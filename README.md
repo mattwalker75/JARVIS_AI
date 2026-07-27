@@ -51,28 +51,46 @@ key required (except for internet research and package installs).
 
 ## What it can do
 
-- **Chat** with rich markdown, a live "thinking" panel for reasoning models, and
-  spoken replies.
+- **Chat** with rich markdown, clickable links, a live "thinking" panel for reasoning
+  models, and spoken replies.
+- **Plan & execute multi-step work** — for anything non-trivial it keeps a persistent
+  **task ledger** (objective + checklist) shown live above the chat, so it resumes
+  correctly after any interruption instead of forgetting where it was.
+- **Autopilot** — give it an objective and a time budget and it works **autonomously**
+  (build → test → refine → fix) until done, the budget's up, or it gets stuck. It runs
+  server-side (close the tab and walk away), notifies you when finished, and you can
+  **pause / resume / modify / extend / continue** it from the status bar. A verbose
+  switch streams its thinking to the chat so you can watch it work.
 - **Remember** facts about you across conversations (semantic memory you can browse
   and prune in the UI).
 - **Run anything** in a root Linux workbench (2000+ preinstalled tools; installs more
-  on demand).
+  on demand). Targeted `edit_*` tools change files without risky whole-file rewrites.
 - **Use the web** — read pages/APIs, search, and drive a real browser by DOM
-  selectors (not pixel guessing).
+  selectors (not pixel guessing), including reading a page's **JS console** to debug
+  a running web app.
 - **See** — analyze screenshots and image files with a vision model.
 - **Do email** — read and send from your own account.
 - **Read documents** — extract text from PDF/DOCX/EPUB.
 - **Schedule** one-shot and recurring tasks that notify you.
 - **Talk** — hands-free voice conversation that streams speech as it answers.
+- **Shape its identity** — an editable **prompt library** (master + system prompts) with
+  ready-made personas (coder, researcher, investment, pentester, and ~35 more) you can
+  load and switch between.
+- **Manage context** — a live context-window meter with one-click **Summarize & continue**
+  to compact a long conversation and keep going.
 
 ## Extending it
 
 JARVIS is built to grow without editing core code:
 
+- **Prompts** — edit the master + system prompt in the Config tab, or drop
+  `<name>_master.prompt` / `<name>_system.prompt` files in `Prompts/`; the tooling
+  instructions are appended automatically.
+- **Providers** — pick a provider (OpenAI, Groq, OpenRouter, Ollama, …) in the Config
+  tab, paste a key, and **List models** to choose one — or add a line to
+  `litellm/config.yaml` and use it by name.
 - **Custom tools** — drop a JS file in `data/custom_tools/` and restart.
 - **MCP servers** — add external tool servers in config; they register automatically.
-- **Personas** — define alternate system prompts and switch per conversation.
-- **Models/providers** — add a line to `litellm/config.yaml`; use it by name.
 - **Skills** — on-demand how-to playbooks the model reads before hard tasks.
 - **REST API** — `POST /api/chat` for scripts, cron, and other machines.
 
@@ -85,6 +103,8 @@ Detailed docs live in **[`Docs/`](Docs/README.md)**:
 | [Architecture](Docs/architecture.md) | Containers, data flow, the gateway, volumes, security model |
 | [Configuration](Docs/configuration.md) | Full `JARVIS_CONFIG.json` reference |
 | [Tools](Docs/tools.md) | Every tool the LLM can call, by family |
+| [Autopilot & Planner](Docs/autopilot.md) | The task ledger and autonomous objective loops |
+| [Prompts & Context](Docs/prompts.md) | Master/system prompt library + the context-window meter |
 | [Web UI](Docs/web-ui.md) | Tabs, slash commands, model switcher, files, drag-drop |
 | [Voice](Docs/voice.md) | Voice modes, streaming TTS, barge-in |
 | [Memory & Scheduling](Docs/memory-and-scheduling.md) | Semantic memory + scheduled tasks |

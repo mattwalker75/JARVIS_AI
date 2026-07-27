@@ -55,9 +55,16 @@ On start, the app handshakes each server and registers its tools as
 `mcp_<server>_<tool>`. A dead server is logged and skipped (never blocks startup).
 Restart to pick up config changes. Implementation: `app/src/mcp.js`.
 
-## Personas
+## Prompts
 
-Alternate system prompts, switchable per conversation. In config:
+The main way to shape JARVIS's identity and behavior is the **prompt library** — editable
+master + system prompt files in `Prompts/`, with a picker in the Config tab and ~40 ready-made
+personas. The tooling instructions are appended automatically. See [Prompts & Context](prompts.md).
+
+## Personas (per-conversation override)
+
+For a lighter, per-conversation switch (distinct from the active prompt), define **personas** —
+alternate system prompts you flip on the fly. In config:
 
 ```jsonc
 "personas": {

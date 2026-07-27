@@ -9,9 +9,14 @@ for everything else — including `POST /api/chat` for external automation. No a
 The browser UI's transport. Send:
 
 ```json
-{ "type": "chat", "messages": [ {"role":"user","content":"..."} ], "persona": "work" }
-{ "type": "cancel" }        // interrupt the in-flight request (Stop / Esc)
+{ "type": "chat", "messages": [ {"role":"user","content":"..."} ], "persona": "work",
+  "watchdog": true, "planMode": false }
+{ "type": "cancel" }        // interrupt the in-flight request (Stop / Esc). A bare "stop"
+                            // chat message while busy also interrupts.
 ```
+
+Per-message flags: `watchdog` (false = patient mode, don't kill a slow stream), `planMode`
+(clarify → plan → execute).
 
 The server streams events back:
 
@@ -20,8 +25,10 @@ The server streams events back:
 | `{type:"reasoning", text}` | A reasoning-model thinking delta (feeds the Thinking panel). |
 | `{type:"token", text}` | An answer content delta. |
 | `{type:"tool", tool, input}` / `{type:"tool_result", tool, output, ms}` | A tool call and its result. |
-| `{type:"usage", model, usage, cost_usd}` | Token/cost for the turn. |
-| `{type:"reply", text}` | Final answer. |
+| `{type:"usage", model, usage, cost_usd}` | Token/cost for the turn (`usage.context_tokens` drives the context meter). |
+| `{type:"reply", text, ephemeral?}` | Final answer (`ephemeral` = a verbose Autopilot cycle: shown but not saved to history). |
+| `{type:"plan", plan}` | The task ledger changed (drives the plan banner). |
+| `{type:"autopilot", status}` | Autopilot status changed (drives the Autopilot bar). |
 | `{type:"error", error}` | Error. |
 | `{type:"notification"|"task_run"|"chat_post", ...}` | Scheduler/task events. |
 
@@ -47,8 +54,11 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/config` | Public config (no secrets): title, provider, model, voice, personas. |
+| `GET /api/config` | Public config (no secrets): title, provider, model, voice, personas, context window. |
+| `GET /api/config/full` · `POST /api/config/full` | Read / write the full config + secrets (Config tab; auto-backs-up). |
 | `GET /api/models` | Available models (from the gateway or Ollama) + current. |
+| `POST /api/models/probe` | List models from an arbitrary endpoint: `{base_url, api_key}` (for the provider picker). |
+| `GET /api/context-window` | Resolve the context-meter ceiling (manual → Ollama num_ctx → gateway `/model/info` → default). |
 | `POST /api/settings` | Persist an allowlisted setting: `{path, value}` (see [Configuration](configuration.md#settings-the-ui-can-change)). |
 | `GET /api/tts/voices` | Neural (Piper) voices available: `{voices:[{id,label,lang}], default}`. |
 | `POST /api/tts` | Synthesize speech (Piper): body `{text, voice?, rate?}` → `audio/wav`. Proxied to `jarvis-piper`. |
@@ -82,6 +92,29 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/notifications` | Recent notifications. |
 | `POST /api/notifications/clear` | Clear all. |
 | `DELETE /api/notifications/:id` | Dismiss one. |
+
+### Planner & Autopilot
+
+See [Autopilot & the Planner](autopilot.md).
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/plan` · `DELETE /api/plan` | The active task ledger / clear it. |
+| `GET /api/autopilot` | Current Autopilot status (`active`, `paused`, `ended`, `resumable`, cycles, budget, tokens). |
+| `POST /api/autopilot/start` | `{objective, minutes, autonomy, verbose}`. |
+| `POST /api/autopilot/{pause,resume,wrapup,stop}` | Control an active run. |
+| `POST /api/autopilot/extend` · `.../modify` | `{minutes}` / `{objective}`. |
+| `POST /api/autopilot/{continue,dismiss}` | Resume an ended run on the same plan / clear the ended bar. |
+
+### Prompts & context
+
+See [Prompts & Context](prompts.md).
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/prompts` | List saved prompt-set names. |
+| `GET · POST · DELETE /api/prompts/:name` | Read / write / delete a set's `<name>_master.prompt` + `<name>_system.prompt` (`default`/`stock` protected from delete). |
+| `POST /api/summarize` | Summarize a conversation (`{messages}`) for compaction. |
 
 ### Sessions
 

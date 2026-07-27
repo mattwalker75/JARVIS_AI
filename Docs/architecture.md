@@ -92,9 +92,11 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 | `./JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
 | `./READ_ONLY_FILES` | `/READ_ONLY_FILES` (ro) | Files you share to JARVIS |
 | `./READ_WRITE_FILES` | `/READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
-| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log` |
+| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state) |
+| `./Prompts` | `/Prompts` | Active + saved master/system prompt files (see [Prompts](prompts.md)) |
+| `./Logs` | `/logs` | Debug logs (per-day, rotated by size + retention) |
 | `jarvis_memory_data` | `/data/chroma` | Vector store (Docker volume) |
-| `jarvis_workbench_work` | `/workspace` | Workbench scratch/build dir (Docker volume) |
+| `jarvis_workbench_work` | `/workspace` | Workbench scratch/build dir — also mounted read-write into the app so file tools can reach it (Docker volume) |
 | `jarvis_workbench_home` | `/config` | Workbench home (Docker volume) |
 
 Bind mounts (config, secrets, shared folders, `data/`) survive `--delete`; the Docker

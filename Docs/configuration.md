@@ -48,11 +48,20 @@ apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
   "gemini_api_key": "",                           // optional — only to use Gemini via the gateway
   "temperature": 0.4,
   "max_tokens": 12000,                            // per-turn cap; keep generous for local reasoning models
-  "idle_timeout_ms": 120000,                      // abort a stream that sends no data for this long
+  "idle_timeout_ms": 120000,                      // watchdog: abort a stream that sends no data for this long
+  "idle_watchdog": true,                          // default for the 🐕 watchdog toggle (off = patient mode)
   "max_tool_iterations": 15,
-  "system_prompt": "You are {assistant_name}, ..."
+  "completion_checks": 2,                          // times to re-verify "is it really done?" before accepting (0 = off)
+  "context_window": 0,                            // context-meter ceiling; 0/omit = auto (Ollama num_ctx / gateway /model/info)
+  "master_prompt": "",                            // FALLBACK identity prompt (the active one is Prompts/default_master.prompt)
+  "system_prompt": "You are {assistant_name}, ..."  // FALLBACK (active one is Prompts/default_system.prompt)
 }
 ```
+
+The tool-use, planner, and coding guidance is appended to every prompt automatically, so
+`system_prompt` only needs the behavior/identity. The **active** master + system prompts live
+in editable files under `Prompts/` (see [Prompts & Context](prompts.md)); the `llm.*_prompt`
+values are used only if those files are absent.
 
 ### Model tiers
 Each tier in `models` names a model the gateway knows (a `model_name` from
@@ -166,6 +175,34 @@ When `true` (the default), each turn keyword-matches your message against the
 It's a cheap backstop — the model may or may not act on it (a confident local model
 often proceeds directly). Toggle it live from the UI with `/hints on|off`, or set it
 `false` here to disable. See [Extending → Skills](extending.md#skills).
+
+## `autopilot` (optional)
+
+```jsonc
+"autopilot": {
+  "autonomy": "guarded",   // "guarded" (default) | "full" — see docs/autopilot.md
+  "default_minutes": 30,   // time budget prefilled in the launcher
+  "max_cycles": 100        // safety cap on build/test iterations
+}
+```
+See [Autopilot & the Planner](autopilot.md).
+
+## `ui` (optional)
+
+```jsonc
+"ui": { "stall_seconds": 25 }   // how long with no streamed progress before the "model is slow" warning
+```
+
+## `logging` (optional)
+
+```jsonc
+"logging": {
+  "level": 0,          // 0 off … 3 info, 4 verbose (tool args/results), 5 debug (full LLM req/resp)
+  "max_mb": 50,        // roll the day's file to jarvis-<day>.N.log past this size
+  "retain_days": 14    // delete log files older than this on startup
+}
+```
+Read live — change `level` from the Config tab and it applies immediately. Secrets are redacted.
 
 ## `custom_tools` (optional)
 
