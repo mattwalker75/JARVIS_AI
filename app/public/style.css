@@ -154,6 +154,10 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 #ap-answers { width: 100%; resize: vertical; background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px; font: inherit; font-size: .82rem; margin-bottom: 8px; }
 #ap-answers:focus { outline: none; border-color: var(--accent); }
 .apd-skip { width: 100%; margin-top: 6px; }
+.apd-qprogress { font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+.apd-qnav { display: flex; gap: 8px; }
+.apd-qnav #ap-q-back { flex: 0 0 auto; width: auto; margin-top: 0; }
+.apd-qnav #ap-q-next { flex: 1 1 auto; width: auto; }
 .apd-hint { font-size: .74rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
 
 /* Autopilot status bar (shown while a run is active) */

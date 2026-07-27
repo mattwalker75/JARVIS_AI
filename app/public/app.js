@@ -690,7 +690,7 @@ function renderAutopilot(st) {
 (function initAutopilot() {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
   if (btn && drop) {
-    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) { const c = $("ap-clarify-panel"); if (c) c.hidden = true; $("ap-objective").focus(); } });
+    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) { const c = $("ap-clarify-panel"); if (c) c.hidden = true; clar = null; $("ap-objective").focus(); } });
     // Close on an outside click — but only if the press STARTED outside. Otherwise selecting
     // text in the objective box (drag that ends outside) would wrongly close the panel.
     let downInside = false;
@@ -712,6 +712,27 @@ function renderAutopilot(st) {
       return true;
     } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); return false; }
   }
+  // --- Clarify wizard: ask one question at a time, collect an answer for each, then launch. ---
+  let clar = null;   // { objective, questions:[], answers:[], i }
+  function showClarQuestion() {
+    const n = clar.questions.length, i = clar.i;
+    $("ap-q-progress").textContent = `Question ${i + 1} of ${n}`;
+    $("ap-q-text").textContent = clar.questions[i];
+    $("ap-answers").value = clar.answers[i] || "";
+    $("ap-q-back").hidden = i === 0;
+    $("ap-q-next").textContent = (i === n - 1) ? "🛫 Build it" : "Next →";
+    $("ap-answers").focus();
+  }
+  async function finishClar() {
+    const lines = clar.questions.map((q, k) => `${k + 1}. ${q}\n   → ${(clar.answers[k] || "").trim() || "(no preference — use your best judgment)"}`).join("\n");
+    const enriched = clar.objective + "\n\n--- Clarifications (I asked these before starting) ---\n" + lines;
+    const c = clar; clar = null;
+    $("ap-q-next").disabled = true;
+    await launchAutopilot(enriched);
+    $("ap-q-next").disabled = false;
+    if (clar === null) { /* launched (or failed) — panel hidden by launchAutopilot on success */ }
+    return c;
+  }
   const start = $("ap-start");
   if (start) start.addEventListener("click", async () => {
     const objective = ($("ap-objective").value || "").trim();
@@ -723,25 +744,38 @@ function renderAutopilot(st) {
     try {
       const d = await (await fetch("/api/autopilot/clarify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective }) })).json();
       if (d.error) { addMessage("assistant", "Clarify failed: " + d.error, "error"); return; }
-      if (d.ready || !d.questions) { await launchAutopilot(objective); return; }   // no questions -> just go
-      $("ap-questions").textContent = d.questions;
+      const qs = Array.isArray(d.questions) ? d.questions.filter(q => (q || "").trim()) : [];
+      if (d.ready || !qs.length) { await launchAutopilot(objective); return; }   // nothing to ask -> just go
+      clar = { objective, questions: qs, answers: [], i: 0 };
       $("ap-clarify-panel").hidden = false;
-      $("ap-answers").value = ""; $("ap-answers").focus();
+      showClarQuestion();
     } catch (e) { addMessage("assistant", "Clarify failed: " + e.message, "error"); }
     finally { start.disabled = false; start.textContent = lbl; }
   });
-  const startClarified = $("ap-start-clarified");
-  if (startClarified) startClarified.addEventListener("click", async () => {
-    const objective = ($("ap-objective").value || "").trim(); if (!objective) return;
-    const questions = ($("ap-questions").textContent || "").trim();
-    const answers = ($("ap-answers").value || "").trim();
-    const enriched = objective + "\n\n--- Clarifications (I asked these before starting) ---\n" + questions + "\n\nUser's answers:\n" + (answers || "(no specific answers — use your best judgment, and note the assumptions you make)");
-    startClarified.disabled = true; await launchAutopilot(enriched); startClarified.disabled = false;
+  const qNext = $("ap-q-next");
+  if (qNext) qNext.addEventListener("click", async () => {
+    if (!clar) return;
+    clar.answers[clar.i] = ($("ap-answers").value || "").trim();
+    if (clar.i < clar.questions.length - 1) { clar.i++; showClarQuestion(); }
+    else await finishClar();
   });
+  const qBack = $("ap-q-back");
+  if (qBack) qBack.addEventListener("click", () => {
+    if (!clar || clar.i === 0) return;
+    clar.answers[clar.i] = ($("ap-answers").value || "").trim();
+    clar.i--; showClarQuestion();
+  });
+  // Enter submits the current question (Shift+Enter = newline in the answer).
+  const qAns = $("ap-answers");
+  if (qAns) qAns.addEventListener("keydown", (e) => { if (clar && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); qNext.click(); } });
   const clarifySkip = $("ap-clarify-skip");
   if (clarifySkip) clarifySkip.addEventListener("click", async () => {
-    const objective = ($("ap-objective").value || "").trim(); if (!objective) return;
-    clarifySkip.disabled = true; await launchAutopilot(objective); clarifySkip.disabled = false;
+    if (!clar) return;
+    clar.answers[clar.i] = ($("ap-answers").value || "").trim();   // keep whatever's been answered so far
+    const answered = clar.answers.some(a => (a || "").trim());
+    clar.questions = clar.questions.slice(0, clar.i + 1);          // drop the unshown ones
+    if (answered) { await finishClar(); }                          // fold in partial answers
+    else { const o = clar.objective; clar = null; await launchAutopilot(o); }   // nothing answered -> raw objective
   });
   const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
   const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify"), continueB = $("ap-continue"), dismissB = $("ap-dismiss");

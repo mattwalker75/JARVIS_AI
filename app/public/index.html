@@ -73,11 +73,15 @@
           <button id="ap-start" class="apd-start">🛫 Start Autopilot</button>
           <div class="apd-hint">Runs on the server — you can close the tab and walk away. You'll be notified when it finishes, hits its time budget, or gets stuck. <b>Guarded</b> won't send email / post / spend / delete your files on its own.</div>
           <div id="ap-clarify-panel" hidden>
-            <div class="apd-title">A few questions first — answer these so it builds the right thing:</div>
-            <div id="ap-questions" class="apd-questions"></div>
-            <textarea id="ap-answers" rows="5" placeholder="Your answers (roughly match the numbers above)…"></textarea>
-            <button id="ap-start-clarified" class="apd-start">🛫 Build it with these answers</button>
-            <button id="ap-clarify-skip" class="ghost apd-skip">Skip — just build it</button>
+            <div class="apd-title">A few questions first — so it builds the right thing:</div>
+            <div id="ap-q-progress" class="apd-qprogress"></div>
+            <div id="ap-q-text" class="apd-questions"></div>
+            <textarea id="ap-answers" rows="3" placeholder="Your answer… (leave blank to let it decide)"></textarea>
+            <div class="apd-qnav">
+              <button id="ap-q-back" class="ghost apd-skip" hidden>← Back</button>
+              <button id="ap-q-next" class="apd-start">Next →</button>
+            </div>
+            <button id="ap-clarify-skip" class="ghost apd-skip">Skip the rest — just build it</button>
           </div>
         </div>
       </div>

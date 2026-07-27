@@ -180,8 +180,21 @@ app.post("/api/autopilot/clarify", async (req, res) => {
   ];
   try {
     const out = (await llm.chat({ messages, tier: "smart", noTools: true }) || "").trim();
-    if (/^READY\b/i.test(out) || out.length < 4) return res.json({ ready: true, questions: "" });
-    res.json({ ready: false, questions: out });
+    if (/^READY\b/i.test(out) || out.length < 4) return res.json({ ready: true, questions: [], questionsText: "" });
+    // Split the numbered list into individual questions so the UI can ask them one at a time.
+    // A new item starts at a line like "1." / "2)" ; intervening lines belong to the current item.
+    const items = [];
+    for (const raw of out.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = line.match(/^(?:\d+[.)]|[-*•])\s+(.*)$/);
+      if (m) items.push(m[1].trim());
+      else if (items.length) items[items.length - 1] += " " + line;   // continuation of the last question
+      else items.push(line);                                          // un-numbered lead line
+    }
+    const questions = items.filter(Boolean);
+    if (!questions.length) return res.json({ ready: true, questions: [], questionsText: "" });
+    res.json({ ready: false, questions, questionsText: out });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post("/api/tasks/add", (req, res) => {
