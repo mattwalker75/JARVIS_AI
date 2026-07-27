@@ -68,9 +68,17 @@
             <label>Stop after <input id="ap-minutes" type="number" min="1" max="720" value="30"> min</label>
             <label>Autonomy <select id="ap-autonomy"><option value="guarded">guarded (safe)</option><option value="full">full</option></select></label>
           </div>
+          <label class="apd-check"><input type="checkbox" id="ap-clarify" checked> Ask me clarifying questions first (recommended)</label>
           <label class="apd-check"><input type="checkbox" id="ap-verbose"> Verbose — stream its thinking to the chat so I can watch it work</label>
           <button id="ap-start" class="apd-start">🛫 Start Autopilot</button>
           <div class="apd-hint">Runs on the server — you can close the tab and walk away. You'll be notified when it finishes, hits its time budget, or gets stuck. <b>Guarded</b> won't send email / post / spend / delete your files on its own.</div>
+          <div id="ap-clarify-panel" hidden>
+            <div class="apd-title">A few questions first — answer these so it builds the right thing:</div>
+            <div id="ap-questions" class="apd-questions"></div>
+            <textarea id="ap-answers" rows="5" placeholder="Your answers (roughly match the numbers above)…"></textarea>
+            <button id="ap-start-clarified" class="apd-start">🛫 Build it with these answers</button>
+            <button id="ap-clarify-skip" class="ghost apd-skip">Skip — just build it</button>
+          </div>
         </div>
       </div>
       <button id="watchdog-toggle" class="ghost mode-toggle">🐕 Watchdog</button>

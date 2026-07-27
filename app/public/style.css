@@ -149,6 +149,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .apd-start:hover { filter: brightness(1.08); }
 .apd-check { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text); margin-bottom: 10px; cursor: pointer; }
 .apd-check input { accent-color: var(--accent); }
+#ap-clarify-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--edge); }
+.apd-questions { font-size: .82rem; line-height: 1.45; white-space: pre-wrap; color: var(--text); background: #0b0f14; border: 1px solid var(--edge); border-radius: 8px; padding: 9px; margin-bottom: 8px; max-height: 34vh; overflow-y: auto; }
+#ap-answers { width: 100%; resize: vertical; background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px; font: inherit; font-size: .82rem; margin-bottom: 8px; }
+#ap-answers:focus { outline: none; border-color: var(--accent); }
+.apd-skip { width: 100%; margin-top: 6px; }
 .apd-hint { font-size: .74rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
 
 /* Autopilot status bar (shown while a run is active) */

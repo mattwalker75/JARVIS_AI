@@ -169,6 +169,21 @@ app.post("/api/autopilot/modify", (req, res) => res.json(autopilot.modify(req.bo
 app.post("/api/autopilot/extend", (req, res) => res.json(autopilot.extend(req.body || {})));
 app.post("/api/autopilot/continue", (req, res) => res.json(autopilot.continueRun(req.body || {})));
 app.post("/api/autopilot/dismiss", (_req, res) => res.json(autopilot.dismiss()));
+// Pre-flight clarification: before an unattended run, let the model review the objective and
+// ask the questions it needs (scope, architecture, storage, output, edge cases). No tools.
+app.post("/api/autopilot/clarify", async (req, res) => {
+  const objective = String((req.body || {}).objective || "").trim();
+  if (!objective) return res.json({ ready: true, questions: "" });
+  const messages = [
+    { role: "system", content: "You are about to carry out a task AUTONOMOUSLY and UNATTENDED — the user cannot answer questions once you start. FIRST, review the request and ask the clarifying questions you need to build the RIGHT thing: scope and must-have features; tech stack / ARCHITECTURE (e.g. a single self-contained HTML file vs. a client + backend server, what persistence/storage, any frameworks); where the finished output should go; constraints, preferences, and important edge cases. Ask them as a CONCISE numbered list — group related questions, and don't over-ask about trivia. If the request is already clear and specific enough to proceed with confidence, reply with EXACTLY the word READY and nothing else." },
+    { role: "user", content: objective },
+  ];
+  try {
+    const out = (await llm.chat({ messages, tier: "smart", noTools: true }) || "").trim();
+    if (/^READY\b/i.test(out) || out.length < 4) return res.json({ ready: true, questions: "" });
+    res.json({ ready: false, questions: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post("/api/tasks/add", (req, res) => {
   try { res.json(scheduler.schedule(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }

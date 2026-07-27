@@ -9,6 +9,16 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-26: **Autopilot clarify-first.** Before it plans or builds, Autopilot now reviews
+  your objective and asks any clarifying questions it needs (architecture, persistence,
+  scope, where to save) so it builds the *right* thing instead of guessing. A checkbox
+  ("Ask me clarifying questions first", on by default) in the launcher: Start → the model
+  reviews the request and either replies READY (launches immediately) or surfaces a short
+  question list; you answer inline and hit **Start with these answers** (which folds the Q&A
+  into the objective the run is seeded with), or **Skip & start anyway**. `POST
+  /api/autopilot/clarify` (uses `llm.chat({tier:"smart", noTools:true})`). (`app/server.js`,
+  `app/public/{index.html,app.js,style.css}`.)
+
 - 2026-07-26: **Autopilot: a finished run stays put so you can Continue it.** When Autopilot
   ends incomplete (time budget, stuck, or you stopped it), the bar no longer disappears — it
   switches to an ENDED state (⏱/⚠️/⏹) and keeps the plan. New **▶ Continue** button resumes on

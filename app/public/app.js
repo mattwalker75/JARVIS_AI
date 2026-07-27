@@ -690,27 +690,58 @@ function renderAutopilot(st) {
 (function initAutopilot() {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
   if (btn && drop) {
-    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) $("ap-objective").focus(); });
+    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) { const c = $("ap-clarify-panel"); if (c) c.hidden = true; $("ap-objective").focus(); } });
     // Close on an outside click — but only if the press STARTED outside. Otherwise selecting
     // text in the objective box (drag that ends outside) would wrongly close the panel.
     let downInside = false;
     document.addEventListener("mousedown", (e) => { downInside = drop.contains(e.target) || e.target === btn; });
     document.addEventListener("click", (e) => { if (!drop.hidden && !downInside && !drop.contains(e.target) && e.target !== btn) drop.hidden = true; });
   }
+  // Actually launch the autonomous run with the given (possibly clarified) objective.
+  async function launchAutopilot(objective) {
+    const minutes = Number($("ap-minutes").value) || 30;
+    const autonomy = $("ap-autonomy").value || "guarded";
+    const verbose = !!($("ap-verbose") && $("ap-verbose").checked);
+    try {
+      const st = await (await fetch("/api/autopilot/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, minutes, autonomy, verbose }) })).json();
+      if (st.error) { addMessage("assistant", "Autopilot: " + st.error, "error"); return false; }
+      if (drop) drop.hidden = true;
+      const clr = $("ap-clarify-panel"); if (clr) clr.hidden = true;
+      renderAutopilot(st);
+      addMessage("assistant", `🛫 Autopilot started (${autonomy}, up to ${minutes} min) — working on: ${objective.split("\n")[0]}`, "notice");
+      return true;
+    } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); return false; }
+  }
   const start = $("ap-start");
   if (start) start.addEventListener("click", async () => {
     const objective = ($("ap-objective").value || "").trim();
     if (!objective) { $("ap-objective").focus(); return; }
-    const minutes = Number($("ap-minutes").value) || 30;
-    const autonomy = $("ap-autonomy").value || "guarded";
-    const verbose = !!($("ap-verbose") && $("ap-verbose").checked);
-    start.disabled = true;
+    const clarify = !!($("ap-clarify") && $("ap-clarify").checked);
+    if (!clarify) { start.disabled = true; await launchAutopilot(objective); start.disabled = false; return; }
+    // Pre-flight: let the model review the request and ask questions before it plans/builds.
+    start.disabled = true; const lbl = start.textContent; start.textContent = "…reviewing your request";
     try {
-      const st = await (await fetch("/api/autopilot/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, minutes, autonomy, verbose }) })).json();
-      if (st.error) addMessage("assistant", "Autopilot: " + st.error, "error");
-      else { if (drop) drop.hidden = true; renderAutopilot(st); addMessage("assistant", `🛫 Autopilot started (${autonomy}, up to ${minutes} min) — working on: ${objective}`, "notice"); }
-    } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); }
-    finally { start.disabled = false; }
+      const d = await (await fetch("/api/autopilot/clarify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective }) })).json();
+      if (d.error) { addMessage("assistant", "Clarify failed: " + d.error, "error"); return; }
+      if (d.ready || !d.questions) { await launchAutopilot(objective); return; }   // no questions -> just go
+      $("ap-questions").textContent = d.questions;
+      $("ap-clarify-panel").hidden = false;
+      $("ap-answers").value = ""; $("ap-answers").focus();
+    } catch (e) { addMessage("assistant", "Clarify failed: " + e.message, "error"); }
+    finally { start.disabled = false; start.textContent = lbl; }
+  });
+  const startClarified = $("ap-start-clarified");
+  if (startClarified) startClarified.addEventListener("click", async () => {
+    const objective = ($("ap-objective").value || "").trim(); if (!objective) return;
+    const questions = ($("ap-questions").textContent || "").trim();
+    const answers = ($("ap-answers").value || "").trim();
+    const enriched = objective + "\n\n--- Clarifications (I asked these before starting) ---\n" + questions + "\n\nUser's answers:\n" + (answers || "(no specific answers — use your best judgment, and note the assumptions you make)");
+    startClarified.disabled = true; await launchAutopilot(enriched); startClarified.disabled = false;
+  });
+  const clarifySkip = $("ap-clarify-skip");
+  if (clarifySkip) clarifySkip.addEventListener("click", async () => {
+    const objective = ($("ap-objective").value || "").trim(); if (!objective) return;
+    clarifySkip.disabled = true; await launchAutopilot(objective); clarifySkip.disabled = false;
   });
   const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
   const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify"), continueB = $("ap-continue"), dismissB = $("ap-dismiss");
