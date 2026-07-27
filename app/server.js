@@ -167,6 +167,8 @@ app.post("/api/autopilot/pause", (_req, res) => res.json(autopilot.pause()));
 app.post("/api/autopilot/resume", (_req, res) => res.json(autopilot.resume()));
 app.post("/api/autopilot/modify", (req, res) => res.json(autopilot.modify(req.body || {})));
 app.post("/api/autopilot/extend", (req, res) => res.json(autopilot.extend(req.body || {})));
+app.post("/api/autopilot/continue", (req, res) => res.json(autopilot.continueRun(req.body || {})));
+app.post("/api/autopilot/dismiss", (_req, res) => res.json(autopilot.dismiss()));
 app.post("/api/tasks/add", (req, res) => {
   try { res.json(scheduler.schedule(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }

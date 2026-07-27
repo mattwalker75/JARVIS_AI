@@ -20,7 +20,7 @@ ap.setBroadcast(() => {});
 let fails = 0;
 const check = (l, c) => { console.log((c ? "  ✓ " : "  ✗ ") + l); if (!c) fails++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const reset = () => { fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true }); notes = []; require(abs("config")).config.autopilot = {}; };
+const reset = () => { try { ap.dismiss(); } catch (_) {} fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true }); fs.rmSync(process.env.JARVIS_AUTOPILOT_FILE, { force: true }); notes = []; require(abs("config")).config.autopilot = {}; };
 const waitDone = async (ms = 12000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (notes.length) return notes[notes.length - 1].message; await sleep(40); } throw new Error("timeout"); };
 const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planner.create({ objective: "o", steps: ["a", "b", "c"] }); const t = setTimeout(() => res("chunk"), 400); o.signal.addEventListener("abort", () => { clearTimeout(t); const e = new Error("ab"); e.name = "AbortError"; rej(e); }); });
 
@@ -44,6 +44,12 @@ const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planne
   llmBehavior = async () => { c++; if (c === 1) planner.create({ objective: "o", steps: ["a", "b"] }); return "stalling"; };
   ap.start({ objective: "Z", minutes: 60, autonomy: "full" });
   check("no progress -> stuck", /stuck/.test(await waitDone()));
+  // ...and after it ends incomplete, the run stays (banner persists) and is resumable
+  check("ended run persists + resumable", ap.status().ended === true && ap.status().resumable === true);
+  // Continue on the SAME plan (no reset): resume and finish it
+  llmBehavior = async () => { planner.get().steps.forEach((st) => planner.updateStep({ step: st.id, status: "done" })); return "done"; };
+  notes = []; ap.continueRun({ minutes: 10 });
+  check("continue resumes the same plan -> done", /finished/.test(await waitDone()));
 
   // pause -> resume -> completes
   reset(); llmBehavior = slow();

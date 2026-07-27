@@ -85,11 +85,13 @@
         <span class="ap-state" id="ap-state">running</span>
         <span class="ap-meta" id="ap-meta"></span>
         <span class="ap-obj" id="ap-barobj"></span>
+        <button class="ap-ctl" id="ap-continue" title="Continue on the SAME plan (fresh 15-min budget) — picks up from the first incomplete step, no rebuild" hidden>▶ Continue</button>
         <button class="ap-ctl" id="ap-pause" title="Pause — stop starting new cycles (time budget freezes); resume later">⏸ Pause</button>
         <button class="ap-ctl" id="ap-extend" title="Extend the time budget by 15 minutes">+15m</button>
         <button class="ap-ctl" id="ap-modify" title="Change the objective — the next cycle re-checks its plan against it">Modify</button>
         <button class="ap-ctl" id="ap-wrapup" title="Finish the current step, summarize, then stop for review">Wrap up</button>
         <button class="ap-ctl danger" id="ap-stop" title="Stop immediately">Stop</button>
+        <button class="ap-ctl" id="ap-dismiss" title="Dismiss this finished run (clears the bar; the plan stays)" hidden>✕ Dismiss</button>
       </div>
       <div class="plan-banner" id="plan-banner" hidden>
         <div class="pb-head">

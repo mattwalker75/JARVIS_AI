@@ -158,6 +158,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .autopilot-bar .ap-state { font-weight: 800; font-size: .72rem; text-transform: uppercase; letter-spacing: .6px; color: #ffb03a; }
 .autopilot-bar.paused { border-color: rgba(255,90,90,.5); background: linear-gradient(180deg, rgba(255,90,90,.10), rgba(255,90,90,.03)); }
 .autopilot-bar.paused .ap-state { color: var(--danger); }
+.autopilot-bar.ended { border-color: var(--edge); background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)); }
+.autopilot-bar.ended .ap-state { color: var(--muted); }
 .autopilot-bar .ap-meta { font-size: .76rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .autopilot-bar .ap-obj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .84rem; }
 .autopilot-bar .ap-ctl { flex: 0 0 auto; background: transparent; border: 1px solid var(--edge); color: var(--text); border-radius: 7px; padding: 4px 10px; font-size: .78rem; cursor: pointer; }

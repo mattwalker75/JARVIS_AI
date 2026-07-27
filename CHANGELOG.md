@@ -9,6 +9,15 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-26: **Autopilot: a finished run stays put so you can Continue it.** When Autopilot
+  ends incomplete (time budget, stuck, or you stopped it), the bar no longer disappears — it
+  switches to an ENDED state (⏱/⚠️/⏹) and keeps the plan. New **▶ Continue** button resumes on
+  the SAME plan with a fresh 15-min budget (picks up from the first incomplete step — no
+  rebuild), **Modify** changes the objective before continuing, and **✕ Dismiss** clears the
+  bar. Survives an app restart too (the ended run is re-shown, not lost). `POST
+  /api/autopilot/{continue,dismiss}`. (`app/src/autopilot.js`, `app/server.js`, frontend.)
+
+### Added
 - 2026-07-26: **Autopilot verbose mode.** A **Verbose** checkbox in the Autopilot launcher —
   when on, each cycle streams the model's live thinking + tokens into the chat (like a normal
   conversation) so you can watch what it's doing and check in while it works the plan. The

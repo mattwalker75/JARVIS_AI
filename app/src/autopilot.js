@@ -32,27 +32,32 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 // (the marquee "kick it off and walk away" promise — otherwise the in-memory loop dies silently).
 function save() { try { if (run) persist.writeJsonAtomic(FILE, run, true); else require("fs").rmSync(FILE, { force: true }); } catch (_) {} }
 
+const ENDED_STATES = ["done", "budget", "stopped", "stuck", "error"];
 function status() {
   if (!run) return { active: false, status: "idle" };
+  const ended = ENDED_STATES.includes(run.status);
   return {
     active: ["running", "stopping", "pausing", "paused"].includes(run.status),
     paused: run.status === "paused" || run.status === "pausing",
+    ended,
+    resumable: ended && run.status !== "done",   // finished incomplete -> can Continue on the existing plan
     id: run.id, objective: run.objective, autonomy: run.autonomy,
     status: run.status, cycles: run.cycles, minutes: run.minutes,
-    seconds_left: run.status === "paused" ? Math.round((run.pausedRemaining || 0) / 1000) : Math.max(0, Math.round((run.deadline - nowMs()) / 1000)),
+    seconds_left: ended ? 0 : (run.status === "paused" ? Math.round((run.pausedRemaining || 0) / 1000) : Math.max(0, Math.round((run.deadline - nowMs()) / 1000))),
     tokens: run.tokens || 0, cost_usd: +(run.cost || 0).toFixed(4),
     started_at: run.startedAt,
   };
 }
 function emitStatus() { save(); try { broadcast({ type: "autopilot", status: status() }); } catch (_) {} }
 
-// Called once on server startup — resume a run that was in flight when the app went down.
+// Called once on server startup — resume a run that was in flight, or re-show a run that had
+// ENDED (so its banner + plan are still there to Continue/Modify after a restart).
 function restore() {
   if (run) return;
   let saved; try { saved = persist.readJson(FILE, null); } catch (_) { saved = null; }
   if (!saved || !saved.status) return;
-  if (["done", "budget", "stopped", "stuck", "error"].includes(saved.status)) { try { require("fs").rmSync(FILE, { force: true }); } catch (_) {} return; }
   run = saved; ac = null;
+  if (ENDED_STATES.includes(run.status)) { run.ended = true; emitStatus(); return; }   // keep the ended banner; don't resume the loop
   if (run.status === "paused") { emitStatus(); return; }   // stay paused; the user resumes
   run.pauseRequested = false; run.status = "running";       // was running/pausing/stopping -> continue
   emitStatus();
@@ -60,7 +65,7 @@ function restore() {
 }
 
 function start({ objective, minutes, autonomy, verbose }) {
-  if (run) throw new Error("an Autopilot run is already active (running or paused) — stop it first");   // run is null only when idle/finished
+  if (run && !run.ended) throw new Error("an Autopilot run is already active (running or paused) — stop it first");   // an ENDED run can be replaced by a new objective
   objective = String(objective || "").trim();
   if (!objective) throw new Error("Autopilot needs an objective");
   const ap = (config.config && config.config.autopilot) || {};
@@ -133,16 +138,34 @@ function finish(state, message, summary) {
   if (!run) return;
   const label = run.objective;
   run.status = state;   // done | budget | stopped | stuck | error
-  emitStatus();
+  run.ended = true; run.lastMessage = message; ac = null;
+  emitStatus();   // KEEP the run (banner persists in the ended state; the plan is untouched so you can Continue/Modify)
   try {
     const sched = require("./scheduler");
     if (summary && summary.trim()) sched.postToChat(summary.trim());
     const level = (state === "error" || state === "stuck") ? "warning" : "info";
     const verb = { done: "finished ✅", budget: "hit its time budget ⏱", stopped: "stopped ⏹", stuck: "got stuck ⚠️", error: "errored ⚠️" }[state] || state;
-    sched.pushNotification({ level, label: "Autopilot", message: `Autopilot ${verb}: ${message}\nObjective: ${label}` });
+    const tail = state !== "done" ? " (Continue it from the Autopilot bar to keep going on the same plan.)" : "";
+    sched.pushNotification({ level, label: "Autopilot", message: `Autopilot ${verb}: ${message}\nObjective: ${label}${tail}` });
   } catch (_) {}
-  run = null; ac = null;
-  try { require("fs").rmSync(FILE, { force: true }); } catch (_) {}
+}
+
+// Continue an ENDED-but-incomplete run on the SAME plan (no rebuild): fresh budget, reset the
+// stuck/error counters, resume the loop. The model picks up from the plan's first incomplete step.
+function continueRun({ minutes } = {}) {
+  if (!run || !run.ended || run.status === "done") return status();
+  const add = Math.max(1, Math.min(Number(minutes) || run.minutes || 15, 720));
+  run.deadline = nowMs() + add * 60000; run.minutes = add;
+  run.noProgress = 0; run.errors = 0; run.idleWork = 0;
+  run.wrapUp = false; run.budgetHit = false; run.hardStop = false; run.pauseRequested = false;
+  run.ended = false; run.status = "running";
+  emitStatus(); startLoop();
+  return status();
+}
+// Dismiss an ended run (clear the banner). Leaves the plan in place so you can still use it in chat.
+function dismiss() {
+  if (run && run.ended) { run = null; ac = null; try { require("fs").rmSync(FILE, { force: true }); } catch (_) {} try { broadcast({ type: "autopilot", status: { active: false, status: "idle" } }); } catch (_) {} }
+  return status();
 }
 
 function guardClause(mode) {
@@ -229,4 +252,4 @@ async function loop() {
   }
 }
 
-module.exports = { start, requestWrapUp, requestStop, pause, resume, modify, extend, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };
+module.exports = { start, requestWrapUp, requestStop, pause, resume, modify, extend, continueRun, dismiss, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };

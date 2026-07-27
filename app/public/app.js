@@ -664,21 +664,28 @@ function renderPlan(plan) {
 // --- Autopilot: launch + live status bar -------------------------------------
 let apTick = null;
 function fmtLeft(s) { s = Math.max(0, s | 0); const m = Math.floor(s / 60), ss = s % 60; return m > 0 ? `${m}m ${ss}s` : `${ss}s`; }
+const AP_ENDED_LABEL = { done: "✅ done", budget: "⏱ time budget reached", stopped: "⏹ stopped", stuck: "⚠️ stuck", error: "⚠️ errored" };
 function renderAutopilot(st) {
   const bar = $("autopilot-bar"); if (!bar) return;
-  if (!st || !st.active) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
+  if (!st || (!st.active && !st.ended)) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
   bar.hidden = false;
-  const paused = !!st.paused, stopping = st.status === "stopping" || st.status === "pausing";
+  const paused = !!st.paused, stopping = st.status === "stopping" || st.status === "pausing", ended = !!st.ended;
   bar.classList.toggle("paused", paused || stopping);
-  const state = $("ap-state"); if (state) state.textContent = st.status === "pausing" ? "pausing…" : st.status === "stopping" ? "stopping…" : st.status;
+  bar.classList.toggle("ended", ended);
+  const state = $("ap-state"); if (state) state.textContent = ended ? (AP_ENDED_LABEL[st.status] || st.status) : (st.status === "pausing" ? "pausing…" : st.status === "stopping" ? "stopping…" : st.status);
   const obj = $("ap-barobj"); if (obj) { obj.textContent = st.objective || ""; obj.title = st.objective || ""; }
   const pauseBtn = $("ap-pause"); if (pauseBtn) { pauseBtn.textContent = paused ? "▶ Resume" : "⏸ Pause"; pauseBtn.dataset.act = paused ? "resume" : "pause"; }
+  // Show the right control set: active runs get pause/extend/wrapup/stop; an ended run gets
+  // continue (if resumable) / dismiss. Modify is available in both.
+  const show = (id, on) => { const b = $(id); if (b) b.hidden = !on; };
+  show("ap-pause", !ended); show("ap-extend", !ended); show("ap-wrapup", !ended); show("ap-stop", !ended);
+  show("ap-continue", ended && st.resumable); show("ap-dismiss", ended);
   let secs = Number(st.seconds_left) || 0;
   const tokBit = st.tokens ? ` · ${st.tokens >= 1000 ? (st.tokens / 1000).toFixed(1) + "k" : st.tokens} tok` + (st.cost_usd ? ` ~$${st.cost_usd}` : "") : "";
-  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}${tokBit}`; };
+  const paint = () => { const m = $("ap-meta"); if (m) m.textContent = ended ? `${st.cycles || 0} cycles${tokBit}` : `cycle ${st.cycles || 0} · ${fmtLeft(secs)}${paused ? " left (paused)" : " left"}${tokBit}`; };
   paint();
   if (apTick) { clearInterval(apTick); apTick = null; }
-  if (st.status === "running") apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);  // freeze while paused/stopping
+  if (st.status === "running") apTick = setInterval(() => { secs = Math.max(0, secs - 1); paint(); }, 1000);  // freeze while paused/stopping/ended
 }
 (function initAutopilot() {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
@@ -706,11 +713,13 @@ function renderAutopilot(st) {
     finally { start.disabled = false; }
   });
   const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
-  const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify");
+  const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify"), continueB = $("ap-continue"), dismissB = $("ap-dismiss");
   if (wrap) wrap.addEventListener("click", () => apPost("wrapup"));
   if (stop) stop.addEventListener("click", () => { if (confirm("Stop Autopilot now?")) apPost("stop"); });
   if (pauseB) pauseB.addEventListener("click", () => apPost(pauseB.dataset.act === "resume" ? "resume" : "pause"));
   if (extendB) extendB.addEventListener("click", () => apPost("extend", { minutes: 15 }));
+  if (continueB) continueB.addEventListener("click", () => apPost("continue", { minutes: 15 }));   // resume the SAME plan with a fresh budget
+  if (dismissB) dismissB.addEventListener("click", () => apPost("dismiss"));
   if (modifyB) modifyB.addEventListener("click", () => {
     const cur = ($("ap-barobj").textContent || "").trim();
     const next = prompt("Change the Autopilot objective — the next cycle will re-check its plan against it:", cur);
