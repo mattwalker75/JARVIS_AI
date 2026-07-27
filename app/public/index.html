@@ -61,27 +61,40 @@
       </div>
       <div class="ap-menu">
         <button id="autopilot-btn" class="ghost" title="Autopilot — give JARVIS an objective and a time budget and it works on it autonomously (build → test → refine) until done, the time is up, or you stop it. Runs on the server; you can close the tab.">🛫 Autopilot</button>
-        <div class="ap-drop" id="ap-drop" hidden>
-          <div class="apd-title">Run an objective autonomously</div>
-          <textarea id="ap-objective" rows="3" placeholder="Objective — e.g. Build a web app that lets me browse and tag my photos…"></textarea>
-          <div class="apd-row">
-            <label>Stop after <input id="ap-minutes" type="number" min="1" max="720" value="30"> min</label>
-            <label>Autonomy <select id="ap-autonomy"><option value="guarded">guarded (safe)</option><option value="full">full</option></select></label>
-          </div>
-          <label class="apd-check"><input type="checkbox" id="ap-clarify" checked> Ask me clarifying questions first (recommended)</label>
-          <label class="apd-check"><input type="checkbox" id="ap-verbose"> Verbose — stream its thinking to the chat so I can watch it work</label>
-          <button id="ap-start" class="apd-start">🛫 Start Autopilot</button>
-          <div class="apd-hint">Runs on the server — you can close the tab and walk away. You'll be notified when it finishes, hits its time budget, or gets stuck. <b>Guarded</b> won't send email / post / spend / delete your files on its own.</div>
-          <div id="ap-clarify-panel" hidden>
-            <div class="apd-title">A few questions first — so it builds the right thing:</div>
-            <div id="ap-q-progress" class="apd-qprogress"></div>
-            <div id="ap-q-text" class="apd-questions"></div>
-            <textarea id="ap-answers" rows="3" placeholder="Your answer… (leave blank to let it decide)"></textarea>
-            <div class="apd-qnav">
-              <button id="ap-q-back" class="ghost apd-skip" hidden>← Back</button>
-              <button id="ap-q-next" class="apd-start">Next →</button>
+        <div class="ap-overlay" id="ap-drop" hidden>
+          <div class="apd-card" role="dialog" aria-modal="true" aria-labelledby="ap-dialog-title">
+            <button class="apd-close" id="ap-close" title="Close" aria-label="Close">✕</button>
+            <div class="apd-title" id="ap-dialog-title">🛫 Run an objective autonomously</div>
+            <textarea id="ap-objective" rows="4" placeholder="Objective — e.g. Build a web app that lets me browse and tag my photos…"></textarea>
+            <div class="apd-row">
+              <label>Stop after <input id="ap-minutes" type="number" min="1" max="720" value="30"> min</label>
+              <label>Autonomy <select id="ap-autonomy"><option value="guarded">guarded (safe)</option><option value="full">full</option></select></label>
             </div>
-            <button id="ap-clarify-skip" class="ghost apd-skip">Skip the rest — just build it</button>
+            <label class="apd-check"><input type="checkbox" id="ap-clarify" checked> Ask me clarifying questions first (recommended)</label>
+            <label class="apd-check"><input type="checkbox" id="ap-verbose"> Verbose — stream its thinking to the chat so I can watch it work</label>
+            <button id="ap-start" class="apd-start">🛫 Start Autopilot</button>
+            <div class="apd-hint">Runs on the server — you can close the tab and walk away. You'll be notified when it finishes, hits its time budget, or gets stuck. <b>Guarded</b> won't send email / post / spend / delete your files on its own.</div>
+            <div id="ap-clarify-panel" hidden>
+              <div class="apd-title">A few questions first — so it builds the right thing:</div>
+              <div id="ap-q-progress" class="apd-qprogress"></div>
+              <div id="ap-q-text" class="apd-questions"></div>
+              <textarea id="ap-answers" rows="3" placeholder="Your answer… (leave blank to let it decide)"></textarea>
+              <div class="apd-qnav">
+                <button id="ap-q-back" class="ghost apd-skip" hidden>← Back</button>
+                <button id="ap-q-next" class="apd-start">Next →</button>
+              </div>
+              <button id="ap-clarify-skip" class="ghost apd-skip">Skip the rest — just build it</button>
+            </div>
+          </div>
+        </div>
+        <div class="ap-overlay" id="ap-modify-modal" hidden>
+          <div class="apd-card apd-card-sm" role="dialog" aria-modal="true" aria-labelledby="ap-modify-title">
+            <button class="apd-close" id="ap-modify-close" title="Close" aria-label="Close">✕</button>
+            <div class="apd-title" id="ap-modify-title">✏️ Modify the objective</div>
+            <div class="apd-hint" style="margin:0 0 8px">The next cycle will re-check its plan against the new objective and adjust its steps.</div>
+            <textarea id="ap-modify-obj" rows="5" placeholder="Updated objective…"></textarea>
+            <button id="ap-modify-save" class="apd-start">Save changes</button>
+            <button id="ap-modify-cancel" class="ghost apd-skip">Cancel</button>
           </div>
         </div>
       </div>

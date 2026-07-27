@@ -136,11 +136,20 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 
 /* Autopilot launcher dropdown */
 .ap-menu { position: relative; }
-.ap-drop { position: absolute; top: 110%; right: 0; z-index: 60; width: 340px; padding: 12px;
-  background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; box-shadow: 0 10px 34px rgba(0,0,0,.55); }
-.apd-title { font-weight: 700; margin-bottom: 8px; }
-#ap-objective { width: 100%; resize: vertical; background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px; font: inherit; }
-#ap-objective:focus { outline: none; border-color: var(--accent); }
+/* Autopilot launcher + modify: a centered floating modal (not a cramped dropdown). */
+.ap-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center;
+  padding: 8vh 16px 24px; background: rgba(0,0,0,.55); backdrop-filter: blur(2px); overflow-y: auto; }
+.apd-card { position: relative; width: min(560px, 100%); max-height: 84vh; overflow-y: auto; padding: 22px 22px 20px;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,.6);
+  animation: apd-pop .12s ease-out; }
+.apd-card-sm { width: min(460px, 100%); }
+@keyframes apd-pop { from { transform: translateY(-8px) scale(.99); opacity: 0; } to { transform: none; opacity: 1; } }
+.apd-close { position: absolute; top: 10px; right: 12px; background: transparent; border: none; color: var(--muted);
+  font-size: 1.05rem; line-height: 1; padding: 4px 6px; cursor: pointer; border-radius: 6px; }
+.apd-close:hover { color: var(--text); background: rgba(255,255,255,.06); }
+.apd-title { font-weight: 700; margin-bottom: 8px; padding-right: 24px; }
+#ap-objective, #ap-modify-obj { width: 100%; resize: vertical; background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px; font: inherit; margin-bottom: 8px; }
+#ap-objective:focus, #ap-modify-obj:focus { outline: none; border-color: var(--accent); }
 .apd-row { display: flex; gap: 10px; margin: 8px 0; }
 .apd-row label { flex: 1; font-size: .82rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .apd-row input, .apd-row select { background: #0b0f14; color: var(--text); border: 1px solid var(--edge); border-radius: 6px; padding: 5px; font: inherit; }

@@ -9,6 +9,12 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-27: **Autopilot launcher + Modify are now floating modals.** Starting a run opens a
+  centered floating window (dimmed backdrop, ✕/Esc/backdrop-click to close, roomier objective
+  box) instead of a cramped header dropdown, and **Modify** opens its own floating window
+  prefilled with the current objective (Save / Cancel, Cmd/Ctrl+Enter to save) instead of a
+  browser `prompt()`. (`app/public/{index.html,app.js,style.css}`.)
+
 - 2026-07-27: **Lifecycle commands wipe Autopilot state.** `./JARVIS.sh --stop / --delete /
   --setup / --start` now clear the saved Autopilot run + plan (`data/autopilot.json`,
   `data/plan.json`) so you always come back up to a clean slate — no zombie banner or leftover

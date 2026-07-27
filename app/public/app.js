@@ -692,13 +692,14 @@ function renderAutopilot(st) {
 }
 (function initAutopilot() {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
+  const openLauncher = () => { const c = $("ap-clarify-panel"); if (c) c.hidden = true; clar = null; drop.hidden = false; $("ap-objective").focus(); };
+  const closeLauncher = () => { drop.hidden = true; };
   if (btn && drop) {
-    btn.addEventListener("click", (e) => { e.stopPropagation(); drop.hidden = !drop.hidden; if (!drop.hidden) { const c = $("ap-clarify-panel"); if (c) c.hidden = true; clar = null; $("ap-objective").focus(); } });
-    // Close on an outside click — but only if the press STARTED outside. Otherwise selecting
-    // text in the objective box (drag that ends outside) would wrongly close the panel.
-    let downInside = false;
-    document.addEventListener("mousedown", (e) => { downInside = drop.contains(e.target) || e.target === btn; });
-    document.addEventListener("click", (e) => { if (!drop.hidden && !downInside && !drop.contains(e.target) && e.target !== btn) drop.hidden = true; });
+    btn.addEventListener("click", (e) => { e.stopPropagation(); if (drop.hidden) openLauncher(); else closeLauncher(); });
+    // Modal behavior: click the dimmed backdrop (the overlay itself, not the card) to close.
+    drop.addEventListener("mousedown", (e) => { if (e.target === drop) closeLauncher(); });
+    const closeBtn = $("ap-close"); if (closeBtn) closeBtn.addEventListener("click", closeLauncher);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !drop.hidden) closeLauncher(); });
   }
   // Actually launch the autonomous run with the given (possibly clarified) objective.
   async function launchAutopilot(objective) {
@@ -795,11 +796,28 @@ function renderAutopilot(st) {
   if (extendB) extendB.addEventListener("click", () => apPost("extend", { minutes: 15 }));
   if (continueB) continueB.addEventListener("click", () => apPost("continue", { minutes: 15 }));   // resume the SAME plan with a fresh budget
   if (dismissB) dismissB.addEventListener("click", () => apPost("dismiss"));
-  if (modifyB) modifyB.addEventListener("click", () => {
-    const cur = ($("ap-barobj").textContent || "").trim();
-    const next = prompt("Change the Autopilot objective — the next cycle will re-check its plan against it:", cur);
-    if (next && next.trim() && next.trim() !== cur) apPost("modify", { objective: next.trim() });
-  });
+  // Modify: open a floating window prefilled with the current objective (no more prompt() box).
+  const modModal = $("ap-modify-modal"), modObj = $("ap-modify-obj");
+  const closeModify = () => { if (modModal) modModal.hidden = true; };
+  if (modifyB && modModal && modObj) {
+    modifyB.addEventListener("click", () => {
+      modObj.value = ($("ap-barobj").textContent || "").trim();
+      modModal.hidden = false; modObj.focus();
+    });
+    modModal.addEventListener("mousedown", (e) => { if (e.target === modModal) closeModify(); });
+    const mClose = $("ap-modify-close"), mCancel = $("ap-modify-cancel"), mSave = $("ap-modify-save");
+    if (mClose) mClose.addEventListener("click", closeModify);
+    if (mCancel) mCancel.addEventListener("click", closeModify);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !modModal.hidden) closeModify(); });
+    const doSave = () => {
+      const cur = ($("ap-barobj").textContent || "").trim();
+      const next = (modObj.value || "").trim();
+      if (next && next !== cur) apPost("modify", { objective: next });
+      closeModify();
+    };
+    if (mSave) mSave.addEventListener("click", doSave);
+    modObj.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doSave(); } });
+  }
 })();
 
 // --- Mode toggles: stream watchdog + plan mode -------------------------------
