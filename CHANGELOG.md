@@ -8,6 +8,16 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-27: **Less robotic replies on simple turns.** The active system prompt
+  (`Prompts/default_system.prompt`) now scopes the "restate the goal / verify completion"
+  ritual to substantial (multi-step, tool-using, or hard-to-reverse) work. Simple or
+  conversational turns are told to answer directly — no "Re-reading your request…" opener, no
+  numbered re-verification of the request, no "Job done — nothing left to do" epilogue — and to
+  match reply length to the ask. Log review showed the model prefacing even one-line chit-chat
+  with the full completion ritual. (`stock_system.prompt` left pristine as the backup; read live,
+  no restart needed.)
+
 ### Fixed
 - 2026-07-27: **Autopilot converges instead of burning cycles re-verifying.** Log review showed
   runs repeatedly exhausting the per-cycle tool-step cap without ever declaring "done" — each
