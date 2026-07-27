@@ -152,6 +152,17 @@ wait_http() { # $1 port  $2 path  $3 label
   warn "$3 not responding yet on http://localhost:$1$2 (may still be starting)."; return 1
 }
 
+# Autopilot run state + the task-ledger plan persist in data/ (bind mount) so a run survives
+# an app auto-restart. The deliberate lifecycle commands (stop/delete/setup/start), though,
+# should hand you a clean slate — no zombie Autopilot banner or leftover plan. Wipe them here.
+clear_autopilot_state() {
+  local removed=0
+  for f in "${SCRIPT_DIR}/data/autopilot.json" "${SCRIPT_DIR}/data/plan.json"; do
+    [[ -e "$f" ]] && { rm -f "$f" && removed=1; }
+  done
+  [[ "$removed" == 1 ]] && info "Cleared saved Autopilot run + plan (fresh start)." || true
+}
+
 cmd_check() {
   info "Checking the local Docker daemon..."
   daemon_running && ok "Docker daemon running ($(docker version -f '{{.Server.Version}}' 2>/dev/null))." \
@@ -160,6 +171,7 @@ cmd_check() {
 
 cmd_setup() {
   require_daemon
+  clear_autopilot_state
   info "SETUP: building the app + workbench + memory + voice (piper) images and pulling the gateway image..."
   warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
   dc build jarvis-app jarvis-workbench jarvis-memory jarvis-piper || { err "Image build failed."; return 1; }
@@ -169,6 +181,7 @@ cmd_setup() {
 
 cmd_start() {
   require_daemon
+  clear_autopilot_state
   info "START: bringing up app + memory + gateway + workbench..."
   dc up -d || { err "Failed to start the stack."; return 1; }
   wait_http "$MEM_PORT" "/healthz" "Memory service" || true
@@ -282,12 +295,13 @@ cmd_status() {
   fi
 }
 
-cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
+cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; clear_autopilot_state; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
 
 cmd_delete() {
   require_daemon
   warn "DELETE: removing containers, network, and ALL data volumes (semantic-memory vector store + workbench home + /workspace)."
   dc down -v --remove-orphans
+  clear_autopilot_state
   ok "Removed."
 }
 

@@ -8,6 +8,13 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-27: **Lifecycle commands wipe Autopilot state.** `./JARVIS.sh --stop / --delete /
+  --setup / --start` now clear the saved Autopilot run + plan (`data/autopilot.json`,
+  `data/plan.json`) so you always come back up to a clean slate — no zombie banner or leftover
+  plan. An app *auto-restart* (crash recovery) still resumes a run as before; only the deliberate
+  lifecycle commands reset it. (`JARVIS.sh`: `clear_autopilot_state`.)
+
 ### Added
 - 2026-07-27: **Autopilot forced stop.** A plain **Stop** aborts the current step and ends the
   run — but if it's wedged on a step that won't quit, the button now changes to **Force stop**

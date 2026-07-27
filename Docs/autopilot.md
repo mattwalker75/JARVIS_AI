@@ -43,6 +43,10 @@ you can close the tab and walk away — it **notifies you** (in-app + desktop + 
 a summary when it ends, and the run **survives an app restart** (it auto-resumes if it was
 running, or re-shows the ended bar so you can continue).
 
+> A run survives an app *auto-restart* (crash recovery), but the deliberate lifecycle
+> commands — `./JARVIS.sh --stop`, `--delete`, `--setup`, `--start` — **wipe the saved run
+> and plan** so you always come back up to a clean slate.
+
 ### Launching
 
 Click **🛫 Autopilot** in the header:
@@ -62,7 +66,7 @@ While running it shows `state · cycle N · countdown · tokens ~$cost`, plus co
 | **+15m** | Extend the time budget (also rescues a run about to stop on the budget). |
 | **Modify** | Change the objective mid-run; the next cycle re-checks its plan against it. |
 | **Wrap up** | Finish the current step, summarize, and stop for review (graceful). |
-| **Stop** | Stop immediately (also kills any in-flight workbench command). |
+| **Stop** | Stop immediately (also kills any in-flight workbench command). If a step is wedged and won't quit, the button becomes **Force stop** — one more click ends the run instantly and kills any preview servers (ports 9101-9150). |
 
 ### When it ends
 
