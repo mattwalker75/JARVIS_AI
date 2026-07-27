@@ -371,11 +371,14 @@ function connectWS() {
       const finalText = streamBubble ? (streamText || t) : t;
       if (streamBubble) { const lvl = renderAssistant(streamBubble, finalText); if (lvl) flashChat(lvl); }
       else addMessage("assistant", finalText);
-      history.push({ role: "assistant", content: finalText }); saveHistory();
-      if (window.JarvisVoice) {
-        // If we streamed sentences already, only speak the leftover tail; else speak it all.
-        if (ttsSpokenLen > 0 && streamText) { const rest = streamText.slice(ttsSpokenLen); if (rest.trim()) JarvisVoice.speak(rest); }
-        else JarvisVoice.speak(plain(finalText));
+      // ephemeral = a verbose Autopilot cycle: show it, but don't add it to the chat's
+      // model-context history (would bloat/confuse your next chat turn) and don't speak it.
+      if (!d.ephemeral) {
+        history.push({ role: "assistant", content: finalText }); saveHistory();
+        if (window.JarvisVoice) {
+          if (ttsSpokenLen > 0 && streamText) { const rest = streamText.slice(ttsSpokenLen); if (rest.trim()) JarvisVoice.speak(rest); }
+          else JarvisVoice.speak(plain(finalText));
+        }
       }
       ttsSpokenLen = 0;
       streamBubble = null; streamText = "";
@@ -693,9 +696,10 @@ function renderAutopilot(st) {
     if (!objective) { $("ap-objective").focus(); return; }
     const minutes = Number($("ap-minutes").value) || 30;
     const autonomy = $("ap-autonomy").value || "guarded";
+    const verbose = !!($("ap-verbose") && $("ap-verbose").checked);
     start.disabled = true;
     try {
-      const st = await (await fetch("/api/autopilot/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, minutes, autonomy }) })).json();
+      const st = await (await fetch("/api/autopilot/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ objective, minutes, autonomy, verbose }) })).json();
       if (st.error) addMessage("assistant", "Autopilot: " + st.error, "error");
       else { if (drop) drop.hidden = true; renderAutopilot(st); addMessage("assistant", `🛫 Autopilot started (${autonomy}, up to ${minutes} min) — working on: ${objective}`, "notice"); }
     } catch (e) { addMessage("assistant", "Autopilot failed to start: " + e.message, "error"); }

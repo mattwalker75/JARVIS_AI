@@ -147,6 +147,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .apd-row input#ap-minutes { width: 62px; }
 .apd-start { width: 100%; background: var(--accent); color: #042027; border: none; border-radius: 8px; padding: 9px; font-weight: 800; cursor: pointer; }
 .apd-start:hover { filter: brightness(1.08); }
+.apd-check { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text); margin-bottom: 10px; cursor: pointer; }
+.apd-check input { accent-color: var(--accent); }
 .apd-hint { font-size: .74rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
 
 /* Autopilot status bar (shown while a run is active) */

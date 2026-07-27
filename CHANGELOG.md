@@ -8,6 +8,13 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-26: **Autopilot verbose mode.** A **Verbose** checkbox in the Autopilot launcher —
+  when on, each cycle streams the model's live thinking + tokens into the chat (like a normal
+  conversation) so you can watch what it's doing and check in while it works the plan. The
+  streamed cycle text is shown but NOT added to your chat's model-context history (or spoken),
+  so it won't bloat your next chat. (`app/src/autopilot.js`, frontend.)
+
 ### Fixed
 - 2026-07-26: **Autopilot review — 6 planning/loop bugs fixed.**
   (1) **Stale plan hijack** (reported): a NEW Autopilot objective inherited a leftover plan

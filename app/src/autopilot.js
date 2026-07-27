@@ -59,7 +59,7 @@ function restore() {
   startLoop();
 }
 
-function start({ objective, minutes, autonomy }) {
+function start({ objective, minutes, autonomy, verbose }) {
   if (run) throw new Error("an Autopilot run is already active (running or paused) — stop it first");   // run is null only when idle/finished
   objective = String(objective || "").trim();
   if (!objective) throw new Error("Autopilot needs an objective");
@@ -72,7 +72,7 @@ function start({ objective, minutes, autonomy }) {
     id: "ap_" + nowMs().toString(36), objective, autonomy: mode, minutes: minutesN,
     deadline: nowMs() + minutesN * 60000, maxCycles, cycles: 0, noProgress: 0, errors: 0,
     status: "running", startedAt: new Date().toISOString(), wrapUp: false, budgetHit: false, hardStop: false,
-    pauseRequested: false, objectiveChanged: false, lastSummary: "", idleWork: 0, tokens: 0, cost: 0,
+    pauseRequested: false, objectiveChanged: false, lastSummary: "", idleWork: 0, tokens: 0, cost: 0, verbose: !!verbose,
   };
   emitStatus();
   startLoop();
@@ -188,7 +188,11 @@ async function loop() {
       if (!ev) return;
       if (ev.type === "tool" && ev.tool && !NONPRODUCTIVE_TOOLS.has(ev.tool)) didWork = true;
       if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
-      if (ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage") { try { broadcast(ev); } catch (_) {} }
+      // Always stream tool activity + usage; in VERBOSE mode also stream the model's live
+      // thinking + tokens to the chat so you can watch what it's doing.
+      const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage";
+      const think = run.verbose && (ev.type === "reasoning" || ev.type === "token");
+      if (base || think) { try { broadcast(ev); } catch (_) {} }
     };
 
     let reply = "";
@@ -207,6 +211,9 @@ async function loop() {
     run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
     run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
     run.idleWork = didWork ? 0 : run.idleWork + 1;
+    // Verbose: finalize this cycle's streamed thinking as an (ephemeral) chat message so cycles
+    // are separated. ephemeral = shown but not added to your chat's model-context history.
+    if (run.verbose && reply && reply.trim()) { try { broadcast({ type: "reply", text: reply, ephemeral: true }); } catch (_) {} }
     emitStatus();
 
     // Prefer reporting genuine completion even if the budget was also reached this cycle.
