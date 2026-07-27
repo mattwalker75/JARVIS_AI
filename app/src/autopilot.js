@@ -12,6 +12,10 @@ const planner = require("./planner");
 // braces on top of the safe-mode instruction). run_shell can't be withheld — Autopilot needs
 // it to build/test — so guarded mode is best-effort, backed by the instruction.
 const RISKY_TOOLS = ["send_email", "delete_memory", "set_secret", "delete_secret"];
+// A cycle counts as "productive" (resets the anti-thrash counter) if it calls ANY tool other
+// than these read-only / bookkeeping ones — so research (web_search/fetch/browser), serving,
+// editing, etc. all count as progress, not just file writes.
+const NONPRODUCTIVE_TOOLS = new Set(["read_file", "list_dir", "read_document", "search_memory", "list_memories", "list_secrets", "list_tasks", "plan_show", "plan_update", "plan_create", "plan_add_step", "plan_clear"]);
 const persist = require("./persist");
 const FILE = process.env.JARVIS_AUTOPILOT_FILE || "/data/autopilot.json";
 
@@ -56,13 +60,14 @@ function restore() {
 }
 
 function start({ objective, minutes, autonomy }) {
-  if (run && (run.status === "running" || run.status === "stopping")) throw new Error("an Autopilot run is already active — stop it first");
+  if (run) throw new Error("an Autopilot run is already active (running or paused) — stop it first");   // run is null only when idle/finished
   objective = String(objective || "").trim();
   if (!objective) throw new Error("Autopilot needs an objective");
   const ap = (config.config && config.config.autopilot) || {};
   const minutesN = Math.max(1, Math.min(Number(minutes) || Number(ap.default_minutes) || 30, 720)); // cap 12h
   const mode = ((autonomy || ap.autonomy || "guarded") === "full") ? "full" : "guarded";
   const maxCycles = Math.max(1, Number(ap.max_cycles) || 100);
+  try { planner.clear(); } catch (_) {}   // a NEW objective starts fresh — never inherit a stale plan from a previous task
   run = {
     id: "ap_" + nowMs().toString(36), objective, autonomy: mode, minutes: minutesN,
     deadline: nowMs() + minutesN * 60000, maxCycles, cycles: 0, noProgress: 0, errors: 0,
@@ -178,10 +183,10 @@ async function loop() {
     // Stream tool activity/usage to open clients; also detect whether this cycle actually
     // WROTE anything (vs. just reading/planning) to drive the anti-thrash push above,
     // and tally tokens/cost across the whole run.
-    let wroteFiles = false;
+    let didWork = false;
     const emit = (ev) => {
       if (!ev) return;
-      if (ev.type === "tool" && (ev.tool === "write_workbench_file" || ev.tool === "run_shell" || ev.tool === "write_file")) wroteFiles = true;
+      if (ev.type === "tool" && ev.tool && !NONPRODUCTIVE_TOOLS.has(ev.tool)) didWork = true;
       if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
       if (ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage") { try { broadcast(ev); } catch (_) {} }
     };
@@ -199,15 +204,16 @@ async function loop() {
       continue;
     }
     run.cycles++;
+    run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
     run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
-    run.idleWork = wroteFiles ? 0 : run.idleWork + 1;
+    run.idleWork = didWork ? 0 : run.idleWork + 1;
     emitStatus();
 
-    if (run.wrapUp) return finish(run.budgetHit ? "budget" : "stopped",
-      run.budgetHit ? `time budget reached after ${run.cycles} cycle(s).` : `wrapped up after ${run.cycles} cycle(s).`, reply);
-
+    // Prefer reporting genuine completion even if the budget was also reached this cycle.
     const after = planner.get();
     if (after && after.status === "complete") return finish("done", `objective complete after ${run.cycles} cycle(s).`, reply);
+    if (run.wrapUp) return finish(run.budgetHit ? "budget" : "stopped",
+      run.budgetHit ? `time budget reached after ${run.cycles} cycle(s).` : `wrapped up after ${run.cycles} cycle(s).`, reply);
     const doneAfter = after ? after.steps.filter((s) => s.status === "done").length : 0;
     run.noProgress = (after && doneAfter <= doneBefore && before) ? run.noProgress + 1 : 0;
     if (run.noProgress >= 5) return finish("stuck", `no plan progress for ${run.noProgress} cycles — paused for your review.`, reply);

@@ -77,6 +77,15 @@ const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planne
   check("cross-cycle recap injected", instrs.some((i) => /Last cycle you reported/.test(i)));
   check("anti-thrash push injected", instrs.some((i) => /STOP re-reading/.test(i)));
 
+  // stale-plan bug: a NEW objective must NOT inherit a leftover plan from a previous task
+  reset();
+  planner.create({ objective: "OLD DOOM game", steps: ["build engine", "add enemies"] });
+  let capt = [];
+  llmBehavior = async (o) => { capt.push(o.messages[1].content); if (!planner.get()) planner.create({ objective: "sc", steps: ["a"] }); planner.get().steps.forEach((st) => planner.updateStep({ step: st.id, status: "done" })); return "done"; };
+  ap.start({ objective: "Build a SimCity-style game", minutes: 60, autonomy: "full" });
+  await waitDone();
+  check("new objective starts a fresh plan (no stale DOOM)", capt[0] && /call plan_create/.test(capt[0]) && /SimCity/.test(capt[0]) && !/OLD DOOM/.test(capt[0]));
+
   // persistence: a 'running' run left on disk resumes on restore()
   reset();
   fs.writeFileSync(process.env.JARVIS_AUTOPILOT_FILE, JSON.stringify({ id: "ap_x", objective: "resume me", autonomy: "full", minutes: 60, deadline: Date.now() + 3600000, maxCycles: 100, cycles: 1, noProgress: 0, errors: 0, status: "running", tokens: 0, cost: 0 }));

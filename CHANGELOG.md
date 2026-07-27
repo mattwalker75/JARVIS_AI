@@ -8,6 +8,22 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-26: **Autopilot review — 6 planning/loop bugs fixed.**
+  (1) **Stale plan hijack** (reported): a NEW Autopilot objective inherited a leftover plan
+  from a previous task (e.g. a SimCity run continued the earlier DOOM plan). `start()` now
+  clears any existing plan so each objective begins fresh; a fresh chat (New chat) clears it too.
+  (2) **Anti-thrash misfire**: only file-writes counted as "work", so research/browser/serve
+  cycles were wrongly nagged to "stop re-reading and write code" — now ANY non-read/non-plan
+  tool counts as progress.
+  (3) **Sporadic errors killed long runs**: the transient-error counter never reset; it now
+  clears after each successful cycle.
+  (4) **Completion vs budget**: a genuinely-finished objective is now reported "done" even if
+  the time budget was hit the same cycle.
+  (5) **Start guard**: starting a new run while one was PAUSED silently clobbered it; now
+  rejected until you stop it.
+  (`app/src/autopilot.js`, `app/public/app.js`; regression test added.)
+
 ### Changed
 - 2026-07-26: **Prompts are now editable files in a top-level `/Prompts` directory.** Replaces
   the earlier inline/`data` approach. The ACTIVE prompt = `Prompts/default_master.prompt` +
