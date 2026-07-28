@@ -238,7 +238,8 @@
               <label>Max tokens<input id="cfg-max-tokens" type="number" min="1"></label>
             </div>
             <label>Context window <span class="cfg-badge">meter</span><input id="cfg-context-window" type="number" min="0" step="1024" placeholder="auto — from Ollama num_ctx / the model"></label>
-            <div class="hint">Pick a provider to fill the endpoint URL, add its API key, then <b>List models</b> to populate the model pickers below (type to filter). “Generic” lets you point at any OpenAI-compatible URL.</div>
+            <div class="hint">Pick a provider to fill the endpoint URL, add its API key, then <b>List models</b> to populate the pickers. Each tier groups its best-fit models on top (vision models in the vision tier, etc.) — but you can pick <b>any</b> model in any tier, or <b>✎ Custom…</b> to type your own. “Generic” points at any OpenAI-compatible URL.</div>
+            <div class="hint cfg-ref">📖 <b>Use <code>MODELS.md</code> (in the project root) as a reference when selecting a model</b> — it lists which models fit the chat / cheap / smart / vision tiers. Edit it (and <code>app/public/models.json</code>) to keep the list current.</div>
           </div>
 
           <div class="cfg-section">
