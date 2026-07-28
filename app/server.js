@@ -391,6 +391,7 @@ function broadcast(obj) {
 scheduler.setNotifyCallback((note) => broadcast({ type: "notification", note }));
 scheduler.setRunCallback((run) => broadcast({ type: "task_run", run }));
 scheduler.setChatCallback((message) => broadcast({ type: "chat_post", message }));
+scheduler.setUiEventCallback((type, data) => broadcast({ type, ...data }));   // tools -> UI (e.g. open the Autopilot launcher)
 require("./src/planner").setOnChange((plan) => broadcast({ type: "plan", plan }));   // live plan ledger updates
 autopilot.setBroadcast(broadcast);   // stream Autopilot tool-activity + status to open clients
 autopilot.restore();                 // resume an Autopilot run that was in flight before a restart

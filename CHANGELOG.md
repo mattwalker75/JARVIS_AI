@@ -8,6 +8,17 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-28: **The model can offer to run a job on Autopilot.** New `open_autopilot` tool: for a
+  large multi-step task the user could walk away from (including follow-up improvements after
+  finishing something), JARVIS now offers "want me to run this on Autopilot so you can step away?"
+  — and on yes, opens the Autopilot launcher **pre-filled** with a self-contained objective (plus
+  suggested time budget + autonomy). The user confirms the settings and presses Start; the model
+  never auto-starts a run. This also gives follow-up plans a proper home instead of silently
+  re-planning into the ledger. Wired via a generic `scheduler.emitUiEvent` → WebSocket → the
+  launcher. (`app/src/{tools.js,scheduler.js}`, `app/server.js`, `app/public/app.js`,
+  `Prompts/default_system.prompt`.)
+
 ### Fixed
 - 2026-07-28: **Model pickers now populate reliably.** The model fields (single + the four
   chat/cheap/smart/vision tiers) were `<input list=datalist>` — native datalists don't reliably

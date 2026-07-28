@@ -110,6 +110,11 @@ function dismissNotification(id) {
 function setNotifyCallback(cb) { notifyCb = cb; }
 function setRunCallback(cb) { runCb = cb; }
 function setChatCallback(cb) { chatCb = cb; }
+// Generic UI event pusher (server wires it to the WebSocket broadcast). Lets a tool ask the
+// open web UI to do something — e.g. open the Autopilot launcher pre-filled.
+let uiCb = null;
+function setUiEventCallback(cb) { uiCb = cb; }
+function emitUiEvent(type, data) { if (uiCb) { try { uiCb(String(type), data || {}); } catch (_) {} } return { ok: true }; }
 // Post a message into the user's live chat conversation window.
 function postToChat(message) {
   const m = String(message == null ? "" : message);
@@ -238,4 +243,4 @@ function start() {
   if (h.unref) h.unref();
 }
 
-module.exports = { schedule, update, list, cancel, pushNotification, recentNotifications, clearNotifications, dismissNotification, postToChat, setNotifyCallback, setRunCallback, setChatCallback, start };
+module.exports = { schedule, update, list, cancel, pushNotification, recentNotifications, clearNotifications, dismissNotification, postToChat, setNotifyCallback, setRunCallback, setChatCallback, setUiEventCallback, emitUiEvent, start };

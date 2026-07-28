@@ -853,6 +853,13 @@ const toolDefs = [
   { type: "function", function: { name: "post_to_chat",
     description: "Post a message directly into the user's live chat conversation window (it appears as a message from you in the web chat). Use this when a task should speak up in the conversation, e.g. to report an outcome or ask a follow-up. For a passive alert/badge instead, use notify_user.",
     parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } },
+  { type: "function", function: { name: "open_autopilot",
+    description: "Hand a SUBSTANTIAL multi-step task off to AUTOPILOT — an autonomous build→test→refine loop that runs server-side so the user can walk away. FLOW: when you're about to take on (or have just outlined) a big multi-step job, OFFER it: ask the user something like \"Want me to run this on Autopilot so you can step away while I work?\" Call this tool ONLY after they say yes. It opens the Autopilot launcher in the UI PRE-FILLED with your objective; the user then confirms the time budget + autonomy and clicks Start (you do NOT start it yourself). Use for real multi-step build/research/automation work and for follow-up improvement plans — NOT for quick answers you can just give in chat.",
+    parameters: { type: "object", properties: {
+      objective: { type: "string", description: "A clear, self-contained mini-spec for the autonomous run — it CANNOT ask you questions once started, so state exactly what to build/do, the key features/requirements, any constraints, and where to save the output." },
+      minutes: { type: "number", description: "Suggested time budget in minutes (the user can change it). Default 30." },
+      autonomy: { type: "string", enum: ["guarded", "full"], description: "Suggested autonomy: 'guarded' (won't take irreversible external actions on its own) or 'full'. Default guarded." }
+    }, required: ["objective"] } } },
   { type: "function", function: { name: "read_recent_chat",
     description: "Read recent messages from the user's live chat conversation (oldest→newest, each with an ISO timestamp). This is how a scheduled/background task can SEE the conversation it otherwise can't: use roles:[\"user\"] to check whether the USER has replied lately (e.g. to decide whether to escalate an unanswered prompt), or look at your own recent role:\"task\"/\"assistant\" posts to avoid repeating yourself. Returns [{at, role, text}]. Roles are \"user\", \"assistant\", \"task\".",
     parameters: { type: "object", properties: {
@@ -950,6 +957,14 @@ async function _execTool(name, args, signal) {
     case "cancel_task": return require("./scheduler").cancel(args.id);
     case "notify_user": return require("./scheduler").pushNotification({ message: args.message, level: args.level });
     case "post_to_chat": return require("./scheduler").postToChat(args.message);
+    case "open_autopilot": {
+      const obj = String(args.objective || "").trim();
+      if (!obj) throw new Error("objective is required");
+      const minutes = Number(args.minutes) > 0 ? Math.min(720, Math.round(Number(args.minutes))) : undefined;
+      const autonomy = args.autonomy === "full" ? "full" : (args.autonomy === "guarded" ? "guarded" : undefined);
+      require("./scheduler").emitUiEvent("open_autopilot", { objective: obj, minutes, autonomy });
+      return { opened: true, note: "Opened the Autopilot launcher pre-filled for the user. Tell them to confirm the time budget + autonomy and click Start." };
+    }
     case "read_recent_chat": return require("./chatlog").recent(args);
     case "list_skills": return require("./skills").list();
     case "get_skill": return require("./skills").get(args.name);

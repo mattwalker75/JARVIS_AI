@@ -390,6 +390,8 @@ function connectWS() {
       renderPlan(d.plan);
     } else if (d.type === "autopilot") {
       renderAutopilot(d.status);
+    } else if (d.type === "open_autopilot") {
+      if (window.openAutopilotPrefilled) window.openAutopilotPrefilled(d.objective, d.minutes, d.autonomy);
     } else if (d.type === "notification") {
       showNotification(d.note);
     } else if (d.type === "task_run") {
@@ -698,6 +700,17 @@ function renderAutopilot(st) {
   const btn = $("autopilot-btn"), drop = $("ap-drop");
   const openLauncher = () => { const c = $("ap-clarify-panel"); if (c) c.hidden = true; clar = null; drop.hidden = false; $("ap-objective").focus(); };
   const closeLauncher = () => { drop.hidden = true; };
+  // Opened by the model via the open_autopilot tool: pre-fill the launcher, then let the user
+  // confirm settings and hit Start (the model never auto-starts a run).
+  window.openAutopilotPrefilled = (objective, minutes, autonomy) => {
+    if (!drop) return;
+    openLauncher();
+    if (objective && $("ap-objective")) $("ap-objective").value = objective;
+    if (minutes && $("ap-minutes")) $("ap-minutes").value = minutes;
+    if (autonomy && $("ap-autonomy")) $("ap-autonomy").value = autonomy === "full" ? "full" : "guarded";
+    if ($("ap-objective")) { $("ap-objective").focus(); $("ap-objective").scrollTop = 0; }
+    addMessage("assistant", "🛫 I've pre-filled the Autopilot launcher — set your time budget and autonomy, then hit Start.", "notice");
+  };
   if (btn && drop) {
     btn.addEventListener("click", (e) => { e.stopPropagation(); if (drop.hidden) openLauncher(); else closeLauncher(); });
     // Modal behavior: click the dimmed backdrop (the overlay itself, not the card) to close.
