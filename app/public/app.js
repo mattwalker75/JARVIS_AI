@@ -649,11 +649,15 @@ function renderPlan(plan) {
 (function initPlanBanner() {
   const banner = $("plan-banner"); if (!banner) return;
   if (localStorage.getItem("jarvis.plan.collapsed") === "1") banner.classList.add("collapsed");
-  const col = $("pb-collapse"), clr = $("pb-clear");
-  if (col) col.addEventListener("click", () => {
-    banner.classList.toggle("collapsed");
+  const handle = $("pb-handle"), clr = $("pb-clear");
+  const toggle = () => {
+    banner.classList.toggle("collapsed");   // show/hide the steps only — the plan data is untouched
     localStorage.setItem("jarvis.plan.collapsed", banner.classList.contains("collapsed") ? "1" : "0");
-  });
+  };
+  if (handle) {
+    handle.addEventListener("click", toggle);
+    handle.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+  }
   if (clr) clr.addEventListener("click", async () => {
     if (!confirm("Clear the current plan?")) return;
     try { await fetch("/api/plan", { method: "DELETE" }); } catch (_) {}

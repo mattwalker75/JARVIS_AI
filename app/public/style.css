@@ -195,8 +195,16 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .pb-btn { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; padding: 2px 5px; border-radius: 5px; }
 .pb-btn:hover { color: var(--text); background: rgba(255,255,255,.06); }
 .plan-banner.collapsed .pb-steps { display: none; }
-.plan-banner.collapsed #pb-collapse { transform: rotate(-90deg); }
 .pb-steps { list-style: none; margin: 0; padding: 0 10px 8px; max-height: 34vh; overflow-y: auto; }
+/* Bottom drawer handle: click to show/hide the steps (mirrors the side-panel drawer handle).
+   Purely visual — it never touches the running plan. */
+.pb-handle { height: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  border-top: 1px solid rgba(54,211,255,.16); border-radius: 0 0 10px 10px; transition: background .12s; }
+.pb-handle::before { content: "\25B4"; font-size: .68rem; line-height: 1; color: var(--muted); }   /* ▴ open → click to hide */
+.plan-banner.collapsed .pb-handle { border-top: none; }
+.plan-banner.collapsed .pb-handle::before { content: "\25BE"; }                                     /* ▾ hidden → click to show */
+.pb-handle:hover { background: rgba(54,211,255,.10); }
+.pb-handle:hover::before { color: var(--accent); }
 .pb-step { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: .86rem; line-height: 1.35; }
 .pb-step .pb-ico { flex: 0 0 auto; width: 15px; text-align: center; font-weight: 700; }
 .pb-step .pb-txt { flex: 1; min-width: 0; }
