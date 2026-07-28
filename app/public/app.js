@@ -1566,8 +1566,8 @@ async function saveConfig() {
     const nb = (d.backups || []).length;
     result.innerHTML = "✅ Saved " + (d.saved || []).join(" + ") +
       (nb ? " (backed up " + nb + " file" + (nb > 1 ? "s" : "") + ")" : "") +
-      ". Now run <code>./JARVIS.sh --reload</code> to apply (restarts the app" +
-      (config.ollama && config.ollama.manage !== false ? " + Ollama" : "") + ").";
+      " — <b>applied live</b>, takes effect on your next message. No restart needed." +
+      "<span class=\"cfg-note\">A restart (<code>./JARVIS.sh --reload</code>) is only needed for the memory service's embedding key or container-level settings (ports). Local LLM runtimes: <code>./JARVIS_LOCAL_LLM.sh</code>.</span>";
   } catch (e) {
     result.className = "cfg-result err"; result.textContent = "Save failed: " + e.message;
   } finally { btn.disabled = false; }

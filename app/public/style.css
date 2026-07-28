@@ -409,5 +409,6 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .cfg-actions .primary:disabled { opacity: .5; cursor: not-allowed; }
 .cfg-result { font-size: .78rem; min-height: 1em; }
 .cfg-result.ok { color: #58e08a; }
+.cfg-note { display: block; margin-top: 4px; font-size: .72rem; color: var(--muted); }
 .cfg-result.err { color: #ff6b7d; }
 .cfg-result code { background: rgba(255,255,255,.08); padding: 1px 6px; border-radius: 5px; font-family: ui-monospace, monospace; }

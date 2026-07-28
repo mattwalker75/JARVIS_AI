@@ -9,6 +9,14 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-28: **Config "Save all" applies live — no restart.** Saving from the Config tab already
+  mutated the in-memory config in place, but the UI still told you to run `./JARVIS.sh --reload`.
+  Corrected the messaging: ordinary settings (endpoint / model / tiers / temperature / max_tokens /
+  completion_checks / prompts / log level …) take effect on the **next message** with no restart.
+  A restart is only flagged for the memory service's embedding key and container-level settings
+  (ports). `POST /api/config/full` now returns `applied_live: true`. (`app/server.js`,
+  `app/public/{app.js,index.html,style.css}`.)
+
 - 2026-07-28: **LLM hosting extracted out of JARVIS core.** JARVIS is now a pure OpenAI-dialect
   *client* — it talks to whatever URL is in `llm.base_url` and no longer knows or cares where the
   model lives. Local model management moved to a new, optional **`JARVIS_LOCAL_LLM.sh`** (pluggable

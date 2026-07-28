@@ -205,7 +205,7 @@
             <h4>Configuration</h4>
             <button id="cfg-reload-from-disk" class="ghost" title="Discard edits and reload from the files on disk">↻ Reload</button>
           </div>
-          <div class="hint">Everything in <code>JARVIS_CONFIG.json</code> + <code>JARVIS_SECRETS.json</code>. Edit the friendly fields or the raw JSON — they stay in sync. After saving, run <code>./JARVIS.sh --reload</code> to apply.</div>
+          <div class="hint">Everything in <code>JARVIS_CONFIG.json</code> + <code>JARVIS_SECRETS.json</code>. Edit the friendly fields or the raw JSON — they stay in sync. <b>Saving applies changes live</b> (the app re-reads them on your next message) — no restart for ordinary settings like endpoint / model / tiers / params / prompts.</div>
 
           <div class="cfg-section">
             <h5>Model &amp; LLM</h5>

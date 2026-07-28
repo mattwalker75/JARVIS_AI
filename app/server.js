@@ -258,7 +258,9 @@ app.post("/api/config/full", (req, res) => {
     const { config: c, secrets: s } = req.body || {};
     if (c === undefined && s === undefined) return res.status(400).json({ error: "nothing to save" });
     const r = writeFullConfig({ config: c, secrets: s });
-    res.json({ ...r, reload_required: true });
+    // writeFullConfig mutates the in-memory config in place, so changes apply on the next turn —
+    // no --reload for ordinary settings (base_url/model/tiers/params/prompts/log level, etc.).
+    res.json({ ...r, reload_required: false, applied_live: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
