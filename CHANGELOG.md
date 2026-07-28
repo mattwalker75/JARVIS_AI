@@ -8,6 +8,14 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-28: **Forgiving file-write tools (from the GPT-4.1 build review).** Two friction points a
+  real Autopilot build kept hitting: (1) `write_workbench_file` / `edit_workbench_file` now accept a
+  **relative path** (resolved under `/workspace`) instead of erroring with "path must be absolute" —
+  a `toWorkbenchPath` helper normalizes it. (2) `write_file` given a **directory** path now returns
+  an actionable error ("… is a directory — include a filename, e.g. …/index.html") instead of a raw
+  `EISDIR`. Both let any model self-correct instantly rather than burning retries. (`app/src/tools.js`.)
+
 ### Added
 - 2026-07-28: **Model tier pickers group by capability (curated `models.json`).** In multi-model
   mode the chat/cheap/smart/vision dropdowns now put the models that fit each tier in a

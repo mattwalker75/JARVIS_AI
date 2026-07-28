@@ -86,11 +86,19 @@ async function runShell(command, timeoutS, signal) {
   });
 }
 
+// Normalize a workbench path: a relative path (e.g. "engine.js", "./src/x.js") is resolved
+// against /workspace (the workbench working dir), so the model doesn't have to remember the
+// absolute prefix. Absolute paths pass through unchanged.
+function toWorkbenchPath(p, example) {
+  if (p == null || String(p).trim() === "") throw new Error("path is required, e.g. " + (example || "/workspace/app.py"));
+  p = String(p).trim();
+  return p.startsWith("/") ? p : "/workspace/" + p.replace(/^\.?\/+/, "");
+}
 // Write a file anywhere in the workbench (e.g. /workspace/app.py) RELIABLY, with no
 // shell-quoting issues — content is base64-piped in. Use this to create code/config
 // files for the workbench instead of run_shell heredocs/echo.
 async function writeWorkbenchFile(p, content) {
-  if (!p || !String(p).startsWith("/")) throw new Error("path must be an absolute workbench path, e.g. /workspace/app.py");
+  p = toWorkbenchPath(p, "/workspace/app.py");
   const b64 = Buffer.from(content == null ? "" : String(content)).toString("base64");
   const dir = String(p).replace(/\/[^/]*$/, "") || "/";
   const r = await runShell(`mkdir -p ${shq(dir)} && printf %s ${shq(b64)} | base64 -d > ${shq(p)} && wc -c < ${shq(p)}`);
@@ -102,7 +110,7 @@ async function writeWorkbenchFile(p, content) {
 // rewrites. Reads via the shared /workspace mount when possible (no truncation), else base64
 // out of the container; writes back reliably as root via writeWorkbenchFile.
 async function editWorkbenchFile(p, oldStr, newStr, replaceAll) {
-  if (!p || !String(p).startsWith("/")) throw new Error("path must be an absolute workbench path, e.g. /workspace/doom.html");
+  p = toWorkbenchPath(p, "/workspace/doom.html");
   if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
   newStr = newStr == null ? "" : String(newStr);
   let content;
@@ -184,6 +192,9 @@ async function readFile(p, offset, maxChars) {
 }
 async function writeFile(p, content, append) {
   const abs = resolveShared(p, true);
+  // Actionable error instead of a raw EISDIR when a directory path is passed without a filename.
+  let isDir = false; try { isDir = fs.statSync(abs).isDirectory(); } catch (_) {}
+  if (isDir) throw new Error(`"${p}" is a directory, not a file — include a filename, e.g. ${abs.replace(/\/+$/, "")}/index.html. (To copy a whole folder here, use run_shell: cp -r <src> ${abs.replace(/\/+$/, "")}/)`);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   let data = content == null ? "" : String(content);
   if (append) {
@@ -654,7 +665,7 @@ const toolDefs = [
     description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
     parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer", description: "Max seconds before the command is killed (default 120, max 600)." } }, required: ["command"] } } },
   { type: "function", function: { name: "write_workbench_file",
-    description: "Write a text/code file to an absolute path in your workbench (e.g. /workspace/app.py). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
+    description: "Write a text/code file in your workbench (e.g. /workspace/app.py; a relative path like app.py resolves under /workspace). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
     parameters: { type: "object", properties: { path: { type: "string", description: "Absolute workbench path, e.g. /workspace/app.py" }, content: { type: "string" } }, required: ["path", "content"] } } },
   { type: "function", function: { name: "edit_workbench_file",
     description: "Make a TARGETED edit to an existing workbench file by replacing an exact snippet — STRONGLY PREFER this over rewriting the whole file with write_workbench_file when changing existing code. It's safer and cheaper: you only emit the small piece that changes, so you don't reintroduce bugs elsewhere or waste tokens re-writing the whole file. Provide old_string = the exact text to find (copy it verbatim, including indentation/whitespace; include enough surrounding context to be UNIQUE) and new_string = what to replace it with. Fails if old_string is missing or appears more than once (then add more context or set replace_all=true). Read the file first so old_string matches exactly.",
