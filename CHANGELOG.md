@@ -9,6 +9,13 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-28: **Config tab: clearer model setup.** (1) The **API key** field now has a **Show/Hide**
+  toggle so you can read and edit the stored key. (2) **List models** falls back to the saved
+  config key + endpoint when the form fields are blank, so it works as long as a key is configured.
+  (3) **Model mode** now shows ONLY the relevant fields — `single` reveals just the single-model
+  input, `multi` reveals just the chat/cheap/smart/vision tier grid (toggled on load and on change).
+  (`app/public/{index.html,app.js,style.css}`, `app/server.js` models/probe fallback.)
+
 - 2026-07-28: **Tuning from the two-day log review.** Interactive turns were hitting the tool-step
   ceiling 41× (terminal "Stopped after the maximum number of tool steps"), and `completion_checks=2`
   was driving repetitive "verify everything" recitations + a repetition loop. Fixes:

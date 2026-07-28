@@ -82,8 +82,11 @@ app.post("/api/tasks/cancel", (req, res) => res.json(scheduler.cancel((req.body 
 // show a provider's models before you save. Tries the OpenAI-compatible /models, then the
 // Ollama /api/tags fallback.
 app.post("/api/models/probe", async (req, res) => {
-  const base = String((req.body || {}).base_url || "").replace(/\/+$/, "");
-  const key = (req.body || {}).api_key || "";
+  const llm = (config && config.llm) || {};
+  // Prefer what the user typed in the form; fall back to the saved config so "List models"
+  // works even when the field is left blank but a key/endpoint is already configured.
+  const base = String((req.body || {}).base_url || llm.base_url || "").replace(/\/+$/, "");
+  const key = (req.body || {}).api_key || llm.api_key || "";
   if (!base) return res.json({ models: [], error: "Enter an endpoint URL first." });
   const headers = key ? { Authorization: "Bearer " + key } : {};
   try {

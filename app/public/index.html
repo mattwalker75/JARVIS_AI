@@ -211,19 +211,28 @@
             <h5>Model &amp; LLM</h5>
             <label>Provider / endpoint<select id="cfg-provider"></select></label>
             <label id="cfg-row-baseurl">Endpoint URL<input id="cfg-base-url" autocomplete="off" placeholder="https://…/v1"></label>
-            <label id="cfg-row-apikey">API key<input id="cfg-api-key" type="password" autocomplete="off" placeholder="sk-…"></label>
+            <label id="cfg-row-apikey">API key
+              <span class="cfg-key-wrap">
+                <input id="cfg-api-key" type="password" autocomplete="off" placeholder="sk-…">
+                <button type="button" id="cfg-api-key-toggle" class="cfg-eye" title="Show / hide the API key" aria-label="Show or hide the API key">👁 Show</button>
+              </span>
+            </label>
             <div class="cfg-models-row">
               <button id="cfg-list-models" type="button" class="ghost">🔄 List models</button>
               <span class="cfg-hint-inline" id="cfg-models-status"></span>
             </div>
             <datalist id="cfg-model-list"></datalist>
             <label>Model mode<select id="cfg-model-mode"><option value="single">single</option><option value="multi">multi</option></select></label>
-            <label>Model (single mode)<input id="cfg-model" list="cfg-model-list" autocomplete="off"></label>
-            <div class="cfg-grid">
-              <label>chat tier<input id="cfg-tier-chat" list="cfg-model-list" autocomplete="off"></label>
-              <label>cheap tier<input id="cfg-tier-cheap" list="cfg-model-list" autocomplete="off"></label>
-              <label>smart tier<input id="cfg-tier-smart" list="cfg-model-list" autocomplete="off"></label>
-              <label>vision tier<input id="cfg-tier-vision" list="cfg-model-list" autocomplete="off"></label>
+            <div id="cfg-single-block">
+              <label>Model (single mode)<input id="cfg-model" list="cfg-model-list" autocomplete="off"></label>
+            </div>
+            <div id="cfg-multi-block">
+              <div class="cfg-grid">
+                <label>chat tier<input id="cfg-tier-chat" list="cfg-model-list" autocomplete="off"></label>
+                <label>cheap tier<input id="cfg-tier-cheap" list="cfg-model-list" autocomplete="off"></label>
+                <label>smart tier<input id="cfg-tier-smart" list="cfg-model-list" autocomplete="off"></label>
+                <label>vision tier<input id="cfg-tier-vision" list="cfg-model-list" autocomplete="off"></label>
+              </div>
             </div>
             <div class="cfg-grid">
               <label>Temperature<input id="cfg-temperature" type="number" step="0.1" min="0" max="2"></label>

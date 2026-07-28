@@ -1342,6 +1342,14 @@ function syncProviderUI() {
   const keyRow = $("cfg-row-apikey"); if (keyRow) keyRow.style.display = showKey ? "" : "none";
   const local = p && (p.id === "ollama" || p.id === "litellm");
   const oll = $("cfg-sec-ollama"); if (oll) oll.style.display = local ? "" : "none";  // host tuning only when using local Ollama
+  syncModelMode();
+}
+// Show ONLY the single-model field OR the multi-tier grid, per the selected model mode.
+function syncModelMode() {
+  const mode = ($("cfg-model-mode") || {}).value || "single";
+  const single = $("cfg-single-block"), multi = $("cfg-multi-block");
+  if (single) single.style.display = mode === "single" ? "" : "none";
+  if (multi) multi.style.display = mode === "multi" ? "" : "none";
 }
 // User picked a provider → fill the endpoint URL (presets) and refresh the UI.
 function onProviderChange() {
@@ -1457,6 +1465,16 @@ async function saveConfig() {
 CFG_FIELDS.forEach(([id]) => { const el = $(id); if (el) el.addEventListener("change", () => { collectStructured(); renderRawConfig(); }); });
 (() => { const s = $("cfg-provider"); if (s) s.addEventListener("change", onProviderChange); })();
 (() => { const b = $("cfg-list-models"); if (b) b.addEventListener("click", listConfigModels); })();
+(() => { const m = $("cfg-model-mode"); if (m) m.addEventListener("change", syncModelMode); })();
+// Show/hide the API key so it can be read and edited (it's stored/sent in the clear anyway).
+(() => {
+  const btn = $("cfg-api-key-toggle"), inp = $("cfg-api-key");
+  if (btn && inp) btn.addEventListener("click", () => {
+    const show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    btn.textContent = show ? "🙈 Hide" : "👁 Show";
+  });
+})();
 (() => {
   const raw = $("cfg-json"); if (raw) raw.addEventListener("blur", () => {
     try { cfgObj = JSON.parse(raw.value); populateProviderSelect(getPath(cfgObj, "llm.provider")); populateStructured(); syncProviderUI(); $("cfg-json-err").textContent = ""; }
