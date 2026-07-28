@@ -1275,6 +1275,33 @@ const CFG_FIELDS = [
   ["cfg-log-level", "logging.level", "num"],
 ];
 
+// The model fields are real <select> dropdowns (native <datalist> was unreliable). "List models"
+// fills these; each keeps its currently-configured value even if it isn't in the fetched list,
+// plus a "✎ Custom…" escape hatch for a model the endpoint didn't return.
+const MODEL_SELECT_IDS = ["cfg-model", "cfg-tier-chat", "cfg-tier-cheap", "cfg-tier-smart", "cfg-tier-vision"];
+const MODEL_CUSTOM = "__custom__";
+let modelOptions = [];   // last result from "List models"
+function renderModelSelect(sel, current) {
+  current = current == null ? "" : String(current);
+  sel.innerHTML = "";
+  const add = (val, label) => { const o = document.createElement("option"); o.value = val; o.textContent = label != null ? label : val; sel.appendChild(o); };
+  add("", "— none —");
+  const seen = new Set();
+  const all = current && !modelOptions.includes(current) ? [current, ...modelOptions] : modelOptions;
+  for (const m of all) { if (m && !seen.has(m)) { seen.add(m); add(m); } }
+  add(MODEL_CUSTOM, "✎ Custom…");
+  sel.value = current;
+}
+// Type a model the endpoint didn't list; inject it and keep it selected.
+function onModelSelectChange(e) {
+  const sel = e.target;
+  if (sel.value !== MODEL_CUSTOM) return;
+  const name = (prompt("Enter a model name (as the provider expects it):", "") || "").trim();
+  if (name) { if (!modelOptions.includes(name)) modelOptions.push(name); renderModelSelect(sel, name); }
+  else { renderModelSelect(sel, ""); }
+  collectStructured(); renderRawConfig();
+}
+
 function getPath(obj, dotted) {
   return dotted.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 }
@@ -1291,6 +1318,7 @@ function populateStructured() {
   for (const [id, path, type] of CFG_FIELDS) {
     const el = $(id); if (!el) continue;
     const v = getPath(cfgObj, path);
+    if (MODEL_SELECT_IDS.includes(id)) { renderModelSelect(el, v); continue; }   // <select> needs the option to exist
     if (type === "bool") el.checked = v !== false && v != null ? !!v : (v === true);
     else el.value = v == null ? "" : v;
   }
@@ -1306,7 +1334,8 @@ function collectStructured() {
     let val;
     if (type === "bool") val = el.checked;
     else if (type === "num") val = el.value === "" ? undefined : Number(el.value);
-    else val = el.value === "" ? undefined : el.value;
+    else if (el.value === "" || el.value === MODEL_CUSTOM) val = undefined;   // sentinel/blank -> unset
+    else val = el.value;
     setPath(cfgObj, path, val);
   }
 }
@@ -1368,8 +1397,10 @@ async function listConfigModels() {
   if (btn) btn.disabled = true; if (st) st.textContent = "Listing…";
   try {
     const d = await (await fetch("/api/models/probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base_url, api_key }) })).json();
-    const dl = $("cfg-model-list"); if (dl) { dl.innerHTML = ""; (d.models || []).forEach((m) => { const o = document.createElement("option"); o.value = m; dl.appendChild(o); }); }
-    if (st) st.textContent = (d.models && d.models.length) ? `${d.models.length} models loaded — click a model field to pick/type one` : ("No models" + (d.error ? " — " + d.error : ""));
+    modelOptions = (d.models || []).slice();
+    // Fill every model dropdown, preserving each field's current selection.
+    MODEL_SELECT_IDS.forEach((id) => { const sel = $(id); if (sel) renderModelSelect(sel, sel.value === MODEL_CUSTOM ? "" : sel.value); });
+    if (st) st.textContent = modelOptions.length ? `${modelOptions.length} models loaded — open any model dropdown to pick one` : ("No models" + (d.error ? " — " + d.error : ""));
   } catch (e) { if (st) st.textContent = "Failed: " + e.message; }
   finally { if (btn) btn.disabled = false; }
 }
@@ -1466,6 +1497,7 @@ CFG_FIELDS.forEach(([id]) => { const el = $(id); if (el) el.addEventListener("ch
 (() => { const s = $("cfg-provider"); if (s) s.addEventListener("change", onProviderChange); })();
 (() => { const b = $("cfg-list-models"); if (b) b.addEventListener("click", listConfigModels); })();
 (() => { const m = $("cfg-model-mode"); if (m) m.addEventListener("change", syncModelMode); })();
+MODEL_SELECT_IDS.forEach((id) => { const s = $(id); if (s) s.addEventListener("change", onModelSelectChange); });
 // Show/hide the API key so it can be read and edited (it's stored/sent in the clear anyway).
 (() => {
   const btn = $("cfg-api-key-toggle"), inp = $("cfg-api-key");

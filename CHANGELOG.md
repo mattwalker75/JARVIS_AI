@@ -8,6 +8,14 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-28: **Model pickers now populate reliably.** The model fields (single + the four
+  chat/cheap/smart/vision tiers) were `<input list=datalist>` — native datalists don't reliably
+  drop down, so the multi-mode tier pickers looked empty. Replaced them with real `<select>`
+  dropdowns that **List models** fills; each keeps its currently-configured value even if the
+  endpoint didn't return it, plus a **✎ Custom…** option to enter a model by hand.
+  (`app/public/{index.html,app.js}`.)
+
 ### Changed
 - 2026-07-28: **Config tab: clearer model setup.** (1) The **API key** field now has a **Show/Hide**
   toggle so you can read and edit the stored key. (2) **List models** falls back to the saved

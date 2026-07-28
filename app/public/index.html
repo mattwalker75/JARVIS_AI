@@ -221,17 +221,16 @@
               <button id="cfg-list-models" type="button" class="ghost">🔄 List models</button>
               <span class="cfg-hint-inline" id="cfg-models-status"></span>
             </div>
-            <datalist id="cfg-model-list"></datalist>
             <label>Model mode<select id="cfg-model-mode"><option value="single">single</option><option value="multi">multi</option></select></label>
             <div id="cfg-single-block">
-              <label>Model (single mode)<input id="cfg-model" list="cfg-model-list" autocomplete="off"></label>
+              <label>Model (single mode)<select id="cfg-model" class="cfg-model-pick"></select></label>
             </div>
             <div id="cfg-multi-block">
               <div class="cfg-grid">
-                <label>chat tier<input id="cfg-tier-chat" list="cfg-model-list" autocomplete="off"></label>
-                <label>cheap tier<input id="cfg-tier-cheap" list="cfg-model-list" autocomplete="off"></label>
-                <label>smart tier<input id="cfg-tier-smart" list="cfg-model-list" autocomplete="off"></label>
-                <label>vision tier<input id="cfg-tier-vision" list="cfg-model-list" autocomplete="off"></label>
+                <label>chat tier<select id="cfg-tier-chat" class="cfg-model-pick"></select></label>
+                <label>cheap tier<select id="cfg-tier-cheap" class="cfg-model-pick"></select></label>
+                <label>smart tier<select id="cfg-tier-smart" class="cfg-model-pick"></select></label>
+                <label>vision tier<select id="cfg-tier-vision" class="cfg-model-pick"></select></label>
               </div>
             </div>
             <div class="cfg-grid">
