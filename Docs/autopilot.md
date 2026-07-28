@@ -56,6 +56,16 @@ Click **🛫 Autopilot** in the header:
 - **Autonomy** — `guarded` (default) or `full` (see below).
 - **Verbose** — stream the model's live thinking + tokens into the chat so you can watch it work. (The streamed cycle text is shown but not added to your chat history or spoken.)
 
+### JARVIS can offer to run it
+
+You don't have to reach for the launcher yourself. When JARVIS sizes up a large, multi-step
+job you could walk away from — including follow-up improvements after it just finished
+something — it can **offer** to run it on Autopilot ("want me to run this on Autopilot so you
+can step away?"). If you agree, its `open_autopilot` tool opens the launcher **pre-filled**: a
+self-contained objective plus a suggested time budget and autonomy. You review the settings and
+press **Start** — the model never auto-starts a run. (This also gives a follow-up plan a proper
+home instead of the model silently re-planning into the ledger.)
+
 ### The live status bar
 
 While running it shows `state · cycle N · countdown · tokens ~$cost`, plus controls:

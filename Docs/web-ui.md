@@ -9,10 +9,15 @@ tabbed side panel showing what JARVIS is doing.
   lists, and **clickable links** (bare URLs the model posts become links too).
 - **Thinking panel** — for reasoning models, a collapsible 💭 panel above each answer
   streams the model's chain-of-thought live, then collapses when the answer starts.
-- **Working / idle status** — a pill by the title shows Idle / Working / Stalled?, driven
-  by streamed activity; after ~25s with no progress it warns the model may be slow.
+- **Working / idle status** — an always-visible pill by the title shows **Idle** (green) /
+  **Working** (amber) / **Stalled?** (red), driven by streamed activity; after ~25s with no
+  progress it warns the model may be slow. A third cyan **Autopilot** state shows while an
+  autonomous run is working server-side (a live chat request's amber **Working** takes priority).
 - **Plan banner** — when JARVIS is working a multi-step task, a live checklist above the chat
-  shows the objective and each step's status (done ✓ / active ▸ / pending ○ / blocked ✕). See [Autopilot & the Planner](autopilot.md).
+  shows the objective and each step's status (done ✓ / active ▸ / pending ○ / blocked ✕). A
+  full-width **drawer handle** along its bottom edge shows/hides the steps (click, or
+  Enter/Space) — purely visual, it never touches the running plan. See [Autopilot & the
+  Planner](autopilot.md).
 - **Autopilot bar** — status + controls for an autonomous run (pause/resume/modify/extend/continue). See [Autopilot](autopilot.md).
 - **Context meter** — a bar by the title shows how full the context window is, with a **🗜 Summarize** button to compact and continue. See [Prompts & Context](prompts.md#the-context-window-meter).
 - **Importance flags** — the model can flag a message `info` / `success` / `attention`
@@ -51,7 +56,7 @@ width, click the handle to open/close, and it stays where you set it (persisted)
 | **Memory** | Everything JARVIS remembers, with a filter box and delete buttons. |
 | **Files** | Browse, open/preview, download, and delete files in the shared folder — JARVIS's deliverables and your uploads. |
 | **Workbench** | The live Linux desktop (noVNC) embedded — watch it use the browser and apps. |
-| **Config** | Provider/model picker (with **List models**), prompts editor + library, behavior, Ollama tuning, diagnostics, and the raw config/secrets editors. See [Configuration](configuration.md) and [Prompts](prompts.md). |
+| **Config** | Provider/model setup — an **API key** field with a **Show/Hide** toggle, **List models** (falls back to the saved config key + endpoint if the form fields are blank), and real dropdowns for the model fields (grouped by tier — see [Configuration](configuration.md#tier-grouping-in-the-config-pickers)); **Model mode** reveals just the single-model input (`single`) or just the chat/cheap/smart/vision tier grid (`multi`). Plus the prompts editor + library, behavior, Ollama tuning, diagnostics, and the raw config/secrets editors. See [Configuration](configuration.md) and [Prompts](prompts.md). |
 
 ## Slash commands
 

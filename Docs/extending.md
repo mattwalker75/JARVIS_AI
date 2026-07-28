@@ -106,6 +106,17 @@ Notes:
   `ollama_chat/` (plain `ollama/` requires Pillow, which the gateway image lacks).
 - To bypass the gateway entirely, point `llm.base_url` at Ollama or OpenAI directly.
 
+### Curating the tier pickers (`models.json` + `MODELS.md`)
+The Config tab groups each tier's dropdown ("★ recommended" vs "Other models") from a
+**user-editable catalog at `app/public/models.json`** — a plain lookup of model name-prefixes to
+tier buckets (`chat` / `cheap` / `smart` / `vision`). Add a model's base name to the right
+bucket(s) and refresh; matching is by **longest prefix** (so `gpt-4.1` also matches
+`gpt-4.1-2025-04-14`), a model may be in several buckets, and anything unlisted falls back to a
+name heuristic. **`MODELS.md`** at the repo root is the human-readable companion (which models fit
+which tier) — keep the two in sync when you add a model. Grouping never restricts selection; any
+model can still be chosen in any tier (or typed via **✎ Custom…**). See
+[Configuration → Tier grouping](configuration.md#tier-grouping-in-the-config-pickers).
+
 ## Skills
 
 Skills are on-demand **how-to playbooks** the model reads before unfamiliar or

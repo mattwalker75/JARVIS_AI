@@ -60,7 +60,8 @@ key required (except for internet research and package installs).
   (build → test → refine → fix) until done, the budget's up, or it gets stuck. It runs
   server-side (close the tab and walk away), notifies you when finished, and you can
   **pause / resume / modify / extend / continue** it from the status bar. A verbose
-  switch streams its thinking to the chat so you can watch it work.
+  switch streams its thinking to the chat so you can watch it work — and JARVIS can even
+  **offer** to run a suitable job on Autopilot, opening the launcher pre-filled for you to Start.
 - **Remember** facts about you across conversations (semantic memory you can browse
   and prune in the UI).
 - **Run anything** in a root Linux workbench (2000+ preinstalled tools; installs more
@@ -88,7 +89,8 @@ JARVIS is built to grow without editing core code:
   instructions are appended automatically.
 - **Providers** — pick a provider (OpenAI, Groq, OpenRouter, Ollama, …) in the Config
   tab, paste a key, and **List models** to choose one — or add a line to
-  `litellm/config.yaml` and use it by name.
+  `litellm/config.yaml` and use it by name. The tier pickers group models by capability
+  from a curated, editable `models.json` (see `MODELS.md` for the reference).
 - **Custom tools** — drop a JS file in `data/custom_tools/` and restart.
 - **MCP servers** — add external tool servers in config; they register automatically.
 - **Skills** — on-demand how-to playbooks the model reads before hard tasks.

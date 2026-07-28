@@ -74,6 +74,22 @@ Each tier in `models` names a model the gateway knows (a `model_name` from
 An omitted tier falls back to `chat`, then to `model`. In **single** mode, every tier
 uses `model`.
 
+### Tier grouping in the Config pickers
+In multi-model mode the Config tab's `chat` / `cheap` / `smart` / `vision` dropdowns are
+**grouped by capability**: models that fit the tier appear in a "★ *tier* — recommended"
+optgroup on top, everything else under "Other models", and non-chat models
+(embeddings / TTS / whisper / dall-e / transcribe) are dropped — so the **vision** picker
+surfaces vision models, **smart** surfaces reasoning models, etc. Grouping only **orders** the
+list; you can still pick **any** model in **any** tier, plus a **✎ Custom…** option to type one
+by hand.
+
+The grouping is driven by a **user-maintained catalog at `app/public/models.json`**, matched by
+**longest name-prefix** (so `gpt-4.1` also matches `gpt-4.1-2025-04-14`; a model may sit in
+several buckets). Anything your endpoint lists that isn't in the file falls back to a name
+heuristic. Edit `models.json` and refresh to keep it current as providers ship models;
+**`MODELS.md`** (repo root) is the human-readable companion reference for which models fit which
+tier. See [Extending → Models & providers](extending.md#models--providers).
+
 ### Mixing local + cloud
 Because `base_url` points at the gateway, you can freely mix providers:
 
