@@ -1,0 +1,32 @@
+{
+  "_comment": "Curated model catalog for the Config tab's multi-model tier pickers. EDIT THIS to add/update models as providers ship them — it's just a lookup. Keys are matched by LONGEST NAME-PREFIX against whatever your endpoint's 'List models' returns, so 'gpt-4.1' also matches 'gpt-4.1-2025-04-14', while the longer 'gpt-4.1-mini' wins for 'gpt-4.1-mini-2025-04-14'. A model may appear in several buckets (e.g. gpt-4o is both chat and vision). Anything your endpoint lists that ISN'T here falls back to a name heuristic. Buckets: chat = main conversation/tool-calling; cheap = fast/background/scheduled; smart = hard reasoning; vision = can read images (required for the vision tier).",
+  "updated": "2026-07-28",
+  "categories": {
+    "chat": [
+      "gpt-4.1", "gpt-4o", "chatgpt-4o", "gpt-4-turbo", "gpt-5",
+      "claude-sonnet-4", "claude-3-7-sonnet", "claude-3-5-sonnet",
+      "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro",
+      "qwen3", "qwen2.5", "llama3.3", "llama-3.3", "mistral-large",
+      "deepseek-chat", "deepseek-v3", "grok-2", "grok-3"
+    ],
+    "cheap": [
+      "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o-mini", "gpt-5-mini", "gpt-5-nano", "gpt-3.5-turbo",
+      "claude-3-5-haiku", "claude-haiku-4-5", "claude-3-haiku",
+      "gemini-2.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash",
+      "llama3.2", "llama-3.2", "qwen2.5:7b", "qwen2.5:3b", "mistral-small", "ministral", "phi-4", "phi3", "gemma2", "gemma3"
+    ],
+    "smart": [
+      "o3", "o4-mini", "o1", "o3-mini", "o1-mini", "gpt-5",
+      "claude-opus-4-1", "claude-opus-4", "claude-3-opus",
+      "gemini-2.5-pro", "deepseek-r1", "deepseek-reasoner", "qwq", "grok-3"
+    ],
+    "vision": [
+      "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "chatgpt-4o",
+      "gpt-5", "gpt-5-mini", "o1", "o3", "o4-mini",
+      "claude-opus-4-1", "claude-opus-4", "claude-sonnet-4", "claude-3-7-sonnet",
+      "claude-3-5-sonnet", "claude-3-5-haiku", "claude-3-opus", "claude-3-haiku",
+      "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash",
+      "qwen2.5vl", "qwen2-vl", "llama3.2-vision", "llava", "llava-llama3", "moondream", "internvl", "pixtral", "minicpm-v"
+    ]
+  }
+}

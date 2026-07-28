@@ -9,6 +9,15 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-28: **Model tier pickers group by capability (curated `models.json`).** In multi-model
+  mode the chat/cheap/smart/vision dropdowns now put the models that fit each tier in a
+  "★ …recommended" group on top, the rest under "Other models", and drop non-chat models
+  (embeddings/tts/whisper/dall-e/transcribe) entirely — so the **vision tier surfaces vision
+  models**, smart surfaces reasoning models, etc. Categorization is driven by a **user-maintained
+  `app/public/models.json`** (matched by longest name-prefix, so `gpt-4.1` also matches
+  `gpt-4.1-2025-04-14`); anything not listed falls back to a name heuristic. Edit the file + refresh
+  to keep it current as providers ship models. (`app/public/{models.json,app.js}`.)
+
 - 2026-07-28: **Header pill shows "Autopilot".** The always-visible status pill used to only read
   Idle/Working — and since Autopilot runs on a separate server-side loop, it read "Idle" even while
   a run was actively building. It now shows a distinct cyan **Autopilot** state whenever a run is

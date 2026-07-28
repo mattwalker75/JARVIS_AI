@@ -1304,15 +1304,71 @@ const CFG_FIELDS = [
 const MODEL_SELECT_IDS = ["cfg-model", "cfg-tier-chat", "cfg-tier-cheap", "cfg-tier-smart", "cfg-tier-vision"];
 const MODEL_CUSTOM = "__custom__";
 let modelOptions = [];   // last result from "List models"
+// Heuristic classifier by model NAME (OpenAI's /models list exposes no capability flags). Good
+// enough to surface the right models per tier; grouping (not filtering) means a miss never hides one.
+function classifyModel(name) {
+  const n = String(name).toLowerCase();
+  return {
+    nonchat:   /embedding|(^|[^a-z])tts|whisper|dall-?e|moderation|transcrib|(^|[^a-z])audio|image-1|stable-?diffusion|rerank|guard/.test(n),
+    vision:    /gpt-4o|gpt-4\.1|4-turbo|vision|(^|[^a-z])vl($|[^a-z])|-vl|llava|pixtral|gemini|claude-3|claude-4|claude-opus|claude-sonnet|claude-haiku|internvl|moondream|(^|[^a-z])o[134]($|[^a-z])|gpt-5|qwen2\.5vl/.test(n),
+    reasoning: /(^|[^a-z])o[134]($|[^a-z])|reason|deepseek-?r1|(^|[^a-z])r1($|[^a-z])|qwq|thinking|gpt-5/.test(n),
+    small:     /mini|nano|small|lite|haiku|flash|tiny|phi|(^|[^0-9.])[0-9]b($|[^a-z])/.test(n),   // 7b/8b = small; 32b/70b are not
+  };
+}
+const MODEL_TIER = { "cfg-tier-vision": "vision", "cfg-tier-smart": "smart", "cfg-tier-cheap": "cheap", "cfg-tier-chat": "chat", "cfg-model": "chat" };
+const TIER_LABEL = { vision: "Vision-capable", smart: "Reasoning", cheap: "Small / fast", chat: "General chat" };
+let modelCatalog = null;   // curated buckets from /models.json (user-maintained)
+async function loadModelCatalog() {
+  if (modelCatalog) return modelCatalog;
+  try { modelCatalog = await (await fetch("/models.json", { cache: "no-store" })).json(); } catch (_) { modelCatalog = { categories: {} }; }
+  return modelCatalog;
+}
+// Which tier buckets a model belongs to. Curated catalog wins (longest name-prefix match); if the
+// model isn't listed there at all, fall back to the name heuristic. [] = not a usable chat model.
+function categoriesFor(name) {
+  const n = String(name).toLowerCase();
+  if (classifyModel(name).nonchat) return [];   // embeddings/tts/whisper/transcribe/etc. are never a chat tier, even if they prefix-match a catalog key
+  const cats = (modelCatalog && modelCatalog.categories) || {};
+  let maxLen = -1; const hit = new Set(); let matched = false;
+  for (const [cat, keys] of Object.entries(cats)) {
+    for (const k of keys || []) {
+      const kk = String(k).toLowerCase();
+      if (n === kk || n.startsWith(kk)) {
+        matched = true;
+        if (kk.length > maxLen) { maxLen = kk.length; hit.clear(); hit.add(cat); }
+        else if (kk.length === maxLen) hit.add(cat);
+      }
+    }
+  }
+  if (matched) return [...hit];
+  const c = classifyModel(name);            // heuristic fallback for anything not in the catalog
+  if (c.nonchat) return [];
+  const out = ["chat"];
+  if (c.vision) out.push("vision"); if (c.reasoning) out.push("smart"); if (c.small) out.push("cheap");
+  return out;
+}
 function renderModelSelect(sel, current) {
   current = current == null ? "" : String(current);
   sel.innerHTML = "";
-  const add = (val, label) => { const o = document.createElement("option"); o.value = val; o.textContent = label != null ? label : val; sel.appendChild(o); };
-  add("", "— none —");
-  const seen = new Set();
-  const all = current && !modelOptions.includes(current) ? [current, ...modelOptions] : modelOptions;
-  for (const m of all) { if (m && !seen.has(m)) { seen.add(m); add(m); } }
-  add(MODEL_CUSTOM, "✎ Custom…");
+  const opt = (parent, val, label) => { const o = document.createElement("option"); o.value = val; o.textContent = label != null ? label : val; parent.appendChild(o); };
+  opt(sel, "", "— none —");
+  const tier = MODEL_TIER[sel.id] || "chat";
+  // candidate list: the current value (even if not returned) + fetched models, deduped
+  const seen = new Set(); const cand = [];
+  const push = (m) => { if (m && !seen.has(m)) { seen.add(m); cand.push(m); } };
+  if (current && !modelOptions.includes(current)) push(current);
+  modelOptions.forEach(push);
+  // drop non-chat models (embeddings/tts/etc.) from every tier — but never drop the current value
+  const usable = cand.filter((m) => m === current || categoriesFor(m).length > 0);
+  const rec = [], other = [];
+  for (const m of usable) (categoriesFor(m).includes(tier) ? rec : other).push(m);
+  if (rec.length && other.length) {                       // split into two labeled groups
+    const g1 = document.createElement("optgroup"); g1.label = `★ ${TIER_LABEL[tier]} — recommended`; rec.forEach((m) => opt(g1, m)); sel.appendChild(g1);
+    const g2 = document.createElement("optgroup"); g2.label = "Other models"; other.forEach((m) => opt(g2, m)); sel.appendChild(g2);
+  } else {
+    usable.forEach((m) => opt(sel, m));                    // nothing to split — flat list
+  }
+  opt(sel, MODEL_CUSTOM, "✎ Custom…");
   sel.value = current;
 }
 // Type a model the endpoint didn't list; inject it and keep it selected.
@@ -1482,6 +1538,8 @@ async function loadConfig() {
   populateProviderSelect(getPath(cfgObj, "llm.provider"));
   populateStructured();
   syncProviderUI();
+  // Load the curated model catalog, then re-render the model dropdowns so the tier groupings apply.
+  loadModelCatalog().then(() => { MODEL_SELECT_IDS.forEach((id) => { const s = $(id); if (s) renderModelSelect(s, s.value === MODEL_CUSTOM ? "" : s.value); }); });
   renderPromptPresets();   // list saved prompt sets
   loadActivePrompts();     // fill the master/system editor from the active (default) set
   renderRawConfig();
