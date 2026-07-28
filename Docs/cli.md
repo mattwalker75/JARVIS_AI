@@ -9,9 +9,9 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | Command | What it does |
 | --- | --- |
 | `-c`, `--check` | Verify Docker is running and the config is valid. |
-| `-b`, `--setup` | Build the app / memory / workbench images and pull the gateway image. First workbench build is large (several minutes). |
+| `-b`, `--setup` | Build the app / memory / workbench images. First workbench build is large (several minutes). |
 | `-u`, `--start` | Start the whole stack; prints the URLs. |
-| `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench/gateway stay up). |
+| `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
 | `-i`, `--status` | Show what's running + app health. |
 | `-x`, `--stop` | Stop the stack (keeps all data). |
 | `-d`, `--delete` | Remove containers, network, and **all data volumes** (semantic memory + `/workspace` + workbench home). Bind mounts survive. |
@@ -82,3 +82,41 @@ volumes (wiped by `--delete`), so back them up if you care about them.
 ./JARVIS.sh --stop --delete
 ./JARVIS.sh --setup --start
 ```
+
+---
+
+## `JARVIS_LOCAL_LLM.sh` — local model runtime
+
+JARVIS core no longer hosts models. `JARVIS.sh` is now model-agnostic: it doesn't
+manage Ollama or export provider keys. If you run a **local** model, this optional
+helper manages the runtime and prints the endpoint URL to paste into **Config →
+Endpoint URL**. **Cloud users don't need it** — point `llm.base_url` straight at the
+provider and skip this entirely.
+
+It applies your local Ollama settings from the `ollama.*` block of `JARVIS_CONFIG.json`
+(context length, keep-alive, parallelism — see [Configuration](configuration.md#ollama-optional)),
+ensures the runtime is up, and prints the URL. The backend is **pluggable**: Ollama
+today, with MLX / vLLM / llama.cpp addable later as new backend blocks.
+
+| Command | What it does |
+| --- | --- |
+| `start [--backend ollama] [--gateway]` | Apply local config, ensure the runtime is up, and print the URL to paste into Config. `--gateway` also brings up the LiteLLM gateway in front of it. |
+| `url [--gateway]` | Just print the endpoint URL (nothing else) — direct to the runtime, or the gateway's URL with `--gateway`. |
+| `status` | Show whether the runtime (`:11434`) and the gateway (`:4000`) are up. |
+| `stop [--gateway]` | Stop the runtime (and the gateway with `--gateway`). |
+
+```bash
+# Running a local model
+./JARVIS_LOCAL_LLM.sh start          # → prints e.g. http://host.docker.internal:11434/v1
+# paste that into Config → Endpoint URL, set your model to the Ollama tag (e.g. qwen3:8b)
+
+# With the LiteLLM gateway (one endpoint, multi-model routing across providers)
+./JARVIS_LOCAL_LLM.sh start --gateway   # → prints http://host.docker.internal:4000/v1
+```
+
+The **`--gateway`** option fronts the runtime with the LiteLLM gateway, which lives in
+its own standalone `litellm/docker-compose.yml` (started by this script, **not** by
+`JARVIS.sh`). It gives you one OpenAI-compatible endpoint with multi-model/provider
+routing (config in `litellm/config.yaml`); provider keys (`llm.anthropic_api_key`,
+`llm.gemini_api_key`, …) are exported into the gateway from `JARVIS_CONFIG.json`. Without
+`--gateway`, JARVIS talks straight to the runtime.

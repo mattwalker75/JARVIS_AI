@@ -74,7 +74,7 @@ turn's actual prompt size against the **context window**:
 
 - resolved automatically (`GET /api/context-window`): a manual `llm.context_window` wins;
   otherwise for local Ollama it uses `ollama.context_length` (the loaded `num_ctx` — the real
-  effective ceiling), and for cloud via the gateway it asks `/model/info`; else a default.
+  effective ceiling), and if the endpoint is a LiteLLM gateway it asks `/model/info`; else a default.
 - set a number in **Config → Context window** to override, or leave blank for auto.
 
 ### Summarize & continue

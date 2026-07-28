@@ -6,10 +6,12 @@ capabilities — persistent semantic **memory**, a **root Linux workbench**, a r
 open **internet** access, a **task scheduler**, and hands-free **voice**. Everything
 runs on your machine and binds to **localhost only**.
 
-The model backend is flexible: a built-in **LiteLLM gateway** fans out to local
-models (via **Ollama**) and/or cloud providers (OpenAI, Anthropic, Gemini), and you
-can mix them per task (e.g. a fast local model for chat, a bigger one for hard
-reasoning, a vision model for screenshots).
+The model backend is flexible: JARVIS is a pure OpenAI-dialect client that talks to
+whatever endpoint you point it at — a **cloud provider** (OpenAI, Anthropic, Gemini, …),
+or a **local runtime** you start with the optional `./JARVIS_LOCAL_LLM.sh` helper (**Ollama**
+today; MLX / vLLM / llama.cpp later). An optional **LiteLLM gateway** can front several
+providers behind one endpoint so you can mix them per task (a fast local model for chat, a
+bigger one for hard reasoning, a vision model for screenshots).
 
 > ⚠️ **Powerful by design.** JARVIS runs arbitrary root commands in its workbench
 > container, drives a browser, and can use your saved accounts. That's intentional.
@@ -18,18 +20,22 @@ reasoning, a vision model for screenshots).
 
 ## The stack
 
-Five containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
+Four containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
 
 | Container | Role | Port |
 | --- | --- | --- |
 | `jarvis-app` | Node.js orchestrator + web UI (chat, tool-calling, voice) | 8110 |
 | `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | 8120 |
-| `jarvis-litellm` | LLM gateway — one endpoint, many providers | 4000 |
 | `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
 | `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
 
+The **LLM is not in the stack** — the app talks OpenAI-dialect to whatever `llm.base_url`
+points at (a cloud provider, or a local runtime you start with `./JARVIS_LOCAL_LLM.sh`,
+reached over `host.docker.internal`). The optional LiteLLM gateway now lives in its own
+`litellm/docker-compose.yml`, started by that helper.
+
 The app drives the workbench through the Docker socket (`docker exec`), reaches
-memory + the gateway over the internal network, and shares two host folders
+memory over the internal network, and shares two host folders
 (`READ_ONLY_FILES/` → you-to-JARVIS, `READ_WRITE_FILES/` ↔ both ways).
 
 ## Quick start
@@ -46,8 +52,10 @@ cp JARVIS_CONFIG_template.json JARVIS_CONFIG.json   # then edit: pick a model + 
 - **Health / self-test:** `curl http://localhost:8110/api/selftest`
 
 Running fully local? Install [Ollama](https://ollama.com) on your host, pull a model
-(`ollama pull qwen3-next:80b`), and JARVIS talks to it through the gateway — no cloud
-key required (except for internet research and package installs).
+(`ollama pull qwen3-next:80b`), then run `./JARVIS_LOCAL_LLM.sh start` and **paste the URL
+it prints into Config → Endpoint URL** — no cloud key required (except for internet
+research and package installs). Add `--gateway` to front it with LiteLLM for multi-model
+routing. See [CLI](Docs/cli.md#jarvis_local_llmsh--local-model-runtime).
 
 ## What it can do
 
@@ -102,7 +110,7 @@ Detailed docs live in **[`Docs/`](Docs/README.md)**:
 
 | Doc | Contents |
 | --- | --- |
-| [Architecture](Docs/architecture.md) | Containers, data flow, the gateway, volumes, security model |
+| [Architecture](Docs/architecture.md) | Containers, data flow, external LLM serving, volumes, security model |
 | [Configuration](Docs/configuration.md) | Full `JARVIS_CONFIG.json` reference |
 | [Tools](Docs/tools.md) | Every tool the LLM can call, by family |
 | [Autopilot & Planner](Docs/autopilot.md) | The task ledger and autonomous objective loops |

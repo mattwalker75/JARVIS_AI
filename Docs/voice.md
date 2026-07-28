@@ -179,7 +179,7 @@ all settable from the UI and persist.
 
 The main latency is the model "thinking" before it speaks. For a more responsive feel,
 point the **chat** tier at a smaller/faster model with the header model switcher (or
-`/model`), e.g. `qwen3:8b` — trivial now that everything routes through the gateway.
+`/model`), e.g. `qwen3:8b` — trivial as long as your endpoint serves the smaller model.
 
 ## Troubleshooting
 

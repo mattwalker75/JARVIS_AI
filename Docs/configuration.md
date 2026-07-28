@@ -21,6 +21,7 @@ apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
 | --- | --- |
 | `assistant_name` | The AI's name — sets its identity (via `{assistant_name}` in the prompt), the UI title, and the voice wake word. |
 | `llm` | Model backend, routing, generation params, and system prompt. |
+| `ollama` | Local-Ollama tuning — read by `JARVIS_LOCAL_LLM.sh`, not by JARVIS core. |
 | `voice` | Speech-to-text / text-to-speech behavior. |
 | `mem0` | Semantic memory service settings. |
 | `workbench` | Workbench container name + embedded desktop URL. |
@@ -34,7 +35,7 @@ apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
 ```jsonc
 "llm": {
   "provider": "ollama",                         // "openai" | "ollama" | "mock" (offline canned replies)
-  "base_url": "http://jarvis-litellm:4000/v1",  // the gateway (default). Or Ollama/OpenAI directly.
+  "base_url": "",                                // OpenAI-dialect endpoint JARVIS talks to. "" = OpenAI.
   "model": "qwen3-next:80b",                     // used in single-model mode
   "model_mode": "multi",                         // "single" | "multi" | omit to auto-detect
   "models": {                                    // used in multi-model mode
@@ -44,8 +45,8 @@ apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
     "smart":  "qwen3-next:80b"                   //   hard reasoning
   },
   "api_key": "sk-...",                            // your model key (also used by Mem0 for embeddings if cloud)
-  "anthropic_api_key": "",                        // optional — only to use Claude via the gateway
-  "gemini_api_key": "",                           // optional — only to use Gemini via the gateway
+  "anthropic_api_key": "",                        // optional — only used by the optional LiteLLM gateway (JARVIS_LOCAL_LLM.sh --gateway)
+  "gemini_api_key": "",                           // optional — only used by the optional LiteLLM gateway (JARVIS_LOCAL_LLM.sh --gateway)
   "temperature": 0.4,
   "max_tokens": 12000,                            // per-turn cap; keep generous for local reasoning models
   "idle_timeout_ms": 120000,                      // watchdog: abort a stream that sends no data for this long
@@ -58,14 +59,26 @@ apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
 }
 ```
 
+### The endpoint (`base_url`)
+JARVIS is a pure OpenAI-dialect client — it POSTs to whatever `base_url` points at and
+does **not** host or manage models. It no longer defaults to an in-stack gateway. Set it to:
+
+- a **cloud provider** — e.g. `https://api.openai.com/v1` (with `api_key`). Empty (`""`)
+  falls back to OpenAI.
+- the URL **`JARVIS_LOCAL_LLM.sh` prints** for a local runtime — Ollama direct (e.g.
+  `http://host.docker.internal:11434/v1`), or its optional LiteLLM gateway
+  (`http://host.docker.internal:4000/v1`) with `--gateway`. See
+  [CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime).
+
 The tool-use, planner, and coding guidance is appended to every prompt automatically, so
 `system_prompt` only needs the behavior/identity. The **active** master + system prompts live
 in editable files under `Prompts/` (see [Prompts & Context](prompts.md)); the `llm.*_prompt`
 values are used only if those files are absent.
 
 ### Model tiers
-Each tier in `models` names a model the gateway knows (a `model_name` from
-`litellm/config.yaml`). The app picks a tier per task:
+Each tier in `models` names a model your endpoint serves — an Ollama tag, a cloud model
+name, or a `model_name` from `litellm/config.yaml` if you front it with the gateway. The
+app picks a tier per task:
 - **chat** — normal conversation (also the header model switcher target),
 - **cheap** — scheduled/background task runs,
 - **vision** — used by the screenshot/image "look" step (must be vision-capable),
@@ -91,7 +104,8 @@ heuristic. Edit `models.json` and refresh to keep it current as providers ship m
 tier. See [Extending → Models & providers](extending.md#models--providers).
 
 ### Mixing local + cloud
-Because `base_url` points at the gateway, you can freely mix providers:
+To fan out one endpoint across several providers, point `base_url` at the LiteLLM gateway
+(`JARVIS_LOCAL_LLM.sh --gateway`) and mix `model_name`s from `litellm/config.yaml`:
 
 ```jsonc
 "models": {
@@ -102,12 +116,30 @@ Because `base_url` points at the gateway, you can freely mix providers:
 }
 ```
 
-### Bypassing the gateway
-Point `base_url` straight at a backend if you don't need multi-provider:
+### Talking straight to one backend
+If you don't need multi-provider routing, skip the gateway and point `base_url` directly
+at the runtime (this is what `JARVIS_LOCAL_LLM.sh start` without `--gateway` prints):
 ```jsonc
 "base_url": "http://host.docker.internal:11434/v1"   // Ollama directly
 "base_url": "https://api.openai.com/v1"              // OpenAI directly
 ```
+
+## `ollama` (optional)
+
+```jsonc
+"ollama": {
+  "manage": true,              // false = leave your Ollama install untouched
+  "context_length": 65536,     // OLLAMA_CONTEXT_LENGTH
+  "keep_alive": "-1",          // OLLAMA_KEEP_ALIVE (-1 = keep model resident)
+  "num_parallel": 1,           // OLLAMA_NUM_PARALLEL
+  "max_loaded_models": 3       // OLLAMA_MAX_LOADED_MODELS
+}
+```
+
+This block is read by **`JARVIS_LOCAL_LLM.sh`** (the local-LLM helper) — **not** by
+JARVIS core or `JARVIS.sh --reload`. On `./JARVIS_LOCAL_LLM.sh start` it applies these as
+`OLLAMA_*` settings and restarts Ollama so they take effect (macOS). Cloud-only setups can
+ignore it. See [CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime).
 
 ## `voice`
 

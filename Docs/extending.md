@@ -98,8 +98,9 @@ model_list:
 ```
 
 Then in `JARVIS_CONFIG.json`: `"models": { "smart": "claude-opus-4-8", ... }`.
-Provider keys are exported from your config on `--start`. Restart the gateway after
-editing (`docker compose restart jarvis-litellm`).
+The gateway is the optional LiteLLM stack started by `./JARVIS_LOCAL_LLM.sh --gateway`
+(it exports provider keys from your config). Restart it after editing
+(`docker compose -f litellm/docker-compose.yml restart`).
 
 Notes:
 - Local chat models use the `ollama_chat/` prefix; local **vision** models also need

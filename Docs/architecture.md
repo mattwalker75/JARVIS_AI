@@ -1,7 +1,9 @@
 # Architecture
 
-JARVIS is a five-container Docker Compose stack (project name `jarvis`), everything
-bound to `127.0.0.1` (localhost only).
+JARVIS is a four-container Docker Compose stack (project name `jarvis`), everything
+bound to `127.0.0.1` (localhost only). The LLM itself is **not** in the stack — the app
+is a pure OpenAI-dialect client and talks to whatever URL is in `llm.base_url` (see
+[LLM serving is external](#llm-serving-is-external)).
 
 ```
                           your browser  ──ws/http──┐
@@ -12,13 +14,14 @@ bound to `127.0.0.1` (localhost only).
 │   • tool-calling loop (app/src/llm.js)                            │
 │   • 48 tools (app/src/tools.js)                                   │
 │   • scheduler, sessions, chatlog                                  │
-└─┬────────────┬──────────────┬──────────────┬────────────┬────────┘
-  │ docker exec │ http          │ http         │ http       │ http
-  ▼            ▼               ▼              ▼            ▼
- jarvis-      jarvis-litellm   jarvis-memory  jarvis-piper Ollama (host)
- workbench    (:4000 gateway)  (:8120 Mem0)   (:5000 TTS)  (:11434)
- (:8111)      OpenAI-dialect   semantic mem   offline      local models
- root Linux   → many providers + Chroma store neural voice
+└─┬────────────┬──────────────┬────────────────┬───────────────────┘
+  │ docker exec │ http          │ http           │ OpenAI-dialect http
+  ▼            ▼               ▼                ▼  (llm.base_url)
+ jarvis-      jarvis-memory   jarvis-piper      LLM endpoint  (EXTERNAL)
+ workbench    (:8120 Mem0)    (:5000 TTS)       • a cloud provider, OR
+ (:8111)      semantic mem    offline           • a local runtime started by
+ root Linux   + Chroma store  neural voice        ./JARVIS_LOCAL_LLM.sh, reached
+                                                  over host.docker.internal
 ```
 
 ## The containers
@@ -34,18 +37,6 @@ The brain. A Node.js/Express server that:
 
 It reaches the workbench through the mounted Docker socket (`docker exec` as root),
 and everything else over the internal Docker network.
-
-### jarvis-litellm (`:4000`) — the LLM gateway
-A [LiteLLM](https://docs.litellm.ai/) proxy that presents **one OpenAI-compatible
-endpoint** and routes each request to the right provider based on the model name.
-Configured in `litellm/config.yaml`. This is what makes model/provider mixing a
-config change instead of code:
-
-- local models via Ollama on your host (`ollama_chat/…`),
-- OpenAI, Anthropic, Gemini (keys exported from config on `--start`).
-
-The app's `llm.base_url` points here by default (`http://jarvis-litellm:4000/v1`).
-You can bypass it and talk straight to Ollama or OpenAI by changing that URL.
 
 ### jarvis-memory (`:8120`) — semantic memory
 A small FastAPI wrapper (`memory/server.py`) around [Mem0](https://github.com/mem0ai/mem0),
@@ -69,11 +60,31 @@ reaches it at `http://jarvis-piper:5000` and proxies the browser through `/api/t
 (`app/src/tts.js`). Only used when the voice engine is set to **Piper** (browser TTS needs
 no container). See [Voice](voice.md#neural-voice-piper).
 
+## LLM serving is external
+
+The model is **not** part of the core stack. `jarvis-app` is a pure OpenAI-dialect
+client — it POSTs to whatever URL is in `llm.base_url` and neither knows nor cares
+where the model runs. That URL is either:
+
+- **a cloud provider** — e.g. `https://api.openai.com/v1` (empty `base_url` falls back
+  to OpenAI). Nothing else to run.
+- **a local runtime on your host** — managed by the optional **`JARVIS_LOCAL_LLM.sh`**
+  helper (Ollama today; MLX / vLLM / llama.cpp are pluggable backends for later). It
+  applies your local model config, ensures the runtime is up, and **prints the endpoint
+  URL to paste into Config → Endpoint URL**. The app reaches host runtimes over
+  `host.docker.internal` (`jarvis-app` sets `extra_hosts: host.docker.internal:host-gateway`).
+
+For multi-model routing across providers behind one endpoint, `JARVIS_LOCAL_LLM.sh
+--gateway` can front the runtime with a **LiteLLM gateway** — now a standalone stack in
+`litellm/docker-compose.yml` (project `jarvis-llm`, port `:4000`), no longer part of the
+core `docker-compose.yml`. See [CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime)
+and [Configuration → `llm`](configuration.md#llm).
+
 ## How a chat message flows
 
 1. The browser sends `{type:"chat", messages}` over the WebSocket (`/ws`).
 2. The app builds the prompt (system prompt + capped history) and calls the model at
-   `llm.base_url` (the gateway) using the tier's model (`chat` by default).
+   `llm.base_url` (the external LLM endpoint) using the tier's model (`chat` by default).
 3. The model streams back. `reasoning_content` deltas feed the **Thinking** panel;
    `content` deltas stream as the answer (and as speech, if voice is on).
 4. If the model emits **tool calls**, the app runs them (in parallel where possible),
