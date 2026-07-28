@@ -221,7 +221,8 @@
               <button id="cfg-list-models" type="button" class="ghost">🔄 List models</button>
               <span class="cfg-hint-inline" id="cfg-models-status"></span>
             </div>
-            <label>Model mode<select id="cfg-model-mode"><option value="single">single</option><option value="multi">multi</option></select></label>
+            <label>Model mode<select id="cfg-model-mode"><option value="single">single — one model (best for cloud)</option><option value="multi">multi — mainly for LOCAL models</option></select></label>
+            <div class="hint">Cloud models (GPT‑4o/4.1, Claude, Gemini) are multimodal and strong across the board — use <b>single</b>, one model handles chat <i>and</i> vision. <b>Multi</b> (chat / cheap / smart / vision) is mainly for <b>local</b> setups that stitch together specialized models (e.g. a text model + a separate vision model). You can still use multi on cloud purely to route tiers by <i>cost</i>.</div>
             <div id="cfg-single-block">
               <label>Model (single mode)<select id="cfg-model" class="cfg-model-pick"></select></label>
             </div>

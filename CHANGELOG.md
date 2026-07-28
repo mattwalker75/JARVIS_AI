@@ -17,6 +17,11 @@ infrastructure, security, documentation, or test-policy changes.
   `EISDIR`. Both let any model self-correct instantly rather than burning retries. (`app/src/tools.js`.)
 
 ### Added
+- 2026-07-28: **Config calls out that multi-model is mainly for local models.** The Model-mode
+  dropdown now labels `single — one model (best for cloud)` / `multi — mainly for LOCAL models`,
+  with a hint: cloud models are multimodal so one model does chat+vision (use single); multi is
+  for local setups that stitch specialized models together (or cloud cost-tiers). (`app/public/index.html`.)
+
 - 2026-07-28: **Model tier pickers group by capability (curated `models.json`).** In multi-model
   mode the chat/cheap/smart/vision dropdowns now put the models that fit each tier in a
   "★ …recommended" group on top, the rest under "Other models", and drop non-chat models
