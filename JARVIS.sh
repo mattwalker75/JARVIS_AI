@@ -2,27 +2,28 @@
 #
 # JARVIS.sh - Single control script for the JARVIS multi-container stack.
 #
-# Wraps docker-compose.yml (jarvis-app + jarvis-memory + jarvis-litellm + jarvis-workbench + jarvis-piper).
+# Wraps docker-compose.yml (jarvis-app + jarvis-memory + jarvis-workbench + jarvis-piper).
 # Expands on the ByOwnerOS RUN_LOCAL_DEV.sh pattern with memory backup/restore.
 #
 #   jarvis-app        Node.js backend + JS frontend (orchestrator)            :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
-#   jarvis-litellm    LiteLLM gateway — one endpoint -> many model providers  :4000
 #   jarvis-workbench  Linux desktop (noVNC) the LLM works in as root          :8111
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only    :5000
+#
+# LLM HOSTING is NOT managed here. JARVIS just talks to whatever URL is in llm.base_url
+# (a cloud provider, or a local runtime). To run models locally, use ./JARVIS_LOCAL_LLM.sh
+# (Ollama + an optional LiteLLM gateway) and paste the URL it prints into the Config tab.
 #
 # Usage:
 #   ./JARVIS.sh <flag> [<flag> ...]
 #
 # Flags:
 #   -c, --check        Verify the local Docker daemon is running.
-#   -b, --setup        Build the app/workbench/memory images and pull the gateway image.
+#   -b, --setup        Build the app/workbench/memory/voice images.
 #   -u, --start        Start the whole stack; print URLs.
-#   -r, --reload       Apply config + restart the app to re-read config files
-#                      (JARVIS_CONFIG.json + JARVIS_SECRETS.json). Also applies the host
-#                      Ollama settings (ollama.* — context_length/keep_alive/…) and
-#                      restarts Ollama, unless ollama.manage=false. Memory + gateway +
-#                      workbench keep running. Run this after saving from the Config tab.
+#   -r, --reload       Restart the app to re-read config files (JARVIS_CONFIG.json +
+#                      JARVIS_SECRETS.json). Memory + workbench keep running. Run this after
+#                      saving from the Config tab. (Local LLM runtimes: see ./JARVIS_LOCAL_LLM.sh.)
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
 #   -p, --prompt <text>  Run one prompt and print the answer; supports piping stdin in.
 #   -e, --eval         Replay data/evals/*.json through the model and report pass/fail.
@@ -89,23 +90,13 @@ PROJECT="jarvis"
 APP_CONTAINER="jarvis-app"
 WB_CONTAINER="jarvis-workbench"
 MEM_CONTAINER="jarvis-memory"
-LITELLM_CONTAINER="jarvis-litellm"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
 WB_VOLUME="${PROJECT}_jarvis_workbench_work"
-APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"; LITELLM_PORT="4000"
+APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"
 
-# Export provider API keys from JARVIS_CONFIG.json so the LiteLLM gateway can reach
-# each provider (llm.api_key -> OpenAI, llm.anthropic_api_key, llm.gemini_api_key).
-export_provider_keys() {
-  local cfg="${SCRIPT_DIR}/JARVIS_CONFIG.json"
-  [[ -f "$cfg" ]] || return 0
-  command -v python3 >/dev/null 2>&1 || return 0
-  local k
-  for pair in "api_key:OPENAI_API_KEY" "anthropic_api_key:ANTHROPIC_API_KEY" "gemini_api_key:GEMINI_API_KEY"; do
-    k=$(python3 -c "import json;print(json.load(open('$cfg')).get('llm',{}).get('${pair%%:*}','') or '')" 2>/dev/null || true)
-    [[ -n "$k" ]] && export "${pair##*:}=$k"
-  done
-}
+# LLM hosting/management lives OUTSIDE this script now — see ./JARVIS_LOCAL_LLM.sh (local runtimes
+# like Ollama + an optional LiteLLM gateway). JARVIS just talks to whatever URL is in
+# JARVIS_CONFIG.json's llm.base_url (a cloud provider, or the URL that helper prints).
 
 if [[ -t 1 ]]; then
   C_RESET='\033[0m'; C_RED='\033[0;31m'; C_GRN='\033[0;32m'; C_YEL='\033[0;33m'; C_BLU='\033[0;34m'; C_BOLD='\033[1m'
@@ -172,17 +163,16 @@ cmd_check() {
 cmd_setup() {
   require_daemon
   clear_autopilot_state
-  info "SETUP: building the app + workbench + memory + voice (piper) images and pulling the gateway image..."
+  info "SETUP: building the app + workbench + memory + voice (piper) images..."
   warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
   dc build jarvis-app jarvis-workbench jarvis-memory jarvis-piper || { err "Image build failed."; return 1; }
-  dc pull jarvis-litellm || true
   ok "SETUP complete. Next:  ./JARVIS.sh --start"
 }
 
 cmd_start() {
   require_daemon
   clear_autopilot_state
-  info "START: bringing up app + memory + gateway + workbench..."
+  info "START: bringing up app + memory + workbench + voice..."
   dc up -d || { err "Failed to start the stack."; return 1; }
   wait_http "$MEM_PORT" "/healthz" "Memory service" || true
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
@@ -190,59 +180,16 @@ cmd_start() {
   ok "JARVIS is up."
   echo -e "${C_BOLD}  Chat UI:${C_RESET}            http://localhost:${APP_PORT}/"
   echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in)"
-  echo -e "${C_BOLD}  Semantic memory:${C_RESET}    http://localhost:${MEM_PORT}/   ·   Model gateway: http://localhost:${LITELLM_PORT}/"
+  echo -e "${C_BOLD}  Semantic memory:${C_RESET}    http://localhost:${MEM_PORT}/"
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
-}
-
-# Apply the host Ollama settings from JARVIS_CONFIG.json (ollama.*) and restart the
-# Ollama app so it picks them up. Ollama runs on the HOST, outside this stack, which is
-# why it's driven here via launchctl env + an app restart rather than from the container.
-apply_ollama_settings() {
-  local manage; manage="$(lc "$(read_cfg ollama.manage true)")"
-  if [[ "$manage" != "true" ]]; then
-    info "Ollama: manage=false in config — leaving Ollama untouched."
-    return 0
-  fi
-  if [[ "$(uname)" != "Darwin" ]]; then
-    warn "Ollama auto-management is implemented for macOS only; set ollama.manage=false to silence this. Skipping."
-    return 0
-  fi
-  command -v ollama >/dev/null 2>&1 || { warn "Ollama CLI not found on PATH; skipping Ollama management."; return 0; }
-
-  local ctx keep par maxl
-  ctx="$(read_cfg ollama.context_length 65536)"
-  keep="$(read_cfg ollama.keep_alive -1)"
-  par="$(read_cfg ollama.num_parallel 1)"
-  maxl="$(read_cfg ollama.max_loaded_models 3)"
-
-  info "Ollama: applying context_length=${ctx}, keep_alive=${keep}, num_parallel=${par}, max_loaded_models=${maxl}"
-  # launchctl setenv makes these visible to the GUI Ollama.app when it next launches.
-  launchctl setenv OLLAMA_CONTEXT_LENGTH   "$ctx"  2>/dev/null || true
-  launchctl setenv OLLAMA_KEEP_ALIVE       "$keep" 2>/dev/null || true
-  launchctl setenv OLLAMA_NUM_PARALLEL     "$par"  2>/dev/null || true
-  launchctl setenv OLLAMA_MAX_LOADED_MODELS "$maxl" 2>/dev/null || true
-
-  info "Ollama: restarting so the new settings take effect..."
-  osascript -e 'quit app "Ollama"' 2>/dev/null || killall Ollama 2>/dev/null || true
-  sleep 2
-  open -a Ollama 2>/dev/null || { warn "Could not launch Ollama.app; start Ollama manually."; return 0; }
-  # Wait for the Ollama API to come back up.
-  local up=""
-  for _ in $(seq 1 30); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:11434/api/tags 2>/dev/null)" == "200" ]] \
-      && { up=1; break; }
-    sleep 2
-  done
-  [[ -n "$up" ]] && ok "Ollama restarted with the new settings." \
-    || warn "Ollama did not answer on :11434 yet (it may still be starting)."
+  echo -e "  ${C_BOLD}Model:${C_RESET} set an endpoint in the Config tab. Cloud → paste the provider URL; local → run  ${C_BOLD}./JARVIS_LOCAL_LLM.sh start${C_RESET}  and paste the URL it prints."
 }
 
 cmd_reload() {
   require_daemon
-  info "RELOAD: applying config and restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
-  apply_ollama_settings
-  export_provider_keys
+  info "RELOAD: restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
   info "(The database, memory service, and workbench keep running; the LLM's memory and any browser session are preserved.)"
+  info "(Local LLM runtimes are managed separately — see ./JARVIS_LOCAL_LLM.sh.)"
   dc restart jarvis-app || { err "Reload failed."; return 1; }
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Configuration reloaded."
@@ -286,7 +233,7 @@ cmd_prompt() {
 cmd_status() {
   require_daemon
   info "Container status:"; dc ps; echo
-  for pair in "$MEM_CONTAINER memory" "$LITELLM_CONTAINER gateway" "$WB_CONTAINER workbench" "$APP_CONTAINER app"; do
+  for pair in "$MEM_CONTAINER memory" "$WB_CONTAINER workbench" "$APP_CONTAINER app"; do
     set -- $pair
     if container_running "$1"; then echo -e "  $2  ($1): ${C_GRN}running${C_RESET}"; else echo -e "  $2  ($1): ${C_RED}stopped${C_RESET}"; fi
   done
@@ -387,7 +334,6 @@ usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${
 
 main() {
   require_compose_file
-  export_provider_keys
   [[ $# -eq 0 ]] && { usage; exit 1; }
   local rc=0
   while [[ $# -gt 0 ]]; do

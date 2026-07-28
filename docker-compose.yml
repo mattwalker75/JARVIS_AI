@@ -4,13 +4,16 @@ name: jarvis
 #
 #   jarvis-app        Node.js backend + JS frontend (the orchestrator)        :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
-#   jarvis-litellm    LiteLLM gateway — one endpoint -> many model providers  :4000
 #   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only     :5000
 #
 # The app reaches the workbench via the Docker socket (docker exec), the memory
-# service + gateway over the internal network, and mounts the shared folders into
-# both the app and the workbench so files can be exchanged between you and the LLM.
+# service over the internal network, and mounts the shared folders into both the app
+# and the workbench so files can be exchanged between you and the LLM.
+#
+# LLM hosting is NOT in this stack. The app talks to whatever URL is in llm.base_url —
+# a cloud provider, or a local runtime managed by ./JARVIS_LOCAL_LLM.sh (reached over
+# host.docker.internal). See that script for local models + the optional LiteLLM gateway.
 
 services:
   jarvis-workbench:
@@ -54,20 +57,6 @@ services:
       - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
       - jarvis_memory_data:/data
 
-  jarvis-litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: jarvis-litellm
-    restart: unless-stopped
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-    ports:
-      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
-    volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-
   jarvis-piper:
     build:
       context: ./piper
@@ -89,10 +78,13 @@ services:
     container_name: jarvis-app
     restart: unless-stopped
     depends_on:
-      jarvis-litellm:
-        condition: service_started
       jarvis-piper:
         condition: service_started
+    # Reach a local LLM runtime / gateway running on the HOST (via ./JARVIS_LOCAL_LLM.sh).
+    # Automatic on Docker Desktop (macOS/Windows); this maps it on Linux too. Cloud endpoints
+    # don't need it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
       JARVIS_TASKS_FILE: /data/tasks.json

@@ -1,0 +1,28 @@
+name: jarvis-llm
+
+# Standalone LiteLLM gateway for LOCAL models — brought up by ./JARVIS_LOCAL_LLM.sh --gateway,
+# NOT by JARVIS.sh. It gives your local runtime (Ollama, etc.) one OpenAI-compatible endpoint
+# with multi-model routing. JARVIS reaches it from its own container via host.docker.internal:4000
+# — paste http://host.docker.internal:4000/v1 into JARVIS → Config → Endpoint URL.
+#
+# Routing lives in ./config.yaml (mounted below). Provider keys are exported into the environment
+# by JARVIS_LOCAL_LLM.sh (from JARVIS_CONFIG.json) before this comes up.
+
+services:
+  jarvis-litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: jarvis-litellm
+    restart: unless-stopped
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    # Reach the local runtime (Ollama) running on the HOST. Automatic on Docker Desktop
+    # (macOS/Windows); this maps it on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["--config", "/app/config.yaml", "--port", "4000"]

@@ -8,6 +8,26 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-28: **LLM hosting extracted out of JARVIS core.** JARVIS is now a pure OpenAI-dialect
+  *client* — it talks to whatever URL is in `llm.base_url` and no longer knows or cares where the
+  model lives. Local model management moved to a new, optional **`JARVIS_LOCAL_LLM.sh`** (pluggable
+  backend — Ollama today, MLX/vLLM/llama.cpp later; each implements `apply_config`/`ensure_running`/
+  `url`/`stop`). It applies the local configs, ensures the runtime is up, and **prints the endpoint
+  URL to paste into Config → Endpoint URL** — Ollama direct, or an optional LiteLLM gateway it can
+  front (`--gateway`).
+  - `JARVIS.sh` no longer manages Ollama or exports provider keys (`apply_ollama_settings` +
+    `export_provider_keys` removed); `--setup/--start/--reload` are model-agnostic.
+  - The **LiteLLM gateway left the core stack** — removed from `docker-compose.yml` and moved to a
+    standalone `litellm/docker-compose.yml` that `JARVIS_LOCAL_LLM.sh --gateway` runs. `jarvis-app`
+    gains `extra_hosts: host.docker.internal:host-gateway` so it can reach host runtimes.
+  - Config template: `llm.base_url` now defaults empty (code falls back to OpenAI); `ollama.*` is
+    re-documented as read by `JARVIS_LOCAL_LLM.sh`, not JARVIS core.
+  - **Migration (existing local users):** run `./JARVIS_LOCAL_LLM.sh start --gateway`, copy the
+    printed URL, paste into Config → Endpoint URL. Cloud users are unaffected — `base_url` is already
+    a cloud URL. (`JARVIS_LOCAL_LLM.sh`, `JARVIS.sh`, `docker-compose.yml`, `litellm/`,
+    `JARVIS_CONFIG_template.json`.)
+
 ### Fixed
 - 2026-07-28: **Forgiving file-write tools (from the GPT-4.1 build review).** Two friction points a
   real Autopilot build kept hitting: (1) `write_workbench_file` / `edit_workbench_file` now accept a

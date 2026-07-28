@@ -3,10 +3,10 @@
   "_assistant_name_comment": "The AI's name. Sets its identity in the system prompt (via the {assistant_name} placeholder), the displayed title, and the voice WAKE WORD + stop phrase (say this name to start talking; derived from it unless you set voice.wake_word).",
   "assistant_name": "JARVIS",
   "llm": {
-    "_providers": "JARVIS talks the OpenAI dialect. By default base_url points at the bundled LiteLLM gateway (jarvis-litellm), which routes to MANY providers — pick one by setting llm.model to a model_name from litellm/config.yaml (e.g. gpt-4o, claude-sonnet-4-6, gemini-2.5-flash, ollama-llama3). To bypass the gateway, set base_url to https://api.openai.com/v1 (OpenAI) or http://host.docker.internal:11434/v1 (Ollama). 'mock' returns canned replies for offline testing.",
-    "_provider_keys": "llm.api_key is your model key (also used by the Mem0 memory service for embeddings). The anthropic_api_key / gemini_api_key below are OPTIONAL — only needed to use those providers through the gateway (JARVIS.sh exports them on start). For a single-model setup, set just llm.api_key and leave the others empty or omit them.",
+    "_providers": "JARVIS talks the OpenAI dialect to whatever base_url points at — it does NOT host or manage models itself. CLOUD: set base_url to the provider's endpoint (e.g. https://api.openai.com/v1) + llm.api_key, and llm.model to a model name (gpt-4o, claude-sonnet-4, etc.). LOCAL: run ./JARVIS_LOCAL_LLM.sh start and paste the URL it prints into base_url (Ollama direct, or the optional LiteLLM gateway it can front). Empty base_url falls back to OpenAI. 'mock' provider returns canned replies for offline testing.",
+    "_provider_keys": "llm.api_key is your model key (also used by the Mem0 memory service for embeddings). anthropic_api_key / gemini_api_key are OPTIONAL — only needed to reach those providers through the local LiteLLM gateway (./JARVIS_LOCAL_LLM.sh --gateway exports them). For a single-provider setup, set just llm.api_key.",
     "provider": "openai",
-    "base_url": "http://jarvis-litellm:4000/v1",
+    "base_url": "",
     "model": "gpt-4o-mini",
     "_model_mode_comment": "ARCHITECTURE SWITCH between single- and multi-model. 'single' = every task uses 'model' above; the 'models' tiers are ignored (leave them or delete them). 'multi' = use the per-task 'models' tiers below. Omit this key to auto-detect (multi if a 'models' block is present, else single).",
     "model_mode": "multi",
@@ -43,7 +43,7 @@
       ".safetensors"
     ]
   },
-  "_ollama_note": "Ollama runs on the HOST (not in this stack). ./JARVIS.sh --reload applies these settings via launchctl and restarts Ollama. context_length is PRE-ALLOCATED per model at load (bigger = more RAM + slower first load, but a fixed ceiling — it does NOT grow on demand); keep_alive '-1' keeps models resident so there are no ~minute cold reloads (or use a duration like '30m'). Set manage=false to leave Ollama alone.",
+  "_ollama_note": "Read by ./JARVIS_LOCAL_LLM.sh (the local-LLM helper), NOT by JARVIS core. `./JARVIS_LOCAL_LLM.sh start` applies these to host Ollama via launchctl and restarts it. context_length is PRE-ALLOCATED per model at load (bigger = more RAM + slower first load, but a fixed ceiling — it does NOT grow on demand); keep_alive '-1' keeps models resident so there are no ~minute cold reloads (or use a duration like '30m'). Set manage=false to leave Ollama alone.",
   "ollama": {
     "manage": true,
     "context_length": 65536,
