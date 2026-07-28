@@ -113,13 +113,16 @@ function refreshContextMeter() { updateContextMeter(estimateContextTokens()); }
 let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
 let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
 let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
-// Update the always-visible header pill. state: "idle" | "working" | "stalled".
+// Update the always-visible header pill. state: "idle" | "working" | "stalled" | "autopilot".
 function setStatus(state, text) {
   if (!statusEl) return;
   statusEl.className = "jstatus " + state;
   const t = statusEl.querySelector(".jstext");
-  if (t) t.textContent = text || (state === "idle" ? "Idle" : state === "stalled" ? "Stalled?" : "Working");
+  if (t) t.textContent = text || (state === "idle" ? "Idle" : state === "stalled" ? "Stalled?" : state === "autopilot" ? "Autopilot" : "Working");
 }
+let apRunning = false;   // an Autopilot run is actively working server-side (separate from a chat request)
+// Return the header pill to its RESTING state: "Autopilot" if a run is churning, else "Idle".
+function restStatus() { setStatus(apRunning ? "autopilot" : "idle"); }
 // Any streamed progress event resets the stall clock and confirms JARVIS is alive.
 function markActivity() {
   lastActivityAt = Date.now();
@@ -313,7 +316,7 @@ function hideWorking() {
   if (workingEl) { workingEl.remove(); workingEl = null; }
   if (stopBtn) stopBtn.hidden = true;
   stalled = false;
-  setStatus("idle", "Idle");
+  restStatus();   // "Autopilot" if a run is active, else "Idle"
   if (!ambSpeaking) amb(ambIdle());   // done thinking; orb rests (or listens)
 }
 // Ask the server to abort the in-flight request (Stop button or Escape key).
@@ -674,6 +677,9 @@ function fmtLeft(s) { s = Math.max(0, s | 0); const m = Math.floor(s / 60), ss =
 const AP_ENDED_LABEL = { done: "✅ done", budget: "⏱ time budget reached", stopped: "⏹ stopped", stuck: "⚠️ stuck", error: "⚠️ errored" };
 function renderAutopilot(st) {
   const bar = $("autopilot-bar"); if (!bar) return;
+  // Header pill reflects a live run too — "Autopilot" while it's actively working (not paused/ended).
+  apRunning = !!(st && !st.ended && (st.status === "running" || st.status === "stopping" || st.status === "pausing"));
+  if (!workingEl) restStatus();   // update the pill now, unless a chat request is in flight (that shows "Working")
   if (!st || (!st.active && !st.ended)) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
   bar.hidden = false;
   apLastStatus = st.status || null;

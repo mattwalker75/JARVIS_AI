@@ -43,6 +43,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .jstatus.idle { color: #3ad07a; border-color: rgba(58,208,122,.4); }
 .jstatus.working { color: #ffb03a; border-color: rgba(255,176,58,.45); }
 .jstatus.working .jdot { background: #ffb03a; box-shadow: 0 0 6px #ffb03a; animation: jstatpulse 1s infinite; }
+.jstatus.autopilot { color: #36d3ff; border-color: rgba(54,211,255,.45); }
+.jstatus.autopilot .jdot { background: #36d3ff; box-shadow: 0 0 6px #36d3ff; animation: jstatpulse 1.4s infinite; }
 .jstatus.stalled { color: var(--danger); border-color: rgba(255,90,90,.5); }
 .jstatus.stalled .jdot { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: jstatpulse .6s infinite; }
 @keyframes jstatpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }

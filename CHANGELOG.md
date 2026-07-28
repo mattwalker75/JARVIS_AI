@@ -9,6 +9,12 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-28: **Header pill shows "Autopilot".** The always-visible status pill used to only read
+  Idle/Working — and since Autopilot runs on a separate server-side loop, it read "Idle" even while
+  a run was actively building. It now shows a distinct cyan **Autopilot** state whenever a run is
+  actively working (running/stopping/pausing), falling back to Idle when it ends or pauses. A live
+  chat request still shows "Working" and takes visual priority. (`app/public/{app.js,style.css}`.)
+
 - 2026-07-28: **The model can offer to run a job on Autopilot.** New `open_autopilot` tool: for a
   large multi-step task the user could walk away from (including follow-up improvements after
   finishing something), JARVIS now offers "want me to run this on Autopilot so you can step away?"
