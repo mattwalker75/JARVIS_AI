@@ -304,7 +304,7 @@ async function assertPublicUrl(url) {
 async function fetchUrl(url, opts = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
   url = routePreviewUrl(url); // localhost:<preview-port> -> the workbench where it's served
-  const timeoutMs = Math.min(120, Math.max(2, Number(opts.timeout_s) || 30)) * 1000;
+  const timeoutMs = Math.min(120, Math.max(2, Number(opts.timeout_s) || 45)) * 1000;
   const reqHeaders = { "User-Agent": "JARVIS/1.0", ...(opts.headers || {}) };
   let body = opts.body;
   if (opts.json !== undefined && body === undefined) { body = JSON.stringify(opts.json); if (!reqHeaders["Content-Type"]) reqHeaders["Content-Type"] = "application/json"; }
@@ -313,10 +313,21 @@ async function fetchUrl(url, opts = {}) {
   let current = url, resp;
   for (let hop = 0; hop <= 5; hop++) {
     await assertPublicUrl(current);
-    resp = await fetch(current, {
-      method: opts.method || "GET", headers: reqHeaders, body,
-      redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
-    });
+    // Retry ONCE on a timeout — research sites are often slow, and a lone timeout was the
+    // single most common fetch failure. Non-timeout errors propagate immediately.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        resp = await fetch(current, {
+          method: opts.method || "GET", headers: reqHeaders, body,
+          redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
+        });
+        break;
+      } catch (e) {
+        const isTimeout = e && (e.name === "TimeoutError" || /aborted due to timeout|timed out/i.test(e.message || ""));
+        if (isTimeout && attempt < 1) continue;
+        throw e;
+      }
+    }
     if (resp.status >= 300 && resp.status < 400 && resp.headers.get("location")) {
       current = routePreviewUrl(new URL(resp.headers.get("location"), current).href);
       if (hop === 5) throw new Error("too many redirects");

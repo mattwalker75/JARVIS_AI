@@ -32,6 +32,7 @@ const TRIGGERS = {
   "web-preview": /\b(build (me )?(a |an )?(app|web ?app|web ?site|page|demo|tool|dashboard)|prototype|serve (it|the app)|preview)\b/i,
   "internet": /\b(search (the web|online|for)|look up|google (it|the)|find (info|information|out) (on|about)|latest news|current price|what'?s the latest)\b/i,
   "desktop-control": /\b(desktop app|gui app|non-?browser app|application window|xfce)\b/i,
+  "app-integration": /\b(add (a )?(note|record|entry|content|data) (to|in)|update (the )?(note|content|record)|my_business_manager|the (app|application|program) I (uploaded|installed|created)|inside (the|your) app|backed by (real )?files|the app'?s (data|notes|database))\b/i,
 };
 
 // Return a one-line hint pointing at up to 2 relevant skills, or null. Called once per

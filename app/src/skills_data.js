@@ -110,6 +110,19 @@ module.exports = [
     ].join("\n"),
   },
   {
+    name: "app-integration",
+    category: "files",
+    summary: "Work WITH an installed app that has its OWN data directory (don't assume /workspace).",
+    details: [
+      "When the user asks you to operate ON an app that is already installed/running (add notes, records, content, config), the app reads/writes ITS OWN data location — NOT your /workspace scratch dir. Writing into /workspace means the app can't see it, and reading from /workspace gives you a stale copy. This is a common, wasteful mistake — avoid it.",
+      "STEP 1 — find where the app actually stores data BEFORE touching anything: read the app's config/env/source. Look for a data dir / DB path / uploads/notes folder in its config.json, .env, docker-compose, or code (grep for paths like 'data', 'uploads', 'notes', 'DB_PATH', 'STORAGE', 'ROOT_DIR'). If it's a DB-backed app, find the DB file/connection and write through the app's API or directly into the DB — not into loose files.",
+      "STEP 2 — confirm the real path: `ls` it and read an EXISTING record to learn the exact format/schema the app expects (e.g. a note may need real Markdown body content, front-matter, or a DB row — not a placeholder like the literal word 'Markdown').",
+      "STEP 3 — write in that location/format, then VERIFY THROUGH THE APP: reload the app's page (browser_goto) or hit its API and confirm your change actually shows up. Do not report success from a file write alone.",
+      "If the app's data lives in a shared location so BOTH of you can reach it (often under /READ_WRITE_FILES/<app>/...), use that path directly. If it lives only inside the app's own container/dir, go through the app's API/CLI.",
+      "Three distinct locations — keep them straight: /workspace = YOUR scratch/build area; /READ_WRITE_FILES = the shared drop for files you hand the user; the installed APP's data dir = wherever that app is configured to read/write. Match the task to the right one.",
+    ].join("\n"),
+  },
+  {
     name: "create-documents",
     category: "files",
     summary: "Create documents and images in any popular format in the workbench.",

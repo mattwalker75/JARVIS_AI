@@ -9,6 +9,16 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-28: **Tuning from the two-day log review.** Interactive turns were hitting the tool-step
+  ceiling 41× (terminal "Stopped after the maximum number of tool steps"), and `completion_checks=2`
+  was driving repetitive "verify everything" recitations + a repetition loop. Fixes:
+  `llm.max_tool_iterations` 15 → **22** (fewer mid-task truncations), `llm.completion_checks` 2 → **1**
+  (less over-verification), and `fetch_url` default timeout 30 → **45 s with one automatic retry on
+  timeout** (timeouts were ~1/3 of fetches). New **`app-integration` skill** (+auto-hint) for working
+  with an installed app's own data directory instead of writing into `/workspace` where the app
+  can't see it — the notes-only-say-"Markdown" / wrong-location class of bug.
+  (`JARVIS_CONFIG*.json`, `app/src/{tools.js,skills.js,skills_data.js}`.)
+
 - 2026-07-27: **Less robotic replies on simple turns.** The active system prompt
   (`Prompts/default_system.prompt`) now scopes the "restate the goal / verify completion"
   ritual to substantial (multi-step, tool-using, or hard-to-reverse) work. Simple or
