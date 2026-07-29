@@ -385,6 +385,19 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .cfg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
 .cfg-ref { margin-top: 6px; padding: 7px 9px; border: 1px solid rgba(54,211,255,.3); border-radius: 8px; background: rgba(54,211,255,.06); color: var(--text); }
 .cfg-ref code { color: var(--accent); }
+/* MLX models editor: rows of name / model / port + remove */
+.cfg-mlx-labels { display: flex; gap: 6px; font-size: .66rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .03em; }
+.cfg-mlx-labels span:nth-child(1) { flex: 0 0 88px; }
+.cfg-mlx-labels span:nth-child(2) { flex: 1 1 auto; }
+.cfg-mlx-labels span:nth-child(3) { flex: 0 0 64px; }
+.cfg-mlx-labels span:nth-child(4) { flex: 0 0 26px; }
+.cfg-mlx-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.cfg-mlx-row .mlx-name { flex: 0 0 88px; }
+.cfg-mlx-row .mlx-model { flex: 1 1 auto; }
+.cfg-mlx-row .mlx-port { flex: 0 0 64px; }
+.cfg-mlx-row .mlx-del { flex: 0 0 26px; padding: 5px 4px; border: 1px solid var(--edge); background: transparent; color: var(--muted); border-radius: 7px; cursor: pointer; }
+.cfg-mlx-row .mlx-del:hover { border-color: var(--danger); color: var(--danger); }
+#cfg-mlx-add { margin-top: 2px; }
 /* API key: input + show/hide toggle on one row */
 .cfg-key-wrap { display: flex; gap: 8px; align-items: stretch; }
 .cfg-key-wrap input { flex: 1 1 auto; }

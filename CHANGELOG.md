@@ -9,6 +9,12 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-28: **Config tab: friendly MLX models editor.** A new "MLX models" section with add/remove
+  rows (name / model / port) instead of hand-editing the `mlx.models` JSON — links to the
+  `mlx-community` HF org, notes the `mlx/models/` cache, and reminds you to run
+  `./JARVIS_LOCAL_LLM.sh start --backend mlx` to apply (the UI can't launch host processes). Edits
+  sync live with the raw-JSON editor. (`app/public/{index.html,app.js,style.css}`.)
+
 - 2026-07-28: **MLX backend — local models on Apple Silicon.** `JARVIS_LOCAL_LLM.sh` gained a
   `--backend mlx` implementation alongside Ollama (dispatch is now backend-generic:
   `<backend>_apply_config/_ensure_running/_url/_status/_stop/_hint/_config_help`). MLX runs on the
