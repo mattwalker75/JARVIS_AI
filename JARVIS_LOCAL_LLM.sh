@@ -4,11 +4,11 @@
 # it just talks OpenAI-dialect to whatever URL you give it (a cloud provider, or the URL below).
 #
 # Usage:
-#   ./JARVIS_LOCAL_LLM.sh start  [--backend ollama|mlx] [--gateway]   # apply config, ensure it's up, print the URL
+#   ./JARVIS_LOCAL_LLM.sh start  [--backend ollama | mlx] [--gateway]   # apply config, ensure it's up, print the URL
 #   ./JARVIS_LOCAL_LLM.sh url    [--gateway]                       # just print the URL (nothing else)
 #   ./JARVIS_LOCAL_LLM.sh stop   [--gateway]
 #   ./JARVIS_LOCAL_LLM.sh status
-#   ./JARVIS_LOCAL_LLM.sh config [--backend ollama|mlx]           # print setup steps (install / pull / configure)
+#   ./JARVIS_LOCAL_LLM.sh config [--backend ollama | mlx]           # print setup steps (install / pull / configure)
 #
 # Backends: ollama (default) and mlx (Apple Silicon). vLLM / llama.cpp can be added as new backend
 # blocks — each implements: <backend>_apply_config/_ensure_running/_url/_status/_stop/_hint/_config_help.
