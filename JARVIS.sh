@@ -123,7 +123,7 @@ require_daemon() {
 container_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" == "true" ]]; }
 
 read_cfg() { # $1 dotted.key  $2 default
-  local cfg="${SCRIPT_DIR}/JARVIS_CONFIG.json"
+  local cfg="${SCRIPT_DIR}/config/JARVIS_CONFIG.json"
   [[ -f "$cfg" ]] || { echo "$2"; return; }
   python3 - "$cfg" "$1" "$2" <<'PY' 2>/dev/null || echo "$2"
 import json, sys

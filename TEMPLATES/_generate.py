@@ -11,7 +11,7 @@ import json, copy, os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "TEMPLATES")
-BASE = json.load(open(os.path.join(ROOT, "JARVIS_CONFIG_template.json")))
+BASE = json.load(open(os.path.join(ROOT, "config", "JARVIS_CONFIG_template.json")))
 
 # Doc keys (start with _) the app ignores; we drop the base llm doc-comments and add
 # scenario-specific notes so each example reads cleanly.
@@ -56,11 +56,11 @@ SCENARIOS = {
     llm_del=["models", "anthropic_api_key", "gemini_api_key"],
     llm_notes="Everything uses 'model'. base_url points straight at OpenAI, so the "
               "jarvis-litellm gateway is not needed (it can stay stopped).",
-    top_notes="Copy to ../JARVIS_CONFIG.json, set api_key, then ./JARVIS.sh --start."),
+    top_notes="Copy to ../config/JARVIS_CONFIG.json, set api_key, then ./JARVIS.sh --start."),
 
   "openai-tiers": cfg(
     "OpenAI only, multi-tier (cheap/standard/vision/reasoning) via the gateway.",
-    {"provider": "openai", "base_url": "http://jarvis-litellm:4000/v1",
+    {"provider": "openai", "base_url": "http://host.docker.internal:4000/v1",
      "model": "gpt-4o-mini", "model_mode": "multi", "api_key": "sk-REPLACE_ME",
      "models": {"chat": "gpt-4o-mini", "cheap": "gpt-4o-mini", "vision": "gpt-4o", "smart": "o4-mini"}},
     llm_del=["anthropic_api_key", "gemini_api_key"],
@@ -71,16 +71,16 @@ SCENARIOS = {
   # --- Multi-provider ---
   "multi-model": cfg(
     "Multi-model across providers (OpenAI + Anthropic + Google) via the gateway.",
-    {"provider": "openai", "base_url": "http://jarvis-litellm:4000/v1",
+    {"provider": "openai", "base_url": "http://host.docker.internal:4000/v1",
      "model": "gpt-4o-mini", "model_mode": "multi", "api_key": "sk-REPLACE_ME",
      "anthropic_api_key": "sk-ant-REPLACE_ME", "gemini_api_key": "REPLACE_ME_optional",
      "models": {"chat": "gpt-4o-mini", "cheap": "gpt-4o-mini", "vision": "gpt-4o", "smart": "claude-sonnet-4-6"}},
-    llm_notes="Each tier can be any model_name from litellm/config.yaml. JARVIS.sh "
-              "exports these keys to the gateway. Leave a provider's key empty if unused."),
+    llm_notes="Each tier can be any model_name from litellm/config.yaml. Start the gateway with "
+              "./JARVIS_LOCAL_LLM.sh --gateway (it exports these keys). Leave a provider's key empty if unused."),
 
   "anthropic-claude": cfg(
     "Anthropic Claude as the primary model (single), via the gateway.",
-    {"provider": "openai", "base_url": "http://jarvis-litellm:4000/v1",
+    {"provider": "openai", "base_url": "http://host.docker.internal:4000/v1",
      "model": "claude-sonnet-4-6", "model_mode": "single",
      "api_key": "sk-REPLACE_ME", "anthropic_api_key": "sk-ant-REPLACE_ME"},
     llm_del=["models", "gemini_api_key"],
@@ -122,7 +122,7 @@ for name, data in SCENARIOS.items():
 
 # --- Secrets examples (independent of the model config) ---
 secrets_example = {
-  "_comment": "Credential vault example. Copy to ../JARVIS_SECRETS.json. PLAINTEXT by "
+  "_comment": "Credential vault example. Copy to ../config/JARVIS_SECRETS.json. PLAINTEXT by "
               "design. JARVIS reads these via get_secret to operate accounts YOU own; it "
               "can also add/update them itself via set_secret. Never commit real secrets.",
   "secrets": {
@@ -135,7 +135,7 @@ secrets_example = {
   }
 }
 secrets_empty = {
-  "_comment": "Empty vault. Copy to ../JARVIS_SECRETS.json. Add accounts under 'secrets', "
+  "_comment": "Empty vault. Copy to ../config/JARVIS_SECRETS.json. Add accounts under 'secrets', "
               "or just let JARVIS save them for you via set_secret.",
   "secrets": {}
 }

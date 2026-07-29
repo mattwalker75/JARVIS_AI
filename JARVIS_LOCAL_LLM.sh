@@ -17,7 +17,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CFG="${SCRIPT_DIR}/JARVIS_CONFIG.json"
+CFG="${SCRIPT_DIR}/config/JARVIS_CONFIG.json"
 LITELLM_COMPOSE="${SCRIPT_DIR}/litellm/docker-compose.yml"
 OLLAMA_PORT=11434
 GATEWAY_PORT="${LITELLM_PORT:-4000}"

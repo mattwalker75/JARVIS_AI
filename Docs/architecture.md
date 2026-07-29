@@ -99,8 +99,8 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 | Host path | Container | Purpose |
 | --- | --- | --- |
 | `./app` | `/usr/src/app` | App source (bind mount — edits apply on app restart) |
-| `./JARVIS_CONFIG.json` | `/cfg/JARVIS_CONFIG.json` | Config (read-write so the UI can persist settings) |
-| `./JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
+| `./config/JARVIS_CONFIG.json` | `/cfg/JARVIS_CONFIG.json` | Config (read-write so the UI can persist settings) |
+| `./config/JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
 | `./READ_ONLY_FILES` | `/READ_ONLY_FILES` (ro) | Files you share to JARVIS |
 | `./READ_WRITE_FILES` | `/READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
 | `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state) |

@@ -1,6 +1,6 @@
 # Secrets / local config
-JARVIS_CONFIG.json
-JARVIS_SECRETS.json
+config/JARVIS_CONFIG.json
+config/JARVIS_SECRETS.json
 .env
 
 # Node
@@ -31,7 +31,7 @@ READ_ONLY_FILES/*
 !READ_ONLY_FILES/README.txt
 
 # local config backup (contains a real key)
-JARVIS_CONFIG.*backup*.json
+config/JARVIS_CONFIG.*backup*.json
 
 # Debug logs (JARVIS_AI/Logs/), keep the dir
 Logs/*

@@ -54,7 +54,7 @@ services:
       - "127.0.0.1:${MEMORY_PORT:-8120}:8000"
     volumes:
       - ./memory/server.py:/app/server.py:ro
-      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
+      - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
       - jarvis_memory_data:/data
 
   jarvis-piper:
@@ -94,8 +94,8 @@ services:
     volumes:
       - ./app:/usr/src/app
       - /usr/src/app/node_modules
-      - ./JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json   # read-write: the UI persists settings here
-      - ./JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
+      - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json   # read-write: the UI persists settings here
+      - ./config/JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
       - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
       - ./READ_WRITE_FILES:/READ_WRITE_FILES
       - ./data:/data

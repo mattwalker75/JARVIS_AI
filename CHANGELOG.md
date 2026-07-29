@@ -8,6 +8,16 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-28: **Config files moved to `config/`.** `JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`, and
+  their `*_template.json` now live in `config/` instead of the repo root — so the `JARVIS_*.sh`
+  scripts aren't buried among JSON in an `ls`. Updated the compose host mounts, both scripts'
+  paths, `.gitignore`, the `cp` quick-start in README/`configuration.md`, the architecture volume
+  table, and the `TEMPLATES/_generate.py` generator (which also had its now-stale in-stack gateway
+  host `jarvis-litellm:4000` → `host.docker.internal:4000` in the example configs fixed). Container
+  paths (`/cfg/…`) are unchanged, so app code needed no edits. **Existing installs:** move your
+  `JARVIS_CONFIG.json` + `JARVIS_SECRETS.json` into `config/` before the next `--start`.
+
 ### Added
 - 2026-07-28: **`./JARVIS.sh --reset-workbench` — reset the dev OS.** An escape hatch for when the
   LLM installs a pile of packages or messes up the workbench: it recreates ONLY the workbench

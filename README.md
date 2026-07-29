@@ -41,7 +41,7 @@ memory over the internal network, and shares two host folders
 ## Quick start
 
 ```bash
-cp JARVIS_CONFIG_template.json JARVIS_CONFIG.json   # then edit: pick a model + add a key
+cp config/JARVIS_CONFIG_template.json config/JARVIS_CONFIG.json   # then edit: pick a model + add a key
 ./JARVIS.sh --check      # verify Docker is running
 ./JARVIS.sh --setup      # build images (the workbench is large — first build takes a while)
 ./JARVIS.sh --start      # start everything; prints the URLs

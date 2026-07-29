@@ -1,11 +1,14 @@
 # Configuration
 
-All configuration lives in **`JARVIS_CONFIG.json`** (gitignored). Copy the template
+All configuration lives in **`config/JARVIS_CONFIG.json`** (gitignored). Copy the template
 and edit:
 
 ```bash
-cp JARVIS_CONFIG_template.json JARVIS_CONFIG.json
+cp config/JARVIS_CONFIG_template.json config/JARVIS_CONFIG.json
 ```
+
+> The config + secrets files live in **`config/`** (`JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`,
+> and their `*_template.json`) to keep the repo root tidy.
 
 Keys beginning with `_` are documentation-only and ignored by the app.
 
