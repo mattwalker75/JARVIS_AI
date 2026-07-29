@@ -8,6 +8,14 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-28: **`./JARVIS.sh --reset-workbench` — reset the dev OS.** An escape hatch for when the
+  LLM installs a pile of packages or messes up the workbench: it recreates ONLY the workbench
+  container from its clean built image (fresh writable layer → every runtime apt/pip install and
+  system tweak wiped). Keeps `/workspace` build files + the workbench home (desktop / browser
+  logins), and leaves the app, memory, config, and `READ_WRITE_FILES` completely untouched.
+  (`JARVIS.sh`, `Docs/cli.md`.)
+
 ### Changed
 - 2026-07-28: **Config "Save all" applies live — no restart.** Saving from the Config tab already
   mutated the in-memory config in place, but the UI still told you to run `./JARVIS.sh --reload`.

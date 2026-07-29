@@ -65,6 +65,23 @@ volumes (wiped by `--delete`), so back them up if you care about them.
 ./JARVIS.sh --restore-memory --from backups/jarvis-memory-20260702-224412.tgz
 ```
 
+### Reset the dev workbench
+
+`--reset-workbench` is the escape hatch for when the LLM has installed a pile of packages or made
+a mess of the system. It recreates **only** the workbench container from its clean built image, so
+every runtime `apt`/`pip` install and system tweak is wiped:
+
+```bash
+./JARVIS.sh --reset-workbench
+```
+
+- **Wiped:** everything the LLM installed/changed at runtime (the container's OS layer).
+- **Kept:** `/workspace` build files and the workbench home (desktop + any browser logins).
+- **Untouched:** the app, memory, config, and `READ_WRITE_FILES` — nothing else restarts.
+
+For a deeper reset: also wipe `/workspace` with `--restore-workspace --fresh`, or rebuild the
+workbench **image** with `--setup`.
+
 ## Typical sessions
 
 ```bash

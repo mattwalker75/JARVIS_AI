@@ -37,6 +37,9 @@
 #       --backup-workspace   Save the workbench /workspace to backups/jarvis-workspace-<ts>.tgz.
 #       --restore-workspace [--from <file>]   Restore /workspace from a backup,
 #                      or (no --from) reset it to EMPTY.
+#       --reset-workbench   Recreate ONLY the dev OS container from its clean image — wipes every
+#                      package/tweak the LLM installed at runtime. Keeps /workspace + browser logins
+#                      and leaves the app, memory, config, and READ_WRITE_FILES untouched.
 #   -h, --help         Show this help.
 #
 # Lifecycle flags run in the order given, e.g.:  ./JARVIS.sh --setup --start
@@ -330,6 +333,25 @@ cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /workspa
   fi
 }
 
+# Reset ONLY the dev OS container to its clean built image — the escape hatch for when the LLM
+# has installed a pile of packages / made a mess of the system. Recreating the container from
+# jarvis-workbench:local gives it a fresh writable layer, so every runtime apt/pip install and
+# system tweak is wiped. The DATA volumes are kept (/workspace build files + the workbench home /
+# any browser logins), and every OTHER container (app, memory, piper) + your config +
+# READ_WRITE_FILES are left completely untouched.
+cmd_reset_workbench() {
+  require_daemon
+  info "RESET WORKBENCH: recreating the dev OS container ($WB_CONTAINER) from its clean image..."
+  info "  WIPED: everything the LLM installed/changed at RUNTIME (apt & pip packages, system tweaks)."
+  info "  KEPT:  /workspace build files + the workbench home (desktop / browser logins), and every"
+  info "         other container (app, memory) + your config + READ_WRITE_FILES."
+  dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
+  dc up -d "$WB_CONTAINER" || { err "Failed to bring the workbench back up."; return 1; }
+  wait_http "$WB_PORT" "/" "Workbench desktop" || true
+  ok "Workbench reset to its image baseline. (the desktop takes a few seconds to come back)"
+  info "Deeper wipes: /workspace too → ./JARVIS.sh --restore-workspace --fresh ; rebuild the image → ./JARVIS.sh --setup ."
+}
+
 usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
 main() {
@@ -358,6 +380,7 @@ main() {
         if [[ "$(lc "${2:-}")" == "--from" || "$(lc "${2:-}")" == "--from-backup" ]]; then from="${3:-}"; shift 2;
         elif [[ "$(lc "${2:-}")" == "--fresh" ]]; then shift 1; fi
         cmd_restore_memory "$from" || rc=$? ;;
+      --reset-workbench)   cmd_reset_workbench || rc=$? ;;
       --backup-workspace)  cmd_backup_workspace || rc=$? ;;
       --restore-workspace)
         local fromw=""
@@ -372,6 +395,7 @@ main() {
         else cmd_prompt "$2" || rc=$?; shift; fi
         ;;
       status) cmd_status || rc=$? ;; stop) cmd_stop || rc=$? ;; delete) cmd_delete || rc=$? ;; help) usage ;;
+      reset-workbench) cmd_reset_workbench || rc=$? ;;
       *) err "Unknown flag: $1"; echo; usage; rc=2 ;;
     esac
     [[ $rc -ne 0 ]] && break
