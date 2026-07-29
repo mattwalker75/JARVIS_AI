@@ -36,3 +36,8 @@ config/JARVIS_CONFIG.*backup*.json
 # Debug logs (JARVIS_AI/Logs/), keep the dir
 Logs/*
 !Logs/.gitkeep
+
+# MLX local-LLM runtime (created by ./ACTIVATE.sh — venv + downloaded models + server logs)
+mlx/venv/
+mlx/models/
+mlx/*.log

@@ -112,16 +112,17 @@ provider and skip this entirely.
 
 It applies your local Ollama settings from the `ollama.*` block of `JARVIS_CONFIG.json`
 (context length, keep-alive, parallelism — see [Configuration](configuration.md#ollama-optional)),
-ensures the runtime is up, and prints the URL. The backend is **pluggable**: Ollama
-today, with MLX / vLLM / llama.cpp addable later as new backend blocks.
+ensures the runtime is up, and prints the URL. The backend is **pluggable**: **Ollama**
+and **MLX** (Apple Silicon) today, with vLLM / llama.cpp addable later as new backend blocks
+(select with `--backend`).
 
 | Command | What it does |
 | --- | --- |
-| `start [--backend ollama] [--gateway]` | Apply local config, ensure the runtime is up, and print the URL to paste into Config. `--gateway` also brings up the LiteLLM gateway in front of it. |
+| `start [--backend ollama\|mlx] [--gateway]` | Apply local config, ensure the runtime is up, and print the URL to paste into Config. `--gateway` also brings up the LiteLLM gateway in front of it. |
 | `url [--gateway]` | Just print the endpoint URL (nothing else) — direct to the runtime, or the gateway's URL with `--gateway`. |
-| `status` | Show whether the runtime (`:11434`) and the gateway (`:4000`) are up. |
+| `status` | Show whether the runtime and the gateway (`:4000`) are up. |
 | `stop [--gateway]` | Stop the runtime (and the gateway with `--gateway`). |
-| `config [--backend ollama]` | Print a start-to-finish **setup guide** for the backend — where to install it, which models to pull, the `ollama.*` tuning keys, and how to point JARVIS at it. Great first stop. |
+| `config [--backend ollama\|mlx]` | Print a start-to-finish **setup guide** for that backend — install, models, tuning, and how to point JARVIS at it. Great first stop. |
 
 ```bash
 # First time? print the setup steps (install link, pull commands, config)
@@ -141,3 +142,24 @@ its own standalone `litellm/docker-compose.yml` (started by this script, **not**
 routing (config in `litellm/config.yaml`); provider keys (`llm.anthropic_api_key`,
 `llm.gemini_api_key`, …) are exported into the gateway from `JARVIS_CONFIG.json`. Without
 `--gateway`, JARVIS talks straight to the runtime.
+
+### MLX backend (Apple Silicon)
+
+[MLX](https://github.com/ml-explore/mlx) runs local models natively on the macOS **host** via
+`mlx-lm`'s OpenAI-compatible server (it needs Metal, so it can't run inside the containers). It
+lives under `mlx/` with its own Python venv:
+
+```bash
+source ./ACTIVATE.sh        # 1st run: creates mlx/venv + installs mlx-lm; models cache in mlx/models
+                            #          (leave the env with:  source ./DEACTIVATE.sh)
+./JARVIS_LOCAL_LLM.sh config --backend mlx     # full setup guide (models, config, start)
+./JARVIS_LOCAL_LLM.sh start  --backend mlx     # serves the models in the mlx.* config block
+./JARVIS_LOCAL_LLM.sh stop   --backend mlx     # stops the server process(es)
+```
+
+Models are Hugging Face **`mlx-community`** repos (auto-downloaded on first serve). Configure them
+in the **`mlx.models`** array of `JARVIS_CONFIG.json` — each entry (`name`, `model`, `port`) gets
+its **own `mlx_lm.server` process** on its own port (see [Configuration](configuration.md#mlx-optional)).
+For **multiple** models behind one endpoint, add `--gateway` (LiteLLM fronts them); for a single
+model, paste its `http://host.docker.internal:<port>/v1` straight into Config. `mlx-lm` is
+text-only — keep **vision** on Ollama (`qwen2.5vl`) for now.

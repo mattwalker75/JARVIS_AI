@@ -9,6 +9,22 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-28: **MLX backend — local models on Apple Silicon.** `JARVIS_LOCAL_LLM.sh` gained a
+  `--backend mlx` implementation alongside Ollama (dispatch is now backend-generic:
+  `<backend>_apply_config/_ensure_running/_url/_status/_stop/_hint/_config_help`). MLX runs on the
+  macOS **host** via `mlx-lm`'s OpenAI-compatible server in a dedicated venv under `mlx/`:
+  - **`ACTIVATE.sh` / `DEACTIVATE.sh`** (source them) — create the venv + install `mlx-lm` on first
+    run, and point model downloads at `mlx/models/` (`HF_HOME`).
+  - **Multi-model:** a new `mlx.models` config array (`{name, model, port}`) — each entry gets its
+    own `mlx_lm.server` process on its port; `start --backend mlx` launches them all, `stop` kills
+    them, `status` lists them. Front several with `--gateway` for one endpoint.
+  - **`config --backend mlx`** prints a full setup guide (install/activate, `mlx-community` models,
+    the config block, start/stop, tool-calling + vision caveats).
+  - `mlx/venv`, `mlx/models`, `mlx/*.log` are gitignored. Smoke-tested end-to-end (server serves an
+    OpenAI completion). Verified with `mlx-lm 0.31` / `mlx 0.32` on macOS arm64.
+  (`JARVIS_LOCAL_LLM.sh`, `ACTIVATE.sh`, `DEACTIVATE.sh`, `config/JARVIS_CONFIG_template.json`,
+  `.gitignore`, `Docs/{cli,configuration}.md`.)
+
 - 2026-07-28: **`./JARVIS_LOCAL_LLM.sh config` — a backend setup guide.** Prints start-to-finish
   steps for the local runtime: where to install it (`https://ollama.com/download/mac`), which
   models to `ollama pull`, the `ollama.*` tuning keys (and the note that you can edit them in the

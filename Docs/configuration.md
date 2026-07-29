@@ -150,6 +150,24 @@ JARVIS core or `JARVIS.sh --reload`. On `./JARVIS_LOCAL_LLM.sh start` it applies
 `OLLAMA_*` settings and restarts Ollama so they take effect (macOS). Cloud-only setups can
 ignore it. See [CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime).
 
+## `mlx` (optional)
+
+For local models on **Apple Silicon** via `mlx-lm` (see [CLI → MLX backend](cli.md#mlx-backend-apple-silicon)):
+
+```jsonc
+"mlx": {
+  "models": [
+    { "name": "chat",  "model": "mlx-community/Qwen2.5-7B-Instruct-4bit",  "port": 8080 },
+    { "name": "smart", "model": "mlx-community/Qwen2.5-32B-Instruct-4bit", "port": 8081 }
+  ]
+}
+```
+
+Read by **`./JARVIS_LOCAL_LLM.sh --backend mlx`** — **not** by JARVIS core. Each entry starts its
+own `mlx_lm.server` on its `port` (models auto-download from Hugging Face into `mlx/models`). One
+model → paste `http://host.docker.internal:<port>/v1` into Config; multiple → add `--gateway` to
+front them as one endpoint. First run: `source ./ACTIVATE.sh` to create the venv + install mlx-lm.
+
 ## `voice`
 
 ```jsonc
