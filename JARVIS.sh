@@ -37,9 +37,12 @@
 #       --backup-workspace   Save the workbench /workspace to backups/jarvis-workspace-<ts>.tgz.
 #       --restore-workspace [--from <file>]   Restore /workspace from a backup,
 #                      or (no --from) reset it to EMPTY.
-#       --reset-workbench   Recreate ONLY the dev OS container from its clean image — wipes every
-#                      package/tweak the LLM installed at runtime. Keeps /workspace + browser logins
-#                      and leaves the app, memory, config, and READ_WRITE_FILES untouched.
+#       --reset-workbench   DELETE & REBUILD only the dev OS container (the Linux the LLM works in),
+#                      back to its clean image — wipes everything the LLM installed/changed at RUNTIME
+#                      (apt & pip packages, system tweaks). KEEPS /workspace build files + browser
+#                      logins, and leaves the app, memory, config, and READ_WRITE_FILES untouched.
+#                      (Also rebuild the IMAGE from the Dockerfile: --setup. Also wipe /workspace:
+#                      --restore-workspace --fresh.)
 #   -h, --help         Show this help.
 #
 # Lifecycle flags run in the order given, e.g.:  ./JARVIS.sh --setup --start
