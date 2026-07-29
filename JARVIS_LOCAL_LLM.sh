@@ -227,10 +227,18 @@ mlx_config_help() {
 1) ACTIVATE the Python env (creates the venv + installs mlx-lm on first run)
      source ./ACTIVATE.sh          # models download into mlx/models/ ; leave with: source ./DEACTIVATE.sh
 
-2) PICK model(s) from Hugging Face's 'mlx-community' org (pre-quantized for MLX), e.g.
-     mlx-community/Qwen2.5-7B-Instruct-4bit
-     mlx-community/Qwen2.5-32B-Instruct-4bit
-   They auto-download on first serve — no manual pull needed.
+2) PICK a model — MLX models come from Hugging Face's 'mlx-community' org (pre-quantized):
+     browse:  https://huggingface.co/mlx-community     (the '-4bit' variants suit most Macs)
+     e.g.     mlx-community/Qwen2.5-7B-Instruct-4bit
+              mlx-community/Qwen2.5-32B-Instruct-4bit
+
+   DOWNLOAD — models auto-download on first serve into  mlx/models/  (nothing to do). To
+   pre-fetch (so the first request isn't slow), activate the env then use any of these:
+     source ./ACTIVATE.sh
+     hf download mlx-community/Qwen2.5-7B-Instruct-4bit   # just fetch it into mlx/models/
+     mlx_lm.generate --model <repo> --prompt "hi"         # fetch + a quick test
+     mlx_lm.manage --scan                                 # list what's cached ('--delete' to remove)
+   (Everything saves under  mlx/models/  — gitignored; delete that dir to reclaim space.)
 
 3) CONFIGURE them in  config/JARVIS_CONFIG.json  ->  the "mlx" block (each gets its own port):
      "mlx": { "models": [
