@@ -8,6 +8,14 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-28: **`./JARVIS_LOCAL_LLM.sh config` — a backend setup guide.** Prints start-to-finish
+  steps for the local runtime: where to install it (`https://ollama.com/download/mac`), which
+  models to `ollama pull`, the `ollama.*` tuning keys (and the note that you can edit them in the
+  JARVIS UI but must re-run `start` to apply), how to point JARVIS at the printed URL, and the
+  multi-tier `max_loaded_models` tip. `config --backend ollama` (default `ollama`).
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`.)
+
 ### Changed
 - 2026-07-28: **Config files moved to `config/`.** `JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`, and
   their `*_template.json` now live in `config/` instead of the repo root — so the `JARVIS_*.sh`

@@ -121,8 +121,12 @@ today, with MLX / vLLM / llama.cpp addable later as new backend blocks.
 | `url [--gateway]` | Just print the endpoint URL (nothing else) — direct to the runtime, or the gateway's URL with `--gateway`. |
 | `status` | Show whether the runtime (`:11434`) and the gateway (`:4000`) are up. |
 | `stop [--gateway]` | Stop the runtime (and the gateway with `--gateway`). |
+| `config [--backend ollama]` | Print a start-to-finish **setup guide** for the backend — where to install it, which models to pull, the `ollama.*` tuning keys, and how to point JARVIS at it. Great first stop. |
 
 ```bash
+# First time? print the setup steps (install link, pull commands, config)
+./JARVIS_LOCAL_LLM.sh config
+
 # Running a local model
 ./JARVIS_LOCAL_LLM.sh start          # → prints e.g. http://host.docker.internal:11434/v1
 # paste that into Config → Endpoint URL, set your model to the Ollama tag (e.g. qwen3:8b)

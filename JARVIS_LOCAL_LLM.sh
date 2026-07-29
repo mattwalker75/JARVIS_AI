@@ -8,6 +8,7 @@
 #   ./JARVIS_LOCAL_LLM.sh url    [--gateway]                       # just print the URL (nothing else)
 #   ./JARVIS_LOCAL_LLM.sh stop   [--gateway]
 #   ./JARVIS_LOCAL_LLM.sh status
+#   ./JARVIS_LOCAL_LLM.sh config [--backend ollama]               # print setup steps (install / pull / configure)
 #
 # Backends: ollama (default). MLX / vLLM / llama.cpp can be added later as new backend blocks —
 # each just implements: <backend>_apply_config, <backend>_ensure_running, <backend>_url, <backend>_stop.
@@ -99,6 +100,45 @@ ollama_stop() {
   if [[ "$(uname)" == "Darwin" ]]; then osascript -e 'quit app "Ollama"' 2>/dev/null || killall Ollama 2>/dev/null || true; info "Ollama quit."
   else warn "Stop Ollama yourself on this OS (e.g. kill the 'ollama serve' process)."; fi
 }
+# Printed by `config [--backend ollama]` — a start-to-finish setup guide.
+ollama_config_help() {
+  echo -e "${C_BOLD}Set up Ollama for JARVIS${C_RESET}  — local models run on THIS machine; JARVIS talks to them over http://${APP_HOST}:${OLLAMA_PORT}/v1"
+  cat <<TXT
+
+1) INSTALL Ollama on this machine
+     macOS:   download & run   https://ollama.com/download/mac
+     other:   https://ollama.com/download
+     check:   ollama --version
+
+2) PULL the model(s) you want   (the tag becomes your JARVIS model / tier value)
+     ollama pull qwen3:8b          # a general chat model
+     ollama pull qwen2.5vl:32b     # a VISION model (needed for the vision tier / screenshots)
+     ollama list                   # see what you already have
+
+3) (optional) TUNE the runtime in  config/JARVIS_CONFIG.json  -> the "ollama" block:
+     manage            true = this script configures + restarts Ollama for you
+     context_length    num_ctx pre-allocated per model (bigger = more RAM, fixed ceiling)
+     keep_alive        "-1" keeps models resident (no cold reloads), or e.g. "30m"
+     num_parallel      concurrent requests per model
+     max_loaded_models how many models stay resident at once
+   You can also edit these in the JARVIS UI -> Config tab. Either way you must
+   RE-RUN  ./JARVIS_LOCAL_LLM.sh start  afterwards for the changes to take effect.
+
+4) START it + get the URL
+     ./JARVIS_LOCAL_LLM.sh start          # add --gateway to front it with LiteLLM (multi-model routing)
+     -> prints  http://${APP_HOST}:${OLLAMA_PORT}/v1
+
+5) POINT JARVIS at it
+     JARVIS -> Config -> Endpoint URL = that URL. Set the model (single mode) or the
+     chat/cheap/smart/vision tiers (multi mode) to your pulled Ollama tags, then Save.
+
+TIP:  going multi-tier with several local models? Set max_loaded_models >= the number of
+      distinct tier models so they all stay hot in RAM instead of thrashing in and out.
+
+Note: the auto-config in steps 3-4 is macOS-only (launchctl + Ollama.app). On Linux, set the
+      OLLAMA_* env vars yourself and run 'ollama serve'.
+TXT
+}
 
 # ============================ optional gateway (LiteLLM) ============================
 gateway_up() {
@@ -119,7 +159,7 @@ usage() { awk 'NR>=2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${
 CMD=""; BACKEND="ollama"; USE_GATEWAY=0
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
-    start|stop|status|url) CMD="$1" ;;
+    start|stop|status|url|config) CMD="$1" ;;
     --gateway)             USE_GATEWAY=1 ;;
     --backend)             shift; BACKEND="$(lc "${1:-ollama}")" ;;
     -h|--help|help)        usage; exit 0 ;;
@@ -153,6 +193,9 @@ case "$CMD" in
   status)
     printf 'Ollama  (:%s): ' "$OLLAMA_PORT";  port_up "http://localhost:${OLLAMA_PORT}/api/tags"           && echo "up" || echo "down"
     printf 'Gateway (:%s): '  "$GATEWAY_PORT"; port_up "http://localhost:${GATEWAY_PORT}/health/liveliness" && echo "up" || echo "down"
+    ;;
+  config)
+    ollama_config_help
     ;;
   stop)
     [[ "$USE_GATEWAY" == 1 ]] && gateway_down
