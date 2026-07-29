@@ -112,6 +112,7 @@ Detailed docs live in **[`Docs/`](Docs/README.md)**:
 | --- | --- |
 | [Architecture](Docs/architecture.md) | Containers, data flow, external LLM serving, volumes, security model |
 | [Configuration](Docs/configuration.md) | Full `JARVIS_CONFIG.json` reference |
+| [Local models](Docs/local-llm.md) | Running models locally — Ollama vs MLX, setup + how to use |
 | [Tools](Docs/tools.md) | Every tool the LLM can call, by family |
 | [Autopilot & Planner](Docs/autopilot.md) | The task ledger and autonomous objective loops |
 | [Prompts & Context](Docs/prompts.md) | Master/system prompt library + the context-window meter |
