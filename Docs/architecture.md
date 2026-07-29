@@ -114,6 +114,11 @@ Bind mounts (config, secrets, shared folders, `data/`) survive `--delete`; the D
 **volumes** (memory, workspace, workbench home) are wiped by it — back them up first
 (see [CLI](cli.md)).
 
+To reset **just the workbench OS** (after the LLM has installed a pile of packages) without
+touching any data, `./JARVIS.sh --reset-workbench` recreates that one container from its clean
+image — the runtime-installed packages live in the container's writable layer, so recreating wipes
+them while the `/workspace` and home **volumes** (and every other container) are kept. See [CLI](cli.md#reset-the-dev-workbench).
+
 ## Security model
 
 - **Localhost only.** Every port binds to `127.0.0.1`, including the 9101–9150 preview

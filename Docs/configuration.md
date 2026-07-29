@@ -7,8 +7,14 @@ and edit:
 cp JARVIS_CONFIG_template.json JARVIS_CONFIG.json
 ```
 
-Keys beginning with `_` are documentation-only and ignored by the app. After editing,
-apply with `./JARVIS.sh --reload` (restarts the app only) or `--stop --start`.
+Keys beginning with `_` are documentation-only and ignored by the app.
+
+**Applying changes:** saving from the **Config tab** applies them **live** — the app re-reads
+the config on your next message, no restart needed for ordinary settings (endpoint, model, tiers,
+temperature, max_tokens, completion_checks, prompts, log level, …). A restart (`./JARVIS.sh
+--reload`, or `--stop --start`) is only needed for the memory service's embedding key (a separate
+container) and container-level settings like ports. If you edit `JARVIS_CONFIG.json` **by hand**
+(outside the UI), run `./JARVIS.sh --reload` to pick it up.
 
 > The file is mounted **read-write** so the UI can persist a few settings (see
 > [below](#settings-the-ui-can-change)). It's written **in place** (a bind-mounted
