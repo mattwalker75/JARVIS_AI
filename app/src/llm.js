@@ -97,7 +97,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = base + "/chat/completions";
   const headers = { "Content-Type": "application/json" };
-  if (llm.api_key && (llm.provider || "").toLowerCase() !== "ollama") {
+  if (llm.api_key && !["ollama", "local"].includes((llm.provider || "").toLowerCase())) {
     headers["Authorization"] = "Bearer " + llm.api_key;
   }
 
@@ -414,7 +414,7 @@ async function analyzeImage(dataUrl, question, signal) {
   const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = base + "/chat/completions";
   const headers = { "Content-Type": "application/json" };
-  if (llm.api_key && (llm.provider || "").toLowerCase() !== "ollama") headers["Authorization"] = "Bearer " + llm.api_key;
+  if (llm.api_key && !["ollama", "local"].includes((llm.provider || "").toLowerCase())) headers["Authorization"] = "Bearer " + llm.api_key;
   const q = question && String(question).trim();
   const prompt = "You are the eyes of a desktop automation agent. Look at this screenshot of a " +
     "1024x768 screen and report exactly what is visible. List the interactive elements (buttons, links, " +

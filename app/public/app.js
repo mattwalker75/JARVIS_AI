@@ -1477,9 +1477,7 @@ const PROVIDERS = [
   { id: "xai", label: "xAI (Grok)", url: "https://api.x.ai/v1", key: true },
   { id: "perplexity", label: "Perplexity", url: "https://api.perplexity.ai", key: true },
   { id: "gemini", label: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: true },
-  { id: "ollama", label: "Ollama (local)", url: "http://host.docker.internal:11434/v1", key: false },
-  { id: "mlx", label: "MLX (local · Apple Silicon)", url: "http://host.docker.internal:8080/v1", key: false },
-  { id: "litellm", label: "LiteLLM gateway (local)", url: "http://host.docker.internal:4000/v1", key: false },
+  { id: "local", label: "Local endpoint (no key)", url: "", key: false },
   { id: "generic", label: "Generic (custom OpenAI-compatible)", url: "", key: "optional" },
 ];
 function populateProviderSelect(current) {
@@ -1493,8 +1491,8 @@ function syncProviderUI() {
   const p = PROVIDERS.find((x) => x.id === ($("cfg-provider") || {}).value);
   const showKey = !p || p.key !== false;                 // hide the key for keyless local endpoints
   const keyRow = $("cfg-row-apikey"); if (keyRow) keyRow.style.display = showKey ? "" : "none";
-  const local = p && (p.id === "ollama" || p.id === "litellm");
-  const oll = $("cfg-sec-ollama"); if (oll) oll.style.display = local ? "" : "none";  // host tuning only when using local Ollama
+  const local = p && p.id === "local";
+  const oll = $("cfg-sec-ollama"); if (oll) oll.style.display = local ? "" : "none";  // Ollama host-tuning shown for a local endpoint
   syncModelMode();
 }
 // Show ONLY the single-model field OR the multi-tier grid, per the selected model mode.

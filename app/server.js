@@ -34,11 +34,11 @@ app.get("/api/context-window", async (_req, res) => {
   const provider = String(llm.provider || "").toLowerCase();
   const base = (llm.base_url || "").replace(/\/+$/, "");
   const numCtx = Number((cfg.ollama || {}).context_length);
-  const isLocal = provider === "ollama" || /ollama|litellm|11434|localhost|127\.0\.0\.1|host\.docker/.test(base);
+  const isLocal = provider === "ollama" || provider === "local" || /ollama|litellm|11434|localhost|127\.0\.0\.1|host\.docker/.test(base);
   if (isLocal && numCtx > 0) return res.json({ context_window: numCtx, source: "ollama num_ctx" });
   // Cloud (e.g. via the LiteLLM gateway): ask the endpoint for the model's real window.
   try {
-    const headers = llm.api_key && provider !== "ollama" ? { Authorization: "Bearer " + llm.api_key } : {};
+    const headers = llm.api_key && !["ollama", "local"].includes(provider) ? { Authorization: "Bearer " + llm.api_key } : {};
     const r = await fetch(base.replace(/\/v1$/, "") + "/model/info", { headers, signal: AbortSignal.timeout(4000) });
     if (r.ok) {
       const d = await r.json();
