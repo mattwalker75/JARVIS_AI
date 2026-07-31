@@ -8,6 +8,15 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-30: **Header model badge refreshes on Config "Save all".** The top-of-UI model badge was
+  set only at page load and on the quick model dropdown, so after switching models in the Config tab
+  it kept showing the old value (e.g. a stale `openai · gpt-5` after moving to a local Ollama model)
+  until a manual browser refresh. Saving the config now re-reads `/api/config` and updates the badge
+  immediately. In multi-model mode it shows the **chat-tier** model (always present), matching what
+  the server reports via `publicConfig()`'s `modelFor("chat")`. The underlying config was never wrong
+  — this was display-only. (`app/public/app.js`.)
+
 ### Added
 - 2026-07-30: **Gateway model list auto-syncs from the live backend (no more stale entries).**
   `./JARVIS_LOCAL_LLM.sh start --gateway` now **regenerates the local-model routes in

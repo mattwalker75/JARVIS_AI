@@ -1609,6 +1609,14 @@ async function saveConfig() {
     const d = await r.json();
     if (!r.ok) { result.className = "cfg-result err"; result.textContent = "Save failed: " + (d.error || r.status); return; }
     cfgObj = config; secretsObj = secrets; populateStructured();
+    // Refresh the header badge from the canonical config so it reflects the just-saved model. In
+    // multi mode publicConfig() reports the CHAT-tier model (always present), so the badge stays
+    // accurate even though the header has no per-tier display. (Without this the badge kept its
+    // page-load value — e.g. a stale "openai · gpt-5" after switching to a local model.)
+    try {
+      cfg = await (await fetch("/api/config")).json();
+      if (modelBadge) modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
+    } catch (_) {}
     result.className = "cfg-result ok";
     const nb = (d.backups || []).length;
     result.innerHTML = "✅ Saved " + (d.saved || []).join(" + ") +
