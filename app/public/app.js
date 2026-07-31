@@ -1478,7 +1478,8 @@ const PROVIDERS = [
   { id: "perplexity", label: "Perplexity", url: "https://api.perplexity.ai", key: true },
   { id: "gemini", label: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: true },
   { id: "ollama", label: "Ollama (local)", url: "http://host.docker.internal:11434/v1", key: false },
-  { id: "litellm", label: "LiteLLM gateway (this stack)", url: "http://jarvis-litellm:4000/v1", key: false },
+  { id: "mlx", label: "MLX (local · Apple Silicon)", url: "http://host.docker.internal:8080/v1", key: false },
+  { id: "litellm", label: "LiteLLM gateway (local)", url: "http://host.docker.internal:4000/v1", key: false },
   { id: "generic", label: "Generic (custom OpenAI-compatible)", url: "", key: "optional" },
 ];
 function populateProviderSelect(current) {
