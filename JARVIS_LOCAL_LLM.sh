@@ -253,6 +253,9 @@ MLX_MODELS_DIR="${SCRIPT_DIR}/mlx/models"
 MLX_SERVER="$MLX_VENV/bin/mlx_lm.server"
 MLX_DEFAULT_MODEL="mlx-community/Qwen2.5-7B-Instruct-4bit"
 
+# True if the config actually declares MLX models (so `status` can show MLX without the
+# default-fallback noise on pure-Ollama setups).
+mlx_has_models() { python3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG')).get('mlx',{}).get('models',[]) else 1)" 2>/dev/null; }
 # Emit the configured MLX models as "name|model|port" lines (one sensible default if unset).
 mlx_models_list() {
   python3 - "$CFG" "$MLX_DEFAULT_MODEL" <<'PY' 2>/dev/null
@@ -294,9 +297,11 @@ mlx_url() {
   fi
 }
 mlx_status() {
+  # Skip only entries with no port — a live server should still show even if its name/model is
+  # blank in config (that's a useful signal that the config needs fixing, not a reason to hide it).
   while IFS='|' read -r name model port; do
-    [[ -z "$name" ]] && continue
-    printf 'MLX %-8s (:%s): ' "$name" "$port"; port_up "http://localhost:${port}/v1/models" && echo "up  ($model)" || echo "down"
+    [[ -z "$port" ]] && continue
+    printf 'MLX %-8s (:%s): ' "${name:-?}" "$port"; port_up "http://localhost:${port}/v1/models" && echo "up  (${model:-<no model set in config>})" || echo "down"
   done < <(mlx_models_list)
 }
 mlx_stop() {
@@ -423,7 +428,9 @@ case "$CMD" in
     the_url
     ;;
   status)
-    "${BACKEND}_status"
+    # Diagnostic view: report EVERY backend's real state, not just the --backend default (ollama).
+    ollama_status
+    mlx_has_models && mlx_status               # only show MLX when models are actually configured
     printf 'Gateway (:%s): '  "$GATEWAY_PORT"; port_up "http://localhost:${GATEWAY_PORT}/health/liveliness" && echo "up" || echo "down"
     ;;
   config)

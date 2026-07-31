@@ -8,6 +8,14 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-07-30: **`JARVIS_LOCAL_LLM.sh status` now reports every backend, not just Ollama.** `status`
+  ran `${BACKEND}_status`, and `--backend` defaults to `ollama`, so a plain `status` always said
+  "Ollama" even when MLX was the one running. It now shows Ollama, MLX (when models are configured),
+  and the gateway together. `mlx_status` also keys off the port instead of the name, so a live MLX
+  server still appears even if its `mlx.models` name/model is blank — surfacing a misconfig instead of
+  silently hiding the server. (`JARVIS_LOCAL_LLM.sh`.)
+
 ### Added
 - 2026-07-30: **`max_tokens` → `max_completion_tokens` auto-fallback for newer OpenAI models.** The
   OpenAI reasoning-model family (o1/o3/gpt-5, e.g. `gpt-5.4-mini`) rejects `max_tokens` with a 400
