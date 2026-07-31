@@ -524,6 +524,8 @@ function showSlashHelp() {
     "- `/hints [on|off]` — toggle skill auto-hints (no arg shows the state)",
     "- `/remember <fact>` — save a fact to long-term memory",
     "- `/guide [topic]` — JARVIS reads its self-help guides and walks you through it (no topic lists them)",
+    "- `/ro [request]` — reference files in READ_ONLY_FILES (no request lists them)",
+    "- `/rw [request]` — reference files in READ_WRITE_FILES (no request lists them)",
     "- `/files`, `/tasks`, `/memory`, `/activity`, `/workbench` — open that side panel",
   ].join("\n"));
 }
@@ -561,6 +563,16 @@ function handleSlash(text) {
       const base = "Using the JARVIS self-help guides in /READ_ONLY_FILES/JARVIS_Guides/ (list_dir that folder, then read_file the guide that best matches — do NOT answer from general knowledge), ";
       send(arg ? base + "walk me through: " + arg
               : base + "list the available guides (filename + one-line topic) so I can pick one.");
+      return;
+    }
+    case "ro": case "readonly": {
+      const base = "Using the files in /READ_ONLY_FILES (list_dir it, then read_file / read_document / analyze_image the relevant ones — my READ-ONLY shared folder), ";
+      send(arg ? base + arg : base + "list what's in it and briefly say what each file is.");
+      return;
+    }
+    case "rw": case "readwrite": {
+      const base = "Using the files in /READ_WRITE_FILES (list_dir it, then read the relevant ones — my READ-WRITE shared folder; my uploads land under uploads/ and your deliverables are saved here), ";
+      send(arg ? base + arg : base + "list what's in it and briefly say what each file is.");
       return;
     }
     default: addMessage("assistant", "Unknown command `/" + cmd + "` — type `/help` for the list.", "notice");

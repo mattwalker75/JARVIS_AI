@@ -9,6 +9,10 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-30: **`/ro` and `/rw` slash commands.** Tell JARVIS to reference the shared folders:
+  `/ro [request]` works with `READ_ONLY_FILES`, `/rw [request]` with `READ_WRITE_FILES` (no request
+  lists the folder). Complements `/guide`. (`app/public/app.js`, folder READMEs.)
+
 - 2026-07-30: **Self-help guides — ask JARVIS how to use/configure itself.** A shipped set of
   task guides in `READ_ONLY_FILES/JARVIS_Guides/` (switching models, local models via Ollama/MLX,
   Autopilot, maintenance, a glossary) that JARVIS reads at runtime. The system prompt now tells it

@@ -11,6 +11,9 @@ For files you want JARVIS to CREATE or CHANGE — and for the finished work it
 produces for you — use the read-write folder next door: READ_WRITE_FILES/
 (mounted at /READ_WRITE_FILES).
 
+In chat, the /ro command tells JARVIS to reference what's in here — e.g.
+"/ro summarize the contract" (or just "/ro" to list the files).
+
 ---
 JARVIS_Guides/  — shipped self-help guides about JARVIS itself (how to switch
 models, set up local models, use Autopilot, maintenance, a glossary of terms).

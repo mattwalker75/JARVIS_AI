@@ -13,3 +13,6 @@ build files live there, not here; only finished output is copied here.
 
 For files you want JARVIS to READ but never modify, use the read-only folder next
 door: READ_ONLY_FILES/ (mounted at /READ_ONLY_FILES).
+
+In chat, the /rw command tells JARVIS to reference what's in here — e.g.
+"/rw clean up the plan I dropped in" (or just "/rw" to list the files).
