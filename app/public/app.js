@@ -523,6 +523,7 @@ function showSlashHelp() {
     "- `/persona [name|off]` — switch persona (no name lists them)",
     "- `/hints [on|off]` — toggle skill auto-hints (no arg shows the state)",
     "- `/remember <fact>` — save a fact to long-term memory",
+    "- `/guide [topic]` — JARVIS reads its self-help guides and walks you through it (no topic lists them)",
     "- `/files`, `/tasks`, `/memory`, `/activity`, `/workbench` — open that side panel",
   ].join("\n"));
 }
@@ -555,6 +556,12 @@ function handleSlash(text) {
       return;
     case "files": case "tasks": case "memory": case "activity": case "workbench": {
       const tab = document.querySelector('.tab[data-tab="' + cmd + '"]'); if (tab) tab.click(); return;
+    }
+    case "guide": case "howto": case "docs": {
+      const base = "Using the JARVIS self-help guides in /READ_ONLY_FILES/JARVIS_Guides/ (list_dir that folder, then read_file the guide that best matches — do NOT answer from general knowledge), ";
+      send(arg ? base + "walk me through: " + arg
+              : base + "list the available guides (filename + one-line topic) so I can pick one.");
+      return;
     }
     default: addMessage("assistant", "Unknown command `/" + cmd + "` — type `/help` for the list.", "notice");
   }

@@ -1,8 +1,19 @@
 This is the READ-ONLY shared folder.
 
-Put files here that you want JARVIS to be able to READ but not change.
-JARVIS sees this folder mounted at /shared_ro and can list and read files in it,
-but cannot modify or delete anything here.
+Put files here that you want JARVIS to READ but never change — reference docs,
+data, spreadsheets, images, anything you want it to work from.
 
-Use the read-write folder (shared_rw/, mounted at /shared_rw) for files you want
-JARVIS to be able to create or change, and for files JARVIS produces for you.
+JARVIS sees this folder mounted at /READ_ONLY_FILES. It can list and read files
+here (list_dir, read_file, read_document, analyze_image), but it CANNOT modify or
+delete anything — the folder is mounted read-only.
+
+For files you want JARVIS to CREATE or CHANGE — and for the finished work it
+produces for you — use the read-write folder next door: READ_WRITE_FILES/
+(mounted at /READ_WRITE_FILES).
+
+---
+JARVIS_Guides/  — shipped self-help guides about JARVIS itself (how to switch
+models, set up local models, use Autopilot, maintenance, a glossary of terms).
+Ask JARVIS "how do I ..." or use the /guide command and it will read these and
+walk you through the steps. Leave this folder in place; add your own files
+alongside it.

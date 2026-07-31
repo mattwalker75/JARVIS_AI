@@ -10,10 +10,6 @@ node_modules/
 # Database backups
 backups/*.sql
 
-# Shared read-write workspace contents (keep the folder, ignore its files)
-shared_rw/*
-!shared_rw/.gitkeep
-
 # OS / editor
 .DS_Store
 .vscode/
@@ -23,12 +19,15 @@ shared_rw/*
 data/*.json
 data/sessions/
 
-# Shared file-exchange folders
+# Shared file-exchange folders (ignore the user's files, but keep the READMEs
+# and the shipped self-help guides so JARVIS can read them at runtime).
 READ_WRITE_FILES/*
 !READ_WRITE_FILES/.gitkeep
+!READ_WRITE_FILES/README.txt
 READ_ONLY_FILES/*
 !READ_ONLY_FILES/.gitkeep
 !READ_ONLY_FILES/README.txt
+!READ_ONLY_FILES/JARVIS_Guides/
 
 # local config backup (contains a real key)
 config/JARVIS_CONFIG.*backup*.json

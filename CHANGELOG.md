@@ -9,6 +9,16 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-07-30: **Self-help guides — ask JARVIS how to use/configure itself.** A shipped set of
+  task guides in `READ_ONLY_FILES/JARVIS_Guides/` (switching models, local models via Ollama/MLX,
+  Autopilot, maintenance, a glossary) that JARVIS reads at runtime. The system prompt now tells it
+  to consult these for "how do I… / what is…" questions about JARVIS instead of answering from
+  general knowledge, and a new **`/guide [topic]`** slash command forces it (no topic lists them).
+  Also fixed the stale `READ_ONLY_FILES/README.txt` (it referenced old `/shared_ro` paths) and added
+  a matching `READ_WRITE_FILES/README.txt`; `.gitignore` now tracks the READMEs + guides and drops
+  dead `shared_rw` rules. (`READ_ONLY_FILES/`, `READ_WRITE_FILES/README.txt`,
+  `Prompts/default_system.prompt`, `app/public/app.js`, `.gitignore`.)
+
 - 2026-07-28: **Config tab: friendly MLX models editor.** A new "MLX models" section with add/remove
   rows (name / model / port) instead of hand-editing the `mlx.models` JSON — links to the
   `mlx-community` HF org, notes the `mlx/models/` cache, and reminds you to run
