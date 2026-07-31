@@ -9,6 +9,15 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-30: **MLX MODELS editor: "Name" is now a "Tier" dropdown.** In Config → MLX models, the
+  free-text name field is a dropdown of `chat tier / cheap tier / smart tier / vision tier`, and the
+  column is labeled **tier**. Adding a row defaults to the first unused tier. The tier is a label for
+  the server slot (stored as `mlx.models[].name`, also the process label in start/stop/status); you
+  still pick which model each tier actually uses in the Model-mode "multi" tier pickers. A legacy/custom
+  name that isn't one of the four tiers is preserved as an option. (`app/public/app.js`,
+  `app/public/index.html`, `app/public/style.css`.)
+
+### Changed
 - 2026-07-30: **`config --backend ollama|mlx` guides are in sync, with explicit list/delete steps.**
   Both setup guides now share the same structure and call out **LIST** ("the models you have
   downloaded") and **DELETE** ("a downloaded model to reclaim disk") as their own labeled lines with

@@ -244,10 +244,10 @@
 
           <div class="cfg-section" id="cfg-sec-mlx">
             <h5>MLX models <span class="cfg-badge">local · Apple Silicon</span></h5>
-            <div class="cfg-mlx-labels"><span>name</span><span>model (mlx-community/…)</span><span>port</span><span></span></div>
+            <div class="cfg-mlx-labels"><span>tier</span><span>model (mlx-community/…)</span><span>port</span><span></span></div>
             <div id="cfg-mlx-rows"></div>
             <button type="button" id="cfg-mlx-add" class="ghost">＋ Add MLX model</button>
-            <div class="hint">Each entry runs its own <code>mlx_lm.server</code> on its port (models from <a href="https://huggingface.co/mlx-community" target="_blank" rel="noopener">mlx-community</a> on Hugging Face, cached in <code>mlx/models/</code>). Saving writes the config, but the UI can't start host processes — run <code>./JARVIS_LOCAL_LLM.sh start --backend mlx</code> afterward to (re)launch. Full guide: <code>./JARVIS_LOCAL_LLM.sh config --backend mlx</code>.</div>
+            <div class="hint">Each entry runs its own <code>mlx_lm.server</code> on its port (models from <a href="https://huggingface.co/mlx-community" target="_blank" rel="noopener">mlx-community</a> on Hugging Face, cached in <code>mlx/models/</code>). The <b>tier</b> labels which slot a server is for; set which model each tier actually <em>uses</em> in the Model-mode <b>multi</b> tier pickers above. Saving writes the config, but the UI can't start host processes — run <code>./JARVIS_LOCAL_LLM.sh start --backend mlx</code> afterward to (re)launch. Full guide: <code>./JARVIS_LOCAL_LLM.sh config --backend mlx</code>.</div>
           </div>
 
           <div class="cfg-section">
