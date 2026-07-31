@@ -118,7 +118,8 @@ and **MLX** (Apple Silicon) today, with vLLM / llama.cpp addable later as new ba
 
 | Command | What it does |
 | --- | --- |
-| `start [--backend ollama\|mlx] [--gateway]` | Apply local config, ensure the runtime is up, and print the URL to paste into Config. `--gateway` also brings up the LiteLLM gateway in front of it. |
+| `start [--backend ollama\|mlx] [--gateway]` | Apply local config, ensure the runtime is up, and print the URL to paste into Config. `--gateway` also **syncs the gateway's model list from the live backend** (see below) and brings up the LiteLLM gateway in front of it. |
+| `gateway-sync [--backend ollama\|mlx]` | Regenerate the gateway's auto-managed model list from the selected live backend, then reload the gateway if it's running — without a full `start`. |
 | `url [--gateway]` | Just print the endpoint URL (nothing else) — direct to the runtime, or the gateway's URL with `--gateway`. |
 | `status` | Show whether the runtime and the gateway (`:4000`) are up. |
 | `stop [--gateway]` | Stop the runtime (and the gateway with `--gateway`). |
@@ -142,6 +143,15 @@ its own standalone `litellm/docker-compose.yml` (started by this script, **not**
 routing (config in `litellm/config.yaml`); provider keys (`llm.anthropic_api_key`,
 `llm.gemini_api_key`, …) are exported into the gateway from `JARVIS_CONFIG.json`. Without
 `--gateway`, JARVIS talks straight to the runtime.
+
+**Auto-synced model list.** `litellm/config.yaml` has an auto-managed block (delimited by
+`BEGIN/END local routes` markers) that `start --gateway` and `gateway-sync` **regenerate from the
+live `--backend`** — Ollama's installed tags, or the MLX servers that are actually up — so the
+gateway never advertises models you don't have. Your **cloud routes above the marker are left
+untouched.** This is why "List models" in the Config tab, when pointed at the gateway, mirrors your
+real local models plus whatever cloud routes you deliberately keep. (For pure-Ollama use you can skip
+the gateway entirely and point Config straight at `http://host.docker.internal:11434/v1`, which is
+introspected live and needs no config file at all.)
 
 ### MLX backend (Apple Silicon)
 

@@ -8,6 +8,27 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-30: **Gateway model list auto-syncs from the live backend (no more stale entries).**
+  `./JARVIS_LOCAL_LLM.sh start --gateway` now **regenerates the local-model routes in
+  `litellm/config.yaml` from whatever `--backend` selects** before starting the gateway, and a new
+  **`gateway-sync [--backend ollama|mlx]`** subcommand does the same on demand (then reloads a running
+  gateway). The selected backend owns an auto-managed block delimited by `BEGIN/END local routes`
+  markers: **Ollama** contributes one route per installed tag (from its live `/v1/models`, embeddings
+  skipped, all → `:11434`); **MLX** probes each `mlx.models` server's port and contributes a route only
+  for the ones actually answering (each → its own port). **`stop` empties the managed block** (the
+  runtime is gone, so the gateway shouldn't keep advertising it) and reloads a still-running gateway to
+  reflect that. **Cloud routes above the marker are never touched** — those stay hand-maintained. This
+  fixes the confusion where the gateway advertised `claude-sonnet`/`gemini`/`gpt` (and was missing
+  freshly-pulled Ollama models) because its list was a hand-edited file that drifted from reality. New
+  backend hook `<backend>_gateway_routes`; gateway now starts with `--force-recreate` so a freshly-synced
+  config is always re-read. The shipped `litellm/config.yaml` now contains **no cloud routes** — the
+  gateway is for local models, and cloud models are reached directly in single mode, so the gateway's
+  model list is purely local (a documented one-liner shows how to add a cloud route for the rare mixed
+  local+cloud multi-mode case). If the last local models are stopped, the gateway is taken down rather
+  than reloaded to an empty model list. (`JARVIS_LOCAL_LLM.sh`, `litellm/config.yaml`,
+  `Docs/local-llm.md`, `Docs/cli.md`.)
+
 ### Changed
 - 2026-07-30: **Model dropdowns show only available models.** The Config model `<select>`s (chat/
   cheap/smart/vision tiers, single or multi mode) now list only the models actually returned by

@@ -133,6 +133,57 @@ The gateway (LiteLLM) lives in a standalone `litellm/docker-compose.yml` started
 (not `JARVIS.sh`); routing is configured in `litellm/config.yaml`. See
 [CLI → the gateway](cli.md#jarvis_local_llmsh--local-model-runtime).
 
+### The model list stays in sync (no stale entries)
+
+A gateway advertises whatever is written in its config file — so a hand-maintained list drifts out of
+sync with what's actually installed. To prevent that, `litellm/config.yaml` has an **auto-managed
+block** (between `BEGIN local routes` / `END local routes` markers) that is **regenerated from the live
+backend** every time you run `start --gateway` — or on demand with **`gateway-sync`**:
+
+```bash
+./JARVIS_LOCAL_LLM.sh start --backend ollama --gateway   # local block = your installed `ollama list`
+./JARVIS_LOCAL_LLM.sh start --backend mlx    --gateway   # local block = the MLX servers that are UP
+./JARVIS_LOCAL_LLM.sh gateway-sync --backend ollama      # just refresh + reload (no full restart)
+```
+
+The selected `--backend` **owns** that block: Ollama contributes one route per installed tag (all →
+`:11434`, embeddings skipped); MLX probes **each** model's port and contributes a route only for the
+servers actually answering (each → its own port). **Cloud routes above the marker are never touched** —
+those are your deliberate choices (enabling `claude-sonnet` etc. is a decision, not something to
+auto-discover), and they only work once you export the matching API key. So after a sync, "List models"
+in the Config tab shows exactly your live local models **plus** whatever cloud routes you chose to keep.
+
+Conversely, **`stop` empties that block** — once the runtime is down the gateway shouldn't advertise
+models it can't reach, so the local routes are removed (a still-running gateway is reloaded so it drops
+them immediately, or taken down if nothing is left to serve). The next `start --gateway` repopulates it
+from live models.
+
+> **The gateway is for local models.** For **cloud** models you don't need it at all — point JARVIS
+> straight at the provider (`api.openai.com`, etc.) in **single mode**. `litellm/config.yaml` therefore
+> ships with **no cloud routes**, so its model list is purely your local models — no phantom
+> Claude/GPT/Gemini entries.
+
+### Mixing a cloud model into the gateway (optional)
+
+The one case for putting a cloud model *in the gateway* is a **single endpoint serving local + cloud
+tiers in multi mode** — e.g. chat on a local Ollama model, smart-tier on Claude, all via `:4000`. To do
+that, add a route **above** the `BEGIN local routes` marker (the managed block only touches what's
+between the markers):
+
+```yaml
+model_list:
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # >>> BEGIN local routes — AUTO-GENERATED ... >>>
+  # <<< END local routes <<<
+```
+
+Put the key in `JARVIS_CONFIG.json` (`llm.anthropic_api_key` → `ANTHROPIC_API_KEY`, `llm.api_key` →
+`OPENAI_API_KEY`, `llm.gemini_api_key` → `GEMINI_API_KEY`); `JARVIS_LOCAL_LLM.sh` exports it into the
+gateway on `--gateway` startup. Then set the relevant tier's model to `claude-sonnet-4-6`.
+
 ---
 
 ## Command reference
