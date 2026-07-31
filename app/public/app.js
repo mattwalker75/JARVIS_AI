@@ -1477,7 +1477,7 @@ const PROVIDERS = [
   { id: "xai", label: "xAI (Grok)", url: "https://api.x.ai/v1", key: true },
   { id: "perplexity", label: "Perplexity", url: "https://api.perplexity.ai", key: true },
   { id: "gemini", label: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: true },
-  { id: "local", label: "Local endpoint (no key)", url: "", key: false },
+  { id: "local", label: "Local endpoint ( run local LLM )", url: "", key: false },
   { id: "generic", label: "Generic (custom OpenAI-compatible)", url: "", key: "optional" },
 ];
 function populateProviderSelect(current) {
@@ -1493,6 +1493,7 @@ function syncProviderUI() {
   const keyRow = $("cfg-row-apikey"); if (keyRow) keyRow.style.display = showKey ? "" : "none";
   const local = p && p.id === "local";
   const oll = $("cfg-sec-ollama"); if (oll) oll.style.display = local ? "" : "none";  // Ollama host-tuning shown for a local endpoint
+  const lh = $("cfg-local-hint"); if (lh) lh.hidden = !local;   // "use JARVIS_LOCAL_LLM.sh" note under the endpoint URL
   syncModelMode();
 }
 // Show ONLY the single-model field OR the multi-tier grid, per the selected model mode.
