@@ -69,10 +69,10 @@ where the model runs. That URL is either:
 - **a cloud provider** — e.g. `https://api.openai.com/v1` (empty `base_url` falls back
   to OpenAI). Nothing else to run.
 - **a local runtime on your host** — managed by the optional **`JARVIS_LOCAL_LLM.sh`**
-  helper (Ollama today; MLX / vLLM / llama.cpp are pluggable backends for later). It
-  applies your local model config, ensures the runtime is up, and **prints the endpoint
-  URL to paste into Config → Endpoint URL**. The app reaches host runtimes over
-  `host.docker.internal` (`jarvis-app` sets `extra_hosts: host.docker.internal:host-gateway`).
+  helper (**Ollama** and **MLX** today; vLLM / llama.cpp are pluggable backends for later). It
+  ensures the runtime is up and **prints the endpoint URL to paste into Config → Endpoint URL**.
+  The app reaches host runtimes over `host.docker.internal` (`jarvis-app` sets
+  `extra_hosts: host.docker.internal:host-gateway`).
 
 For multi-model routing across providers behind one endpoint, `JARVIS_LOCAL_LLM.sh
 --gateway` can front the runtime with a **LiteLLM gateway** — now a standalone stack in

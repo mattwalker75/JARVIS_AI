@@ -9,6 +9,14 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-31: **Docs updated to match Architecture B + current state.** Rewrote the self-help guide
+  `READ_ONLY_FILES/JARVIS_Guides/local-models-mlx.md` for the discovery-based MLX flow (`mlx-serve` /
+  `mlx-ls` / `mlx-stop` / `mlx-up`, no config block); fixed `switching-models.md`'s MLX step. Corrected
+  `Docs/architecture.md` and root `README.md` which still listed MLX as a "later" backend (it's shipped).
+  Added the `start --backend ollama --gateway` example to `config --backend ollama` step 4. (Guides,
+  `Docs/architecture.md`, `README.md`, `JARVIS_LOCAL_LLM.sh`.)
+
+### Changed
 - 2026-07-31: **MLX is now discovery-based, like Ollama (Architecture B).** MLX models are managed
   from the CLI instead of a config array — you bring each model online as its own `mlx_lm.server`
   process (so several stay hot at once, no reload when JARVIS switches tiers), and the script

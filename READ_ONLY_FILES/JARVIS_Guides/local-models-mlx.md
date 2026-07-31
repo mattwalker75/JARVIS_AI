@@ -4,6 +4,11 @@ MLX is Apple's on-device runtime — it runs models natively on Apple Silicon Ma
 It runs on the **host** (needs Metal), in a Python environment under `mlx/`. Text-only for now
 (keep vision on Ollama).
 
+MLX is **discovery-based, like Ollama** — you bring models online from the command line and the
+script finds them. There is **no MLX config block** to edit. Each model runs as its **own
+`mlx_lm.server` process on its own port**, so several can stay **hot at once** (no reload when JARVIS
+switches tiers — great if you have plenty of RAM).
+
 Print the full guide anytime with: `./JARVIS_LOCAL_LLM.sh config --backend mlx`
 
 ## Steps
@@ -16,30 +21,39 @@ Print the full guide anytime with: `./JARVIS_LOCAL_LLM.sh config --backend mlx`
 2. **Pick a model** from Hugging Face's `mlx-community` org (pre-quantized; `-4bit` suits most Macs):
    browse https://huggingface.co/mlx-community — e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`.
    Models auto-download into `mlx/models/` on first serve (or pre-fetch with `hf download <repo>`).
+   - **List** what you've downloaded: `mlx_lm.manage --scan`
+   - **Delete** one: `mlx_lm.manage --delete --pattern <substr>`
 
-3. **Configure the model(s)** — the `mlx.models` list in `config/JARVIS_CONFIG.json`, each with its
-   own port. Easiest: the **MLX models** section in the Config tab (add rows of name / model / port):
+3. **Bring the model(s) online** — each becomes its own server on its own port:
    ```
-   "mlx": { "models": [
-     { "name": "chat", "model": "mlx-community/Qwen2.5-7B-Instruct-4bit", "port": 8080 }
-   ] }
+   ./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-7B-Instruct-4bit          # auto-assigns a port (8080+)
+   ./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-32B-Instruct-4bit --port 8081
+   ./JARVIS_LOCAL_LLM.sh mlx-ls                                                    # what's running now
+   ./JARVIS_LOCAL_LLM.sh mlx-stop <model | port | all>                            # take one/all offline
+   ```
+   `mlx-serve` remembers what you started, so **`./JARVIS_LOCAL_LLM.sh mlx-up`** relaunches your set
+   after a reboot (MLX has no auto-starting daemon).
+
+4. **Wire it into JARVIS + get the URL:**
+   ```
+   ./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway  # discovers running servers -> ONE URL via LiteLLM
+   ./JARVIS_LOCAL_LLM.sh start --backend mlx            # single server -> its :port URL (no gateway)
+   ./JARVIS_LOCAL_LLM.sh status                         # Ollama + running MLX servers + gateway
    ```
 
-4. **Start it + get the URL:**
-   ```
-   ./JARVIS_LOCAL_LLM.sh start  --backend mlx            # one model  -> one URL
-   ./JARVIS_LOCAL_LLM.sh start  --backend mlx --gateway  # many models-> ONE URL via LiteLLM
-   ./JARVIS_LOCAL_LLM.sh status                          # each model's port + up/down
-   ./JARVIS_LOCAL_LLM.sh stop   --backend mlx            # stop the server(s)
-   ```
-
-5. **Point JARVIS at it:** Config → **Endpoint URL** = the printed `http://host.docker.internal:<port>/v1`,
-   **API key** blank, set the model, **Save**.
+5. **Point JARVIS at it:** Config → **Endpoint URL** = the printed URL, **API key** blank, click
+   **List models**, pick your model, **Save**.
+   - **Multiple models** (`--gateway`): each shows by its real **id** (`mlx-community/…`, like an
+     Ollama tag) — set the model (single mode) or the chat/cheap/smart tiers (multi mode) to those ids.
+   - **Single model:** point the Endpoint URL straight at its `:port` (no gateway needed).
 
 ## Important
 
-- Editing `mlx.models` (in the UI or the file) only writes config — the UI can't launch host
-  processes. **Re-run `./JARVIS_LOCAL_LLM.sh start --backend mlx`** to (re)launch the server(s).
-- **One model = one `mlx_lm.server` process** on its own port. For several models behind one
-  endpoint, add `--gateway` (LiteLLM fronts them).
+- **No config to edit.** The running `mlx_lm.server` processes are the source of truth — bring models
+  up with `mlx-serve`, take them down with `mlx-stop`, list with `mlx-ls`.
+- **Reboot recovery:** run `./JARVIS_LOCAL_LLM.sh mlx-up` to relaunch the set you'd served (or
+  `mlx-serve` them again).
+- **Several models stay hot at once** (one process each), so switching tiers is instant — but each
+  loaded model uses memory. Big models (e.g. a 35B) take a while to load the first time.
+- **Vision:** `mlx-lm` is text-only — keep the **vision** tier on an Ollama model like `qwen2.5vl`.
 - Models save under `mlx/models/`; `rm -rf mlx/models` to reclaim disk.

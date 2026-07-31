@@ -9,7 +9,7 @@ runs on your machine and binds to **localhost only**.
 The model backend is flexible: JARVIS is a pure OpenAI-dialect client that talks to
 whatever endpoint you point it at — a **cloud provider** (OpenAI, Anthropic, Gemini, …),
 or a **local runtime** you start with the optional `./JARVIS_LOCAL_LLM.sh` helper (**Ollama**
-today; MLX / vLLM / llama.cpp later). An optional **LiteLLM gateway** can front several
+and **MLX** today; vLLM / llama.cpp later). An optional **LiteLLM gateway** can front several
 providers behind one endpoint so you can mix them per task (a fast local model for chat, a
 bigger one for hard reasoning, a vision model for screenshots).
 

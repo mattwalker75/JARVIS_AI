@@ -144,8 +144,9 @@ ollama_config_help() {
    RE-RUN  ./JARVIS_LOCAL_LLM.sh start  afterwards for the changes to take effect.
 
 4) START it + get the URL
-     ./JARVIS_LOCAL_LLM.sh start          # add --gateway to front it with LiteLLM (multi-model routing)
-     -> prints  http://${APP_HOST}:${OLLAMA_PORT}/v1
+     ./JARVIS_LOCAL_LLM.sh start --backend ollama            # talk straight to Ollama
+     ./JARVIS_LOCAL_LLM.sh start --backend ollama --gateway  # front it with the LiteLLM gateway (multi-model routing)
+     -> prints  http://${APP_HOST}:${OLLAMA_PORT}/v1  (or the gateway URL when you add --gateway)
 
 5) POINT JARVIS at it
      JARVIS -> Config -> Endpoint URL = that URL. Set the model (single mode) or the

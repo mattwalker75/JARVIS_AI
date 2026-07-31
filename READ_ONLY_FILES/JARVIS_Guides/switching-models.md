@@ -25,7 +25,8 @@ Local runtimes run on your computer, outside JARVIS. First get the runtime up an
 
 - **Ollama:** see `local-models-ollama.md` → run `./JARVIS_LOCAL_LLM.sh start` → it prints a URL
   like `http://host.docker.internal:11434/v1`.
-- **MLX (Apple Silicon):** see `local-models-mlx.md` → run `./JARVIS_LOCAL_LLM.sh start --backend mlx`.
+- **MLX (Apple Silicon):** see `local-models-mlx.md` → bring a model online with
+  `./JARVIS_LOCAL_LLM.sh mlx-serve <model>`, then `./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway`.
 
 Then in **Config**:
 1. **Endpoint URL** → paste the URL the script printed.
