@@ -8,6 +8,15 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-30: **MLX gateway routes are named by the actual model id, not the friendly alias.**
+  `start --backend mlx --gateway` (and `gateway-sync`) now emit each MLX route's `model_name` as the
+  real `mlx.models[].model` (e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`) instead of the entry's
+  `name` (`chat`) — so "List models" shows the actual model, consistent with how Ollama tags work, and
+  there's no opaque alias hiding which model a route serves. The `name` field still labels the process
+  in start/stop/status and the log file. Entries with no `model` set are skipped with a clear warning.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`.)
+
 ### Fixed
 - 2026-07-30: **`JARVIS_LOCAL_LLM.sh status` now reports every backend, not just Ollama.** `status`
   ran `${BACKEND}_status`, and `--backend` defaults to `ollama`, so a plain `status` always said

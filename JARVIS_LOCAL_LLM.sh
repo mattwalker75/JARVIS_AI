@@ -313,23 +313,26 @@ mlx_stop() {
   done < <(mlx_models_list)
   pkill -f "mlx_lm.server" 2>/dev/null || true
 }
-mlx_hint() { echo "Set the JARVIS model / tier to the same 'name' you gave each mlx.models entry (routed via the gateway), or point a tier straight at a port above."; }
+mlx_hint() { echo "Via the gateway: set the JARVIS model / tier to the mlx.models 'model' id (the gateway route is named by the actual model). Or point a tier straight at a model's :port above."; }
 # Emit the LiteLLM route YAML for the LIVE MLX servers (stdout = YAML only; notes → stderr).
 # Unlike Ollama, each MLX model is its own process on its own port — so we probe EACH port and
-# emit a route only for servers that are actually answering. model_name = the entry's friendly name.
+# emit a route only for servers that are actually answering. The route is named by the ACTUAL model
+# id it serves (mlx.models[].model — what the server was started with), NOT the friendly 'name', so
+# "List models" shows the real model, consistent with Ollama. (The 'name' still labels the process
+# in start/stop/status and the log file.)
 mlx_gateway_routes() {
   local n=0
   while IFS='|' read -r name model port; do
-    [[ -z "$name" ]] && continue
+    [[ -z "$model" ]] && { warn "MLX entry '${name:-?}' (:$port) has no 'model' set in config — skipping (set mlx.models[].model)." >&2; continue; }
     if port_up "http://localhost:${port}/v1/models"; then
-      printf '  - model_name: "%s"\n' "$name"
+      printf '  - model_name: "%s"\n' "$model"
       printf '    litellm_params:\n'
       printf '      model: "openai/%s"\n' "$model"
       printf '      api_base: http://%s:%s/v1\n' "$APP_HOST" "$port"
       printf '      api_key: mlx\n'
       n=$((n+1))
     else
-      warn "MLX '$name' (:$port) not responding — skipping (run 'start --backend mlx' first)." >&2
+      warn "MLX '${name:-$model}' (:$port) not responding — skipping (run 'start --backend mlx' first)." >&2
     fi
   done < <(mlx_models_list)
   echo "    ($n MLX servers up)" >&2
@@ -369,7 +372,9 @@ mlx_config_help() {
 
 5) POINT JARVIS at it
      JARVIS -> Config -> Endpoint URL = the printed URL. Single model: paste its :port URL.
-     Multiple: use --gateway and set the tiers to each model's 'name'.
+     Multiple: use --gateway and set the model/tiers to each model's ID (the gateway route is named
+     by the actual 'model', e.g. mlx-community/Qwen2.5-7B-Instruct-4bit — the 'name' just labels the
+     process in start/stop/status).
 
 NOTE: MLX runs on the HOST, not in the JARVIS containers (it needs Metal). JARVIS reaches it over
       host.docker.internal. mlx-lm is text-only; vision models use a separate package (mlx-vlm) —

@@ -20,7 +20,7 @@ There are **two backends** today (a third, the optional LiteLLM gateway, unifies
 | Serving | **one daemon, many models** (swaps on demand) | **one server per model** (a process per port) |
 | Models stored in | `~/.ollama/` (system-wide) | `mlx/models/` (in the repo, gitignored) |
 | Vision | ✅ (e.g. `qwen2.5vl`) | ❌ text-only (use Ollama for vision) |
-| Pick in JARVIS | the Ollama **tag** (`qwen3:8b`) | the entry **name/port** from `mlx.models` |
+| Pick in JARVIS | the Ollama **tag** (`qwen3:8b`) | the **model id** (`mlx-community/…`) via gateway, or the `:port` direct |
 
 Either backend has a built-in setup guide:
 
@@ -110,7 +110,9 @@ Config tab** (the **MLX models** section — add/remove name/model/port rows) or
 ```
 
 **5. Point JARVIS at it** — single model: paste its `http://host.docker.internal:<port>/v1`.
-Multiple: use `--gateway` and set your tiers to each model's `name`.
+Multiple: use `--gateway` and set your model/tiers to each model's **id** (via the gateway the route
+is named by the actual `model`, e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`, just like an Ollama tag
+— the `name` field only labels the process in start/stop/status).
 
 > **Apply step:** editing `mlx.models` (in the UI or the file) only writes config — the UI **can't
 > launch host processes**. Re-run `./JARVIS_LOCAL_LLM.sh start --backend mlx` to (re)launch.
