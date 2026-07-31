@@ -8,6 +8,16 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-07-30: **`max_tokens` → `max_completion_tokens` auto-fallback for newer OpenAI models.** The
+  OpenAI reasoning-model family (o1/o3/gpt-5, e.g. `gpt-5.4-mini`) rejects `max_tokens` with a 400
+  ("Unsupported parameter: 'max_tokens' ... Use 'max_completion_tokens' instead"). The LLM client now
+  defaults to `max_tokens` (works everywhere else, incl. Ollama/LiteLLM) and, on that specific 400,
+  transparently retries the call with `max_completion_tokens` — then **remembers that model** so
+  subsequent turns send the right parameter up front (no repeated failed first attempt). The memory is
+  keyed by model name, so switching models re-probes. Applies to both the main tool-loop and the vision
+  path. (`app/src/llm.js`.)
+
 ### Fixed
 - 2026-07-30: **Header model badge refreshes on Config "Save all".** The top-of-UI model badge was
   set only at page load and on the quick model dropdown, so after switching models in the Config tab

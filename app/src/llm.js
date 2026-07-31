@@ -62,6 +62,39 @@ function estimateCost(model, u) {
   return +(((u.prompt_tokens || 0) / 1000) * pi + ((u.completion_tokens || 0) / 1000) * po).toFixed(6);
 }
 
+// Token-limit parameter compatibility. Most OpenAI-compatible endpoints (and Ollama/LiteLLM) take
+// `max_tokens`, but newer OpenAI reasoning models (o1/o3/gpt-5 family) REJECT it and require
+// `max_completion_tokens`. We default to max_tokens and, the first time a given model rejects it,
+// remember that model and use max_completion_tokens for it from then on (until you switch models —
+// the memory is keyed by model name, so a different model re-probes). See postChat().
+const wantsMaxCompletion = new Set();
+function tokenLimitParam(model, n) {
+  return wantsMaxCompletion.has(model) ? { max_completion_tokens: n } : { max_tokens: n };
+}
+// Recognize ONLY the specific "use max_completion_tokens instead" 400 (not any 400 mentioning tokens).
+function isMaxTokensUnsupported(status, text) {
+  return status === 400 && /max_completion_tokens/i.test(text || "") &&
+    /max_tokens|unsupported_parameter/i.test(text || "");
+}
+// POST a /chat/completions body, transparently retrying max_tokens -> max_completion_tokens on that
+// one 400. `extra` merges into the body per call (e.g. {stream:true}). Returns the fetch Response;
+// the caller still handles other errors. On fallback the offending model is remembered so subsequent
+// turns build the right param up front (no repeated failed first attempt).
+async function postChat(url, headers, body, signal, extra = {}) {
+  const send = (b) => fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify({ ...b, ...extra }), signal });
+  let resp = await send(body);
+  if (resp.status === 400 && "max_tokens" in body) {
+    const t = await resp.clone().text();   // peek without consuming the body the caller may read
+    if (isMaxTokensUnsupported(resp.status, t)) {
+      wantsMaxCompletion.add(body.model);
+      const { max_tokens, ...rest } = body;
+      log.warn("llm", `model ${body.model} rejects max_tokens — retrying with max_completion_tokens (remembered for this model)`);
+      resp = await send({ ...rest, max_completion_tokens: max_tokens });
+    }
+  }
+  return resp;
+}
+
 async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode, noTools }) {
   const llm = config.llm || {};
   if ((llm.provider || "").toLowerCase() === "mock") return mockChat(messages);
@@ -161,7 +194,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       model: lastModel,
       messages: oneSystemAtFront(convo),
       temperature: llm.temperature ?? 0.4,
-      max_tokens: llm.max_tokens ?? 1200,
+      ...tokenLimitParam(lastModel, llm.max_tokens ?? 1200),   // max_tokens, or max_completion_tokens for models that require it
       ...(toolset.length ? { tools: toolset, tool_choice: "auto" } : {}),   // omit tools entirely when disabled
       stream_options: { include_usage: true },
     };
@@ -344,7 +377,7 @@ async function fetchWithRetry(url, options, tries = 4) {
 // One streamed /chat/completions call. Emits {type:"token"} per content delta,
 // assembles streamed tool-call deltas, captures usage. Returns {message, usage}.
 async function streamChatCompletion(url, headers, body, emit, signal, watchdogOn = true) {
-  const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify({ ...body, stream: true }), signal });
+  const resp = await postChat(url, headers, body, signal, { stream: true });
   if (!resp.ok || !resp.body) {
     const t = resp.body ? await resp.text() : "";
     throw new Error(`LLM ${resp.status} (model ${body.model}): ${t.slice(0, 400)}`);
@@ -429,11 +462,11 @@ async function analyzeImage(dataUrl, question, signal) {
       { type: "image_url", image_url: { url: dataUrl } },
     ] }],
     temperature: 0,
-    max_tokens: llm.max_tokens ?? 1200,
+    ...tokenLimitParam(modelFor("vision"), llm.max_tokens ?? 1200),   // same max_tokens/max_completion_tokens fallback
     stream: false,
     // NOTE: deliberately NO `tools` — vision models (qwen2.5vl) reject a tools payload.
   };
-  const resp = await fetchWithRetry(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+  const resp = await postChat(url, headers, body, signal);
   if (!resp.ok) throw new Error(`vision ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
   const d = await resp.json();
   const m = d.choices && d.choices[0] && d.choices[0].message;
