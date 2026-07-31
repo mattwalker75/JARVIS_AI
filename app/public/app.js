@@ -1427,47 +1427,6 @@ function populateStructured() {
   if (getPath(cfgObj, "voice.enabled") === undefined) $("cfg-voice-enabled").checked = true;
   if (getPath(cfgObj, "skills_autohint") === undefined) $("cfg-skills-autohint").checked = true;
   if (getPath(cfgObj, "ollama.manage") === undefined) $("cfg-ollama-manage").checked = true;
-  renderMlxRows();
-}
-
-// --- MLX models editor (config.mlx.models = [{name,model,port}, ...]) ---
-function mlxEnsure() { if (!cfgObj.mlx || typeof cfgObj.mlx !== "object") cfgObj.mlx = {}; if (!Array.isArray(cfgObj.mlx.models)) cfgObj.mlx.models = []; return cfgObj.mlx.models; }
-function mlxSet(i, k, v) { const a = mlxEnsure(); if (!a[i]) a[i] = {}; if (v === undefined || v === "") delete a[i][k]; else a[i][k] = v; renderRawConfig(); }
-function mlxRemove(i) { mlxEnsure().splice(i, 1); renderMlxRows(); renderRawConfig(); }
-// The tier each MLX server is intended for (a label here; you still set the tier's model in the
-// Model-mode "multi" tier pickers). Also used as the process label in start/stop/status + log file.
-const MLX_TIERS = [["chat", "chat tier"], ["cheap", "cheap tier"], ["smart", "smart tier"], ["vision", "vision tier"]];
-function mlxAdd() {
-  const a = mlxEnsure();
-  const used = new Set(a.map((m) => m.name));
-  const nextTier = MLX_TIERS.map(([v]) => v).find((t) => !used.has(t)) || "";   // default to the first free tier
-  a.push({ name: nextTier, model: "", port: 8080 + a.length });
-  renderMlxRows(); renderRawConfig();
-  $("cfg-mlx-rows").lastChild?.querySelector(".mlx-model")?.focus();
-}
-function renderMlxRows() {
-  const box = $("cfg-mlx-rows"); if (!box) return;
-  box.innerHTML = "";
-  mlxEnsure().forEach((m, i) => {
-    const row = document.createElement("div"); row.className = "cfg-mlx-row";
-    const mk = (cls, ph, val, type) => { const el = document.createElement("input"); el.className = cls; el.placeholder = ph; if (type) el.type = type; el.value = val == null ? "" : val; return el; };
-    // Tier dropdown (replaces the free-text name). Value stored in mlx.models[].name.
-    const tier = document.createElement("select"); tier.className = "mlx-tier"; tier.title = "Which JARVIS tier this MLX model is for (label). Set the tier's model in the multi-mode tier pickers.";
-    const opt = (v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; return o; };
-    tier.appendChild(opt("", "— tier —"));
-    MLX_TIERS.forEach(([v, l]) => tier.appendChild(opt(v, l)));
-    if (m.name && !MLX_TIERS.some(([v]) => v === m.name)) tier.appendChild(opt(m.name, m.name + " (custom)"));   // preserve a legacy/custom label
-    tier.value = m.name || "";
-    const model = mk("mlx-model", "mlx-community/…", m.model);
-    const port = mk("mlx-port", "8080", m.port, "number");
-    const del = document.createElement("button"); del.type = "button"; del.className = "mlx-del ghost"; del.textContent = "✕"; del.title = "Remove this model";
-    tier.addEventListener("change", () => mlxSet(i, "name", tier.value || undefined));
-    model.addEventListener("input", () => mlxSet(i, "model", model.value.trim()));
-    port.addEventListener("input", () => mlxSet(i, "port", port.value === "" ? undefined : Number(port.value)));
-    del.addEventListener("click", () => mlxRemove(i));
-    row.append(tier, model, port, del);
-    box.appendChild(row);
-  });
 }
 
 function collectStructured() {
@@ -1649,7 +1608,6 @@ CFG_FIELDS.forEach(([id]) => { const el = $(id); if (el) el.addEventListener("ch
 (() => { const s = $("cfg-provider"); if (s) s.addEventListener("change", onProviderChange); })();
 (() => { const b = $("cfg-list-models"); if (b) b.addEventListener("click", listConfigModels); })();
 (() => { const m = $("cfg-model-mode"); if (m) m.addEventListener("change", syncModelMode); })();
-(() => { const b = $("cfg-mlx-add"); if (b) b.addEventListener("click", mlxAdd); })();
 MODEL_SELECT_IDS.forEach((id) => { const s = $(id); if (s) s.addEventListener("change", onModelSelectChange); });
 // Show/hide the API key so it can be read and edited (it's stored/sent in the clear anyway).
 (() => {
