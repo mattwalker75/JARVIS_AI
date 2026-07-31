@@ -258,85 +258,148 @@ gateway_down() { [[ -f "$LITELLM_COMPOSE" ]] && docker compose -f "$LITELLM_COMP
 gateway_url()  { echo "http://${APP_HOST}:${GATEWAY_PORT}/v1"; }
 
 # ============================ backend: mlx (Apple Silicon) ============================
-# Runs local models natively on the macOS host via mlx-lm's OpenAI-compatible server. Each
-# configured model gets its own mlx_lm.server process on its own port; front several with the
-# LiteLLM gateway for one endpoint. The venv + models live under mlx/ (see ./ACTIVATE.sh).
+# Runs local models natively on the macOS host via mlx-lm's OpenAI-compatible server. DISCOVERY-BASED
+# (like Ollama): you bring models online with `mlx-serve <model>` (each = its own mlx_lm.server process
+# on its own port, so several stay hot at once); the script DISCOVERS the running servers and maps them
+# — no config array. Front several with the LiteLLM gateway for one endpoint. venv + models under mlx/.
 MLX_VENV="${SCRIPT_DIR}/mlx/venv"
 MLX_MODELS_DIR="${SCRIPT_DIR}/mlx/models"
 MLX_SERVER="$MLX_VENV/bin/mlx_lm.server"
-MLX_DEFAULT_MODEL="mlx-community/Qwen2.5-7B-Instruct-4bit"
 
-# True if the config actually declares MLX models (so `status` can show MLX without the
-# default-fallback noise on pure-Ollama setups).
-mlx_has_models() { python3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG')).get('mlx',{}).get('models',[]) else 1)" 2>/dev/null; }
-# Emit the configured MLX models as "name|model|port" lines (one sensible default if unset).
-mlx_models_list() {
-  python3 - "$CFG" "$MLX_DEFAULT_MODEL" <<'PY' 2>/dev/null
-import json, sys
-cfg, default = sys.argv[1], sys.argv[2]
-try: m = json.load(open(cfg)).get("mlx", {}).get("models", [])
-except Exception: m = []
-if not m: m = [{"name": "chat", "model": default, "port": 8080}]
-for e in m:
-    print(f"{e.get('name','model')}|{e.get('model','')}|{e.get('port',8080)}")
-PY
-}
+MLX_REGISTRY="${SCRIPT_DIR}/mlx/serving.json"
+MLX_PORT_BASE=8080
+
 mlx_ensure_venv() {
   [[ "$(uname)" == "Darwin" ]] || { err "MLX requires macOS on Apple Silicon."; return 1; }
   [[ -x "$MLX_SERVER" ]] || { err "MLX not installed yet — run:  source ./ACTIVATE.sh  (first run installs mlx-lm)."; return 1; }
 }
 mlx_apply_config() { info "MLX models cache: $MLX_MODELS_DIR (HF_HOME)"; }
-mlx_start_one() { # name model port
-  local name="$1" model="$2" port="$3"
-  if port_up "http://localhost:${port}/v1/models"; then ok "MLX '$name' already up on :$port ($model)."; return 0; fi
-  [[ -n "$model" ]] || { warn "MLX '$name' has no model set — skipping."; return 0; }
-  info "Starting MLX '$name' → $model on :$port  (first run downloads the model into mlx/models)..."
-  HF_HOME="$MLX_MODELS_DIR" nohup "$MLX_SERVER" --model "$model" --host 0.0.0.0 --port "$port" \
-    > "${SCRIPT_DIR}/mlx/${name}.log" 2>&1 &
-  for _ in $(seq 1 120); do port_up "http://localhost:${port}/v1/models" && { ok "MLX '$name' up on :$port."; return 0; }; sleep 1; done
-  warn "MLX '$name' not answering on :$port yet — the model may still be downloading (see mlx/${name}.log)."
+
+# ---- DISCOVERY: the RUNNING mlx_lm.server processes are the source of truth (like Ollama's daemon,
+#      but one process per model). Emit "model|port" for each, parsed from its command line.
+mlx_discover() {
+  local pid args model port
+  for pid in $(pgrep -f 'mlx_lm\.server' 2>/dev/null); do
+    args="$(ps -p "$pid" -o args= 2>/dev/null)"
+    [[ "$args" == *mlx_lm.server* ]] || continue
+    model="$(sed -n 's/.*--model[= ][= ]*\([^ ]*\).*/\1/p' <<<"$args")"
+    port="$(sed -n 's/.*--port[= ][= ]*\([0-9][0-9]*\).*/\1/p' <<<"$args")"
+    [[ -n "$port" ]] || port="$MLX_PORT_BASE"
+    [[ -n "$model" ]] && echo "${model}|${port}"
+  done | sort -u
 }
-mlx_ensure_running() {
+mlx_running() { [[ -n "$(mlx_discover)" ]]; }
+
+# ---- REGISTRY (mlx/serving.json): auto-written by mlx-serve so `mlx-up` / `start` can relaunch your
+#      set after a reboot. NOT hand-edited — it just remembers what you brought online.
+mlx_registry_add() {  # model port
+  python3 - "$MLX_REGISTRY" "$1" "$2" <<'PY' 2>/dev/null
+import json, sys, os
+path, model, port = sys.argv[1], sys.argv[2], int(sys.argv[3])
+try: reg = json.load(open(path))
+except Exception: reg = []
+reg = [e for e in reg if e.get("model") != model and e.get("port") != port]
+reg.append({"model": model, "port": port})
+os.makedirs(os.path.dirname(path), exist_ok=True)
+json.dump(reg, open(path, "w"), indent=2)
+PY
+}
+mlx_registry_remove() {  # model|port|all
+  python3 - "$MLX_REGISTRY" "$1" <<'PY' 2>/dev/null
+import json, sys
+path, key = sys.argv[1], sys.argv[2]
+try: reg = json.load(open(path))
+except Exception: reg = []
+reg = [] if key == "all" else [e for e in reg if str(e.get("model")) != key and str(e.get("port")) != key]
+json.dump(reg, open(path, "w"), indent=2)
+PY
+}
+mlx_registry_list() {  # emit "model|port"
+  python3 - "$MLX_REGISTRY" <<'PY' 2>/dev/null
+import json, sys
+try: reg = json.load(open(sys.argv[1]))
+except Exception: reg = []
+for e in reg: print(f"{e.get('model','')}|{e.get('port', 8080)}")
+PY
+}
+mlx_next_port() {  # first free port at/after MLX_PORT_BASE
+  local p="$MLX_PORT_BASE"
+  while port_up "http://localhost:$p/v1/models" || lsof -ti tcp:"$p" >/dev/null 2>&1; do p=$((p+1)); done
+  echo "$p"
+}
+
+# Bring ONE model online as its own mlx_lm.server (backgrounded, logged) + record it in the registry.
+mlx_serve_one() {  # model [port]
   mlx_ensure_venv || return 1
-  while IFS='|' read -r name model port; do [[ -n "$name" ]] && mlx_start_one "$name" "$model" "$port"; done < <(mlx_models_list)
+  local model="$1" port="${2:-}"
+  [[ -n "$model" ]] || { err "usage: ./JARVIS_LOCAL_LLM.sh mlx-serve <model> [--port N]"; return 1; }
+  local up; up="$(mlx_discover | awk -F'|' -v m="$model" '$1==m{print $2; exit}')"
+  if [[ -n "$up" ]]; then ok "MLX $model already up on :$up."; mlx_registry_add "$model" "$up"; return 0; fi
+  [[ -n "$port" ]] || port="$(mlx_next_port)"
+  local log; log="${SCRIPT_DIR}/mlx/$(echo "$model" | tr '/:' '__').log"
+  info "Starting MLX $model on :$port  (first run downloads into mlx/models; big models take a while)..."
+  HF_HOME="$MLX_MODELS_DIR" nohup "$MLX_SERVER" --model "$model" --host 0.0.0.0 --port "$port" > "$log" 2>&1 &
+  mlx_registry_add "$model" "$port"
+  for _ in $(seq 1 180); do port_up "http://localhost:${port}/v1/models" && { ok "MLX $model up on :$port."; return 0; }; sleep 1; done
+  warn "MLX $model not answering on :$port yet — may still be loading (see $log)."
 }
+# Relaunch any registered model that isn't currently running (reboot recovery).
+mlx_up() {
+  mlx_ensure_venv || return 1
+  local any=0
+  while IFS='|' read -r model port; do
+    [[ -z "$model" ]] && continue; any=1
+    if port_up "http://localhost:${port}/v1/models"; then ok "MLX $model already up on :$port."
+    else mlx_serve_one "$model" "$port"; fi
+  done < <(mlx_registry_list)
+  [[ "$any" == 0 ]] && info "No MLX models registered yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <model>"
+}
+# Stop a running MLX server by model id or port, or all; drop it from the registry.
+mlx_stop_target() {  # model|port|all
+  local target="${1:-all}" stopped=0 pid
+  while IFS='|' read -r model port; do
+    [[ -z "$port" ]] && continue
+    if [[ "$target" == "all" || "$target" == "$model" || "$target" == "$port" ]]; then
+      pid="$(lsof -ti tcp:"$port" 2>/dev/null | head -1)"
+      [[ -n "$pid" ]] && kill "$pid" 2>/dev/null && { ok "stopped $model (:$port)."; stopped=1; }
+      [[ "$target" != "all" ]] && mlx_registry_remove "$target"
+    fi
+  done < <(mlx_discover)
+  if [[ "$target" == "all" ]]; then pkill -f "mlx_lm.server" 2>/dev/null || true; mlx_registry_remove all; ok "stopped all MLX servers."; fi
+  [[ "$stopped" == 0 && "$target" != "all" ]] && warn "No running MLX server matched '$target'."
+  return 0
+}
+mlx_ls() {
+  local any=0
+  while IFS='|' read -r model port; do
+    [[ -z "$model" ]] && continue; any=1
+    printf 'MLX (:%s) ' "$port"; port_up "http://localhost:${port}/v1/models" && echo "up    $model" || echo "down  $model"
+  done < <(mlx_discover)
+  [[ "$any" == 0 ]] && info "No MLX servers running. Bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <model>"
+}
+
+# ---- backend contract (all discovery-driven) ----
+mlx_ensure_running() { mlx_ensure_venv || return 1; mlx_up; }   # `start` relaunches the registered set
 mlx_url() {
-  local n; n="$(mlx_models_list | grep -c .)"
-  if [[ "$n" -le 1 ]]; then
-    local port; port="$(mlx_models_list | head -1 | cut -d'|' -f3)"; echo "http://${APP_HOST}:${port:-8080}/v1"
-  else
-    while IFS='|' read -r name model port; do [[ -n "$name" ]] && echo "http://${APP_HOST}:${port}/v1   # ${name}: ${model}"; done < <(mlx_models_list)
-    echo "# multiple models: front them with --gateway for ONE endpoint, or point a tier at each port."
-  fi
+  local n; n="$(mlx_discover | grep -c .)"
+  if [[ "$n" -le 1 ]]; then local port; port="$(mlx_discover | head -1 | cut -d'|' -f2)"; echo "http://${APP_HOST}:${port:-8080}/v1"
+  else while IFS='|' read -r model port; do [[ -n "$model" ]] && echo "http://${APP_HOST}:${port}/v1   # ${model}"; done < <(mlx_discover)
+       echo "# multiple models: front them with --gateway for ONE endpoint."; fi
 }
 mlx_status() {
-  # Skip only entries with no port — a live server should still show even if its name/model is
-  # blank in config (that's a useful signal that the config needs fixing, not a reason to hide it).
-  while IFS='|' read -r name model port; do
+  while IFS='|' read -r model port; do
     [[ -z "$port" ]] && continue
-    printf 'MLX %-8s (:%s): ' "${name:-?}" "$port"; port_up "http://localhost:${port}/v1/models" && echo "up  (${model:-<no model set in config>})" || echo "down"
-  done < <(mlx_models_list)
+    printf 'MLX     (:%s): ' "$port"; port_up "http://localhost:${port}/v1/models" && echo "up  ($model)" || echo "down  ($model)"
+  done < <(mlx_discover)
 }
-mlx_stop() {
-  info "Stopping MLX server(s)..."
-  while IFS='|' read -r name model port; do
-    [[ -z "$port" ]] && continue
-    local pid; pid="$(lsof -ti tcp:"$port" 2>/dev/null | head -1)"
-    [[ -n "$pid" ]] && { kill "$pid" 2>/dev/null && ok "stopped '$name' (:$port)."; }
-  done < <(mlx_models_list)
-  pkill -f "mlx_lm.server" 2>/dev/null || true
-}
-mlx_hint() { echo "Via the gateway: set the JARVIS model / tier to the mlx.models 'model' id (the gateway route is named by the actual model). Or point a tier straight at a model's :port above."; }
-# Emit the LiteLLM route YAML for the LIVE MLX servers (stdout = YAML only; notes → stderr).
-# Unlike Ollama, each MLX model is its own process on its own port — so we probe EACH port and
-# emit a route only for servers that are actually answering. The route is named by the ACTUAL model
-# id it serves (mlx.models[].model — what the server was started with), NOT the friendly 'name', so
-# "List models" shows the real model, consistent with Ollama. (The 'name' still labels the process
-# in start/stop/status and the log file.)
+mlx_stop() { mlx_stop_target all; }
+mlx_hint() { echo "Via the gateway: 'List models' shows your running MLX models by id — set the JARVIS model / tier to one. Single model: point Endpoint URL straight at its :port."; }
+# Emit the LiteLLM route YAML for the DISCOVERED (running) MLX servers — one route per live server,
+# named by the actual model id it serves (like an Ollama tag), so "List models" shows the real model.
 mlx_gateway_routes() {
   local n=0
-  while IFS='|' read -r name model port; do
-    [[ -z "$model" ]] && { warn "MLX entry '${name:-?}' (:$port) has no 'model' set in config — skipping (set mlx.models[].model)." >&2; continue; }
+  while IFS='|' read -r model port; do
+    [[ -z "$model" ]] && continue
     if port_up "http://localhost:${port}/v1/models"; then
       printf '  - model_name: "%s"\n' "$model"
       printf '    litellm_params:\n'
@@ -344,11 +407,9 @@ mlx_gateway_routes() {
       printf '      api_base: http://%s:%s/v1\n' "$APP_HOST" "$port"
       printf '      api_key: mlx\n'
       n=$((n+1))
-    else
-      warn "MLX '${name:-$model}' (:$port) not responding — skipping (run 'start --backend mlx' first)." >&2
     fi
-  done < <(mlx_models_list)
-  echo "    ($n MLX servers up)" >&2
+  done < <(mlx_discover)
+  echo "    ($n MLX servers discovered)" >&2
 }
 mlx_config_help() {
   echo -e "${C_BOLD}Set up MLX for JARVIS${C_RESET}  — Apple's on-device LLM runtime (Apple Silicon). Models run on the macOS HOST."
@@ -404,14 +465,17 @@ TXT
 usage() { awk 'NR>=2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
 # ============================ dispatch ============================
-CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0
+CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
     start|stop|status|url|config|gateway-sync) CMD="$(lc "$1")" ;;
+    mlx-serve|mlx-stop|mlx-ls|mlx-up)          CMD="$(lc "$1")" ;;
     --gateway)             USE_GATEWAY=1 ;;
     --backend)             shift; BACKEND="$(lc "${1:-ollama}")"; BACKEND_EXPLICIT=1 ;;
+    --port)                shift; MLX_PORT_ARG="${1:-}" ;;
     -h|--help|help)        usage; exit 0 ;;
-    *) err "unknown argument: $1"; usage; exit 1 ;;
+    -*)                    err "unknown option: $1"; usage; exit 1 ;;
+    *)                     MLX_ARG="$1" ;;    # positional: model id / target for the mlx-* commands
   esac
   shift
 done
@@ -449,10 +513,17 @@ case "$CMD" in
   url)
     the_url
     ;;
+  mlx-serve)
+    mlx_serve_one "$MLX_ARG" "$MLX_PORT_ARG"
+    [[ "$USE_GATEWAY" == 1 ]] && { BACKEND=mlx; sync_gateway_models && { port_up "http://localhost:${GATEWAY_PORT}/health/liveliness" && gateway_up; }; }
+    ;;
+  mlx-stop)   mlx_stop_target "${MLX_ARG:-all}" ;;
+  mlx-ls)     mlx_ls ;;
+  mlx-up)     mlx_up ;;
   status)
     # Diagnostic view: report EVERY backend's real state, not just the --backend default (ollama).
     ollama_status
-    mlx_has_models && mlx_status               # only show MLX when models are actually configured
+    mlx_running && mlx_status                  # show MLX when any server is actually running
     printf 'Gateway (:%s): '  "$GATEWAY_PORT"; port_up "http://localhost:${GATEWAY_PORT}/health/liveliness" && echo "up" || echo "down"
     ;;
   config)
@@ -466,7 +537,7 @@ case "$CMD" in
       # default (that mismatch is why a plain `stop` used to report Ollama while MLX was running).
       stopped=0
       port_up "http://localhost:${OLLAMA_PORT}/api/tags" && { ollama_stop; stopped=1; }
-      mlx_has_models && mlx_status | grep -q ': up' && { mlx_stop; stopped=1; }
+      mlx_running && { mlx_stop; stopped=1; }
       [[ "$stopped" == 0 ]] && info "No local runtime appears to be running."
     fi
     clear_gateway_models       # local runtime(s) going away → drop their routes from the gateway config
