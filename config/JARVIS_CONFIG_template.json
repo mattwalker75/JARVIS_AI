@@ -51,12 +51,7 @@
     "num_parallel": 1,
     "max_loaded_models": 3
   },
-  "_mlx_note": "Read by ./JARVIS_LOCAL_LLM.sh --backend mlx (Apple Silicon only), NOT by JARVIS core. Each entry in models[] starts its own mlx_lm.server on its port; run `./JARVIS_LOCAL_LLM.sh start --backend mlx` (add --gateway to front several as ONE endpoint). Models are Hugging Face 'mlx-community' repos, auto-downloaded into mlx/models on first serve. First run: `source ./ACTIVATE.sh` to create the venv + install mlx-lm. Edit models[] here or via the raw JSON in the Config tab, then re-run start.",
-  "mlx": {
-    "models": [
-      { "name": "chat", "model": "mlx-community/Qwen2.5-7B-Instruct-4bit", "port": 8080 }
-    ]
-  },
+  "_mlx_note": "MLX (Apple Silicon) is managed by ./JARVIS_LOCAL_LLM.sh, NOT via this file. Bring models online with `mlx-serve <model>` (each runs its own mlx_lm.server; the script DISCOVERS running servers), then `start --backend mlx --gateway`. First run: `source ./ACTIVATE.sh`. Full guide: `./JARVIS_LOCAL_LLM.sh config --backend mlx`.",
   "voice": {
     "_comment": "Voice I/O. STT is browser-native (Web Speech API; Chrome/Safari). TTS has two engines (tts_engine): 'browser' = built-in OS/Chrome voices, or 'piper' = offline NEURAL voice from the jarvis-piper container (free, fully local, machine-independent). The wake word and stop phrase derive from assistant_name (say the assistant's name to start); override with wake_word / stop_phrase. followup_seconds (Wake mode) gives you that many seconds AFTER the AI stops talking to reply without repeating the wake word — 0 disables it.",
     "enabled": true,

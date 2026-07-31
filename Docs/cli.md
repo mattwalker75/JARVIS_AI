@@ -162,14 +162,24 @@ lives under `mlx/` with its own Python venv:
 ```bash
 source ./ACTIVATE.sh        # 1st run: creates mlx/venv + installs mlx-lm; models cache in mlx/models
                             #          (leave the env with:  source ./DEACTIVATE.sh)
-./JARVIS_LOCAL_LLM.sh config --backend mlx     # full setup guide (models, config, start)
-./JARVIS_LOCAL_LLM.sh start  --backend mlx     # serves the models in the mlx.* config block
-./JARVIS_LOCAL_LLM.sh stop   --backend mlx     # stops the server process(es)
+./JARVIS_LOCAL_LLM.sh config --backend mlx                        # full setup guide
+./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-7B-Instruct-4bit   # bring a model online (its own port)
+./JARVIS_LOCAL_LLM.sh mlx-ls                                      # list running MLX servers
+./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway              # discover them → one URL via LiteLLM
+./JARVIS_LOCAL_LLM.sh mlx-stop all                               # stop the server process(es)
 ```
 
-Models are Hugging Face **`mlx-community`** repos (auto-downloaded on first serve). Configure them
-in the **`mlx.models`** array of `JARVIS_CONFIG.json` — each entry (`name`, `model`, `port`) gets
-its **own `mlx_lm.server` process** on its own port (see [Configuration](configuration.md#mlx-optional)).
-For **multiple** models behind one endpoint, add `--gateway` (LiteLLM fronts them); for a single
-model, paste its `http://host.docker.internal:<port>/v1` straight into Config. `mlx-lm` is
-text-only — keep **vision** on Ollama (`qwen2.5vl`) for now.
+MLX is **discovery-based, like Ollama** — there's no config array. You bring models online with
+**`mlx-serve <model>`** (each = its own `mlx_lm.server` process on its own port, so several stay hot at
+once), and the script **discovers** the running servers and maps them. Models are Hugging Face
+**`mlx-community`** repos (auto-downloaded on first serve). `mlx-serve` records what it started so
+**`mlx-up`** can relaunch your set after a reboot. For **multiple** models behind one endpoint use
+`--gateway`; for a single model, paste its `http://host.docker.internal:<port>/v1` straight into Config.
+`mlx-lm` is text-only — keep **vision** on Ollama (`qwen2.5vl`) for now.
+
+| MLX command | What it does |
+| --- | --- |
+| `mlx-serve <model> [--port N] [--gateway]` | Start one model as its own server (auto-port), register it; `--gateway` also syncs the gateway. |
+| `mlx-stop <model\|port\|all>` | Stop one or all MLX servers. |
+| `mlx-ls` | List running MLX servers (model + port). |
+| `mlx-up` | Relaunch the registered set (e.g. after a reboot). |

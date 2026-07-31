@@ -4,12 +4,18 @@
 # it just talks OpenAI-dialect to whatever URL you give it (a cloud provider, or the URL below).
 #
 # Usage:
-#   ./JARVIS_LOCAL_LLM.sh start        [--backend ollama | mlx] [--gateway]   # apply config, ensure it's up, print the URL
+#   ./JARVIS_LOCAL_LLM.sh start        [--backend ollama | mlx] [--gateway]   # bring the backend up + print the URL
 #   ./JARVIS_LOCAL_LLM.sh gateway-sync [--backend ollama | mlx]               # refresh the gateway's model list from live models
 #   ./JARVIS_LOCAL_LLM.sh url          [--gateway]                       # just print the URL (nothing else)
 #   ./JARVIS_LOCAL_LLM.sh stop         [--backend ollama | mlx] [--gateway]   # no --backend = stop ALL running runtimes
 #   ./JARVIS_LOCAL_LLM.sh status
-#   ./JARVIS_LOCAL_LLM.sh config       [--backend ollama | mlx]         # print setup steps (install / pull / configure)
+#   ./JARVIS_LOCAL_LLM.sh config       [--backend ollama | mlx]         # print setup steps (install / models / configure)
+#
+# MLX model management (discovery-based, like Ollama — bring models online, the script finds them):
+#   ./JARVIS_LOCAL_LLM.sh mlx-serve <model> [--port N] [--gateway]   # start ONE model as its own server (+ register it)
+#   ./JARVIS_LOCAL_LLM.sh mlx-stop  <model | port | all>             # stop one/all MLX servers
+#   ./JARVIS_LOCAL_LLM.sh mlx-ls                                     # list running MLX servers (model + port)
+#   ./JARVIS_LOCAL_LLM.sh mlx-up                                     # relaunch the registered set (e.g. after a reboot)
 #
 # Backends: ollama (default) and mlx (Apple Silicon). vLLM / llama.cpp can be added as new backend
 # blocks — each implements: <backend>_apply_config/_ensure_running/_url/_status/_stop/_hint/
@@ -435,24 +441,25 @@ mlx_config_help() {
      mlx_lm.manage --delete --pattern Qwen2.5-7B          # e.g. removes ...Qwen2.5-7B-Instruct-4bit
    (Everything saves under  mlx/models/  — gitignored.)
 
-3) CONFIGURE them in  config/JARVIS_CONFIG.json  ->  the "mlx" block (each gets its own port):
-     "mlx": { "models": [
-        { "name": "chat",  "model": "mlx-community/Qwen2.5-7B-Instruct-4bit",  "port": 8080 },
-        { "name": "smart", "model": "mlx-community/Qwen2.5-32B-Instruct-4bit", "port": 8081 }
-     ] }
-   Edit this file directly (or the raw JSON in the JARVIS UI -> Config), then re-run start.
+3) BRING model(s) online — each runs as its OWN mlx_lm.server on its own port, so several stay hot
+   at once (great with lots of RAM; no reload when JARVIS switches tiers). No config file — the script
+   DISCOVERS what's running:
+     ./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-7B-Instruct-4bit          # auto-assigns a port (8080+)
+     ./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-32B-Instruct-4bit --port 8081
+     ./JARVIS_LOCAL_LLM.sh mlx-ls                                                    # what's running now
+     ./JARVIS_LOCAL_LLM.sh mlx-stop <model | port | all>                             # take one/all offline
+   (mlx-serve records what you started, so  mlx-up  relaunches your set after a reboot.)
 
-4) START the server(s) + get the URL(s)
-     ./JARVIS_LOCAL_LLM.sh start --backend mlx            # one model  -> one URL
-     ./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway  # many models-> ONE URL via LiteLLM
-     ./JARVIS_LOCAL_LLM.sh stop  --backend mlx            # clean stop (kills the server processes)
-     ./JARVIS_LOCAL_LLM.sh status                         # shows each model's port
+4) WIRE it into JARVIS + get the URL
+     ./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway  # discovers running servers -> ONE URL via LiteLLM
+     ./JARVIS_LOCAL_LLM.sh start --backend mlx            # single server -> its :port URL (no gateway)
+     ./JARVIS_LOCAL_LLM.sh status                         # Ollama + running MLX servers + gateway
 
 5) POINT JARVIS at it
-     JARVIS -> Config -> Endpoint URL = the printed URL. Single model: paste its :port URL.
-     Multiple: use --gateway and set the model/tiers to each model's ID (the gateway route is named
-     by the actual 'model', e.g. mlx-community/Qwen2.5-7B-Instruct-4bit — the 'name' just labels the
-     process in start/stop/status).
+     JARVIS -> Config -> Endpoint URL = the printed URL, then click "List models".
+     - Multiple models: use --gateway; List models shows each by its REAL id -> set the model
+       (single mode) or the chat/cheap/smart tiers (multi mode) to those ids.
+     - Single model:    point Endpoint URL straight at its :port; List models shows it.
 
 NOTE: MLX runs on the HOST, not in the JARVIS containers (it needs Metal). JARVIS reaches it over
       host.docker.internal. mlx-lm is text-only; vision models use a separate package (mlx-vlm) —

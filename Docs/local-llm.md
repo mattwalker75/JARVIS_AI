@@ -91,31 +91,32 @@ mlx_lm.generate --model <repo> --prompt "hi"          # fetch + quick test
 mlx_lm.manage --scan                                  # list cached ; --delete to remove
 ```
 
-**3. Configure them** — the `mlx.models` array in `config/JARVIS_CONFIG.json`, each with its own
-port (see [Configuration → `mlx`](configuration.md#mlx-optional)). You can edit this **in the
-Config tab** (the **MLX models** section — add/remove name/model/port rows) or the raw JSON:
-```jsonc
-"mlx": { "models": [
-  { "name": "chat",  "model": "mlx-community/Qwen2.5-7B-Instruct-4bit",  "port": 8080 },
-  { "name": "smart", "model": "mlx-community/Qwen2.5-32B-Instruct-4bit", "port": 8081 }
-] }
-```
-
-**4. Start + get the URL:**
+**3. Bring model(s) online** — MLX is **discovery-based, like Ollama** (no config array): each model
+runs as its own `mlx_lm.server` on its own port, so several stay **hot at once** (no reload when JARVIS
+switches tiers — ideal if you have the RAM). The script then discovers what's running.
 ```bash
-./JARVIS_LOCAL_LLM.sh start  --backend mlx     # one model  → one URL
-./JARVIS_LOCAL_LLM.sh start  --backend mlx --gateway   # many   → ONE URL via LiteLLM
-./JARVIS_LOCAL_LLM.sh status                    # each model's port + up/down
-./JARVIS_LOCAL_LLM.sh stop   --backend mlx      # stop the server(s)
+./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-7B-Instruct-4bit          # auto-assigns a port (8080+)
+./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-32B-Instruct-4bit --port 8081
+./JARVIS_LOCAL_LLM.sh mlx-ls                                                    # what's running
+./JARVIS_LOCAL_LLM.sh mlx-stop <model|port|all>                                 # take one/all offline
+```
+`mlx-serve` records what you started in `mlx/serving.json`, so **`mlx-up`** relaunches your set after a
+reboot. (It's auto-written — not a hand-edited config.)
+
+**4. Wire it into JARVIS + get the URL:**
+```bash
+./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway   # discovers running servers → ONE URL via LiteLLM
+./JARVIS_LOCAL_LLM.sh start --backend mlx             # single server → its :port URL (no gateway)
+./JARVIS_LOCAL_LLM.sh status                          # Ollama + running MLX servers + gateway
 ```
 
-**5. Point JARVIS at it** — single model: paste its `http://host.docker.internal:<port>/v1`.
-Multiple: use `--gateway` and set your model/tiers to each model's **id** (via the gateway the route
-is named by the actual `model`, e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`, just like an Ollama tag
-— the `name` field only labels the process in start/stop/status).
+**5. Point JARVIS at it** — Endpoint URL = the printed URL, then **List models**. Multiple models
+(`--gateway`): each shows by its real **id** (`mlx-community/…`, like an Ollama tag) — set the model
+(single mode) or the chat/cheap/smart tiers (multi mode) to those ids. Single model: point Endpoint URL
+straight at its `:port`.
 
-> **Apply step:** editing `mlx.models` (in the UI or the file) only writes config — the UI **can't
-> launch host processes**. Re-run `./JARVIS_LOCAL_LLM.sh start --backend mlx` to (re)launch.
+> **Reboot recovery:** MLX servers aren't a daemon, so after a restart run `./JARVIS_LOCAL_LLM.sh mlx-up`
+> (relaunches your registered set) — or `mlx-serve` them again.
 > **Tool-calling:** JARVIS is tool-heavy; verify a model emits clean tool calls (JARVIS's text-tool
 > salvage is the fallback). **Vision:** `mlx-lm` is text-only — keep vision on Ollama.
 

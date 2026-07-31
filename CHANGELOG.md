@@ -9,6 +9,19 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-31: **MLX is now discovery-based, like Ollama (Architecture B).** MLX models are managed
+  from the CLI instead of a config array — you bring each model online as its own `mlx_lm.server`
+  process (so several stay hot at once, no reload when JARVIS switches tiers), and the script
+  DISCOVERS the running servers and maps them into gateway routes / the model dropdown.
+  New commands: **`mlx-serve <model> [--port]`** (launch + register), **`mlx-stop <model|port|all>`**,
+  **`mlx-ls`**, **`mlx-up`** (relaunch the registered set after a reboot). A gitignored auto-registry
+  `mlx/serving.json` remembers what you started (not hand-edited). `start --backend mlx` relaunches the
+  registered set then discovers + syncs; `status`/`stop` are discovery-driven. **Removed** the
+  `mlx.models` config array, the **MLX MODELS** UI editor section, and their docs — discovered MLX
+  models appear in the normal scan-driven tier pickers. (`JARVIS_LOCAL_LLM.sh`, `app/public/*`,
+  `config/JARVIS_CONFIG_template.json`, `Docs/*`.)
+
+### Changed
 - 2026-07-30: **`litellm/config.yaml` is now gitignored; a template seeds it.** The live gateway
   config is regenerated on every `start`/`gateway-sync`, so tracking it meant a perpetually-dirty
   working tree. It's now gitignored, with the committed default in `litellm/config_template.yaml`;
