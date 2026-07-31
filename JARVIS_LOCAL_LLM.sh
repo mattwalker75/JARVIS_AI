@@ -123,7 +123,10 @@ ollama_config_help() {
 2) PULL the model(s) you want   (the tag becomes your JARVIS model / tier value)
      ollama pull qwen3:8b          # a general chat model
      ollama pull qwen2.5vl:32b     # a VISION model (needed for the vision tier / screenshots)
-     ollama list                   # see what you already have
+   LIST the models you have downloaded:
+     ollama list
+   DELETE a downloaded model to reclaim disk:
+     ollama rm qwen3:8b            # remove by its tag
 
 3) (optional) TUNE the runtime in  config/JARVIS_CONFIG.json  -> the "ollama" block:
      manage            true = this script configures + restarts Ollama for you
@@ -349,13 +352,17 @@ mlx_config_help() {
      e.g.     mlx-community/Qwen2.5-7B-Instruct-4bit
               mlx-community/Qwen2.5-32B-Instruct-4bit
 
-   DOWNLOAD — models auto-download on first serve into  mlx/models/  (nothing to do). To
-   pre-fetch (so the first request isn't slow), activate the env then use any of these:
-     source ./ACTIVATE.sh
+   (The tools below need the env from step 1 active, so HF_HOME points at mlx/models — otherwise
+    they read/write ~/.cache instead.)
+
+   DOWNLOAD — models auto-download on first serve; pre-fetch to avoid a slow first request:
      hf download mlx-community/Qwen2.5-7B-Instruct-4bit   # just fetch it into mlx/models/
      mlx_lm.generate --model <repo> --prompt "hi"         # fetch + a quick test
-     mlx_lm.manage --scan                                 # list what's cached ('--delete' to remove)
-   (Everything saves under  mlx/models/  — gitignored; delete that dir to reclaim space.)
+   LIST the models you have downloaded (cached under mlx/models/):
+     mlx_lm.manage --scan
+   DELETE a downloaded model to reclaim disk (matches repos containing the pattern):
+     mlx_lm.manage --delete --pattern Qwen2.5-7B          # e.g. removes ...Qwen2.5-7B-Instruct-4bit
+   (Everything saves under  mlx/models/  — gitignored.)
 
 3) CONFIGURE them in  config/JARVIS_CONFIG.json  ->  the "mlx" block (each gets its own port):
      "mlx": { "models": [

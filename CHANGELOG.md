@@ -9,6 +9,14 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-30: **`config --backend ollama|mlx` guides are in sync, with explicit list/delete steps.**
+  Both setup guides now share the same structure and call out **LIST** ("the models you have
+  downloaded") and **DELETE** ("a downloaded model to reclaim disk") as their own labeled lines with
+  real commands — Ollama: `ollama list` / `ollama rm <tag>`; MLX: `mlx_lm.manage --scan` /
+  `mlx_lm.manage --delete --pattern <substr>` (with the reminder that MLX's tools need the activated
+  env so `HF_HOME` points at `mlx/models`). (`JARVIS_LOCAL_LLM.sh`.)
+
+### Changed
 - 2026-07-30: **MLX gateway routes are named by the actual model id, not the friendly alias.**
   `start --backend mlx --gateway` (and `gateway-sync`) now emit each MLX route's `model_name` as the
   real `mlx.models[].model` (e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`) instead of the entry's
