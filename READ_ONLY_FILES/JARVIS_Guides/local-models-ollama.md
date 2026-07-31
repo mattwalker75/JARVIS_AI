@@ -14,7 +14,8 @@ Print the full guide anytime with: `./JARVIS_LOCAL_LLM.sh config --backend ollam
    ```
    ollama pull qwen3:8b          # a chat model
    ollama pull qwen2.5vl:32b     # a VISION model (for screenshots / the vision tier)
-   ollama list                   # see what you have
+   ollama list                   # list what you've downloaded
+   ollama rm qwen3:8b            # delete one to reclaim disk
    ```
    You don't "start" a model — Ollama loads it on demand. You just need it pulled.
 
@@ -24,7 +25,8 @@ Print the full guide anytime with: `./JARVIS_LOCAL_LLM.sh config --backend ollam
 
 4. **Start it + get the URL:**
    ```
-   ./JARVIS_LOCAL_LLM.sh start          # prints http://host.docker.internal:11434/v1
+   ./JARVIS_LOCAL_LLM.sh start --backend ollama            # prints http://host.docker.internal:11434/v1
+   ./JARVIS_LOCAL_LLM.sh start --backend ollama --gateway  # front it with the LiteLLM gateway instead
    ```
 
 5. **Point JARVIS at it:** Config → **Endpoint URL** = that URL, **API key** blank, **Model** (or
