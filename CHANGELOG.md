@@ -8,6 +8,16 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-07-30: **Model dropdowns show only available models.** The Config model `<select>`s (chat/
+  cheap/smart/vision tiers, single or multi mode) now list only the models actually returned by
+  "List models" for the current endpoint, instead of also injecting the saved value when it isn't
+  available (which surfaced stale entries like a leftover `gpt-4o-mini` after switching to a local
+  runtime). A configured value is still shown before any list has been fetched so it isn't lost on
+  load; once a list exists an unavailable value drops to blank so you re-pick from what's really
+  there. The **✎ Custom…** option remains for typing a model that doesn't appear in the list.
+  (`app/public/app.js`.)
+
 ### Added
 - 2026-07-30: **`/ro` and `/rw` slash commands.** Tell JARVIS to reference the shared folders:
   `/ro [request]` works with `READ_ONLY_FILES`, `/rw [request]` with `READ_WRITE_FILES` (no request

@@ -1372,10 +1372,13 @@ function renderModelSelect(sel, current) {
   const opt = (parent, val, label) => { const o = document.createElement("option"); o.value = val; o.textContent = label != null ? label : val; parent.appendChild(o); };
   opt(sel, "", "— none —");
   const tier = MODEL_TIER[sel.id] || "chat";
-  // candidate list: the current value (even if not returned) + fetched models, deduped
+  // Show ONLY the models actually available at the endpoint (what "List models" returned) — same in
+  // single or multi mode. Before any list is fetched, keep the current configured value so it isn't
+  // lost on load; once a list exists, show just that (a stale/unavailable value drops to blank so you
+  // re-pick from what's really there). "✎ Custom…" is always available for anything not in the list.
   const seen = new Set(); const cand = [];
   const push = (m) => { if (m && !seen.has(m)) { seen.add(m); cand.push(m); } };
-  if (current && !modelOptions.includes(current)) push(current);
+  if (current && !modelOptions.includes(current) && modelOptions.length === 0) push(current);
   modelOptions.forEach(push);
   // drop non-chat models (embeddings/tts/etc.) from every tier — but never drop the current value
   const usable = cand.filter((m) => m === current || categoriesFor(m).length > 0);
