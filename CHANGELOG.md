@@ -9,6 +9,18 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-07-30: **`litellm/config.yaml` is now gitignored; a template seeds it.** The live gateway
+  config is regenerated on every `start`/`gateway-sync`, so tracking it meant a perpetually-dirty
+  working tree. It's now gitignored, with the committed default in `litellm/config_template.yaml`;
+  `JARVIS_LOCAL_LLM.sh` seeds `litellm/config.yaml` from the template on first gateway use if missing.
+  (Mirrors the `JARVIS_CONFIG.json` live-vs-template pattern.) (`JARVIS_LOCAL_LLM.sh`, `.gitignore`,
+  `litellm/config_template.yaml`.)
+- 2026-07-30: **`stop` with no `--backend` stops every running runtime, not just Ollama.** Like
+  `status`, `stop` used the `--backend` default (`ollama`), so a plain `stop` stopped the wrong thing
+  when MLX was running. It now stops each local runtime that's actually up (Ollama and/or MLX);
+  `stop --backend <x>` still stops just that one. (`JARVIS_LOCAL_LLM.sh`.)
+
+### Changed
 - 2026-07-30: **MLX MODELS editor: "Name" is now a "Tier" dropdown.** In Config → MLX models, the
   free-text name field is a dropdown of `chat tier / cheap tier / smart tier / vision tier`, and the
   column is labeled **tier**. Adding a row defaults to the first unused tier. The tier is a label for

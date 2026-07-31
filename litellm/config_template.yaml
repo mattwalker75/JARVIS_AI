@@ -1,3 +1,8 @@
+# TEMPLATE — committed seed for litellm/config.yaml (which is gitignored, since JARVIS_LOCAL_LLM.sh
+# regenerates its local-routes block on every start/gateway-sync). On first gateway use the script
+# copies this to litellm/config.yaml if that file is missing. Edit cloud/settings here to change the
+# shipped default; day-to-day the live config.yaml is what runs.
+#
 # LiteLLM gateway — ONE OpenAI-compatible endpoint fronting your LOCAL models (Ollama / MLX), so
 # several of them (or mixed runtimes) sit behind a single URL. JARVIS talks OpenAI dialect to it and
 # picks a model by `model_name`. You DON'T need this for cloud models — point JARVIS straight at the

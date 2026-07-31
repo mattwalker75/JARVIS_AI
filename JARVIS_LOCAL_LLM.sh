@@ -7,7 +7,7 @@
 #   ./JARVIS_LOCAL_LLM.sh start        [--backend ollama | mlx] [--gateway]   # apply config, ensure it's up, print the URL
 #   ./JARVIS_LOCAL_LLM.sh gateway-sync [--backend ollama | mlx]               # refresh the gateway's model list from live models
 #   ./JARVIS_LOCAL_LLM.sh url          [--gateway]                       # just print the URL (nothing else)
-#   ./JARVIS_LOCAL_LLM.sh stop         [--gateway]
+#   ./JARVIS_LOCAL_LLM.sh stop         [--backend ollama | mlx] [--gateway]   # no --backend = stop ALL running runtimes
 #   ./JARVIS_LOCAL_LLM.sh status
 #   ./JARVIS_LOCAL_LLM.sh config       [--backend ollama | mlx]         # print setup steps (install / pull / configure)
 #
@@ -191,11 +191,20 @@ PY
 GW_BEGIN_TAG="BEGIN local routes"
 GW_END_TAG="END local routes"
 LITELLM_CONFIG="${SCRIPT_DIR}/litellm/config.yaml"
+LITELLM_TEMPLATE="${SCRIPT_DIR}/litellm/config_template.yaml"
+
+# The live litellm/config.yaml is gitignored (regenerated every run). Seed it from the committed
+# template on first use so a fresh clone / a wiped file just works.
+ensure_gateway_config() {
+  [[ -f "$LITELLM_CONFIG" ]] && return 0
+  [[ -f "$LITELLM_TEMPLATE" ]] || { err "missing $LITELLM_CONFIG and $LITELLM_TEMPLATE — cannot seed gateway config."; return 1; }
+  cp "$LITELLM_TEMPLATE" "$LITELLM_CONFIG" && info "Seeded litellm/config.yaml from the committed template."
+}
 
 # Low-level: replace the marker block in litellm/config.yaml with the content of $1 (a file of YAML
 # routes; an EMPTY file clears the block). Cloud routes above / litellm_settings below are untouched.
 _splice_local_block() { # $1 = routes file
-  [[ -f "$LITELLM_CONFIG" ]] || { err "gateway config not found: $LITELLM_CONFIG"; return 1; }
+  ensure_gateway_config || return 1
   if ! grep -q "$GW_BEGIN_TAG" "$LITELLM_CONFIG" || ! grep -q "$GW_END_TAG" "$LITELLM_CONFIG"; then
     err "markers not found in $LITELLM_CONFIG (need the '$GW_BEGIN_TAG' / '$GW_END_TAG' lines)."; return 1
   fi
@@ -237,6 +246,7 @@ clear_gateway_models() {
 gateway_up() {
   [[ -f "$LITELLM_COMPOSE" ]] || { err "gateway compose not found: $LITELLM_COMPOSE"; return 1; }
   command -v docker >/dev/null 2>&1 || { err "docker not found (needed for --gateway)."; return 1; }
+  ensure_gateway_config || return 1
   export_provider_keys
   info "Gateway: starting LiteLLM on :${GATEWAY_PORT} (fronts the runtime, routes model names)..."
   # --force-recreate so a freshly-synced config.yaml is always re-read (LiteLLM loads it only at start).
@@ -394,12 +404,12 @@ TXT
 usage() { awk 'NR>=2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
 # ============================ dispatch ============================
-CMD=""; BACKEND="ollama"; USE_GATEWAY=0
+CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
     start|stop|status|url|config|gateway-sync) CMD="$(lc "$1")" ;;
     --gateway)             USE_GATEWAY=1 ;;
-    --backend)             shift; BACKEND="$(lc "${1:-ollama}")" ;;
+    --backend)             shift; BACKEND="$(lc "${1:-ollama}")"; BACKEND_EXPLICIT=1 ;;
     -h|--help|help)        usage; exit 0 ;;
     *) err "unknown argument: $1"; usage; exit 1 ;;
   esac
@@ -449,8 +459,17 @@ case "$CMD" in
     "${BACKEND}_config_help"
     ;;
   stop)
-    "${BACKEND}_stop"
-    clear_gateway_models       # local runtime is going away → drop its routes from the gateway config
+    if [[ "$BACKEND_EXPLICIT" == 1 ]]; then
+      "${BACKEND}_stop"                        # stop just the named backend
+    else
+      # No --backend given → stop EVERY local runtime that's actually running, not just the ollama
+      # default (that mismatch is why a plain `stop` used to report Ollama while MLX was running).
+      stopped=0
+      port_up "http://localhost:${OLLAMA_PORT}/api/tags" && { ollama_stop; stopped=1; }
+      mlx_has_models && mlx_status | grep -q ': up' && { mlx_stop; stopped=1; }
+      [[ "$stopped" == 0 ]] && info "No local runtime appears to be running."
+    fi
+    clear_gateway_models       # local runtime(s) going away → drop their routes from the gateway config
     if [[ "$USE_GATEWAY" == 1 ]]; then
       gateway_down             # bringing the gateway down too — cleared config is ready for next start
     elif port_up "http://localhost:${GATEWAY_PORT}/health/liveliness"; then
