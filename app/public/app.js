@@ -1047,7 +1047,7 @@ function newSession() {
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
   try { fetch("/api/plan", { method: "DELETE" }); } catch (_) {} renderPlan(null);   // a fresh chat starts with no active plan (don't inherit a stale one)
-  addMessage("assistant", "New session. JARVIS online — ask me anything.");
+  addMessage("assistant", "New session. JARVIS online — ask me anything. (type `/help` for the help menu)");
 }
 const newChatBtn = $("new-chat");
 if (newChatBtn) newChatBtn.addEventListener("click", newSession);
