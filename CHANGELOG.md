@@ -8,6 +8,18 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Fixed
+- 2026-08-01: **Follow-ups for the LLM_WORKSPACE bind-mount switch.** The token sweep missed a few
+  spots and the volume→bind change broke two commands: (1) `browserd.py` and a custom-tools template
+  still used the old paths — fixed; (2) the workbench `Dockerfile` now sets `WORKDIR /LLM_WORKSPACE`
+  (and its comment no longer calls it a named volume); (3) **`JARVIS.sh --backup-workspace` /
+  `--restore-workspace` were broken** — they operated on the removed `jarvis_workbench_work` volume
+  (e.g. `--restore-workspace --fresh` did a no-op `docker volume rm`); rewritten to tar/clear the host
+  `./LLM_WORKSPACE` folder directly (works even when stopped); (4) `--delete` messaging + several docs
+  and the maintenance guide corrected — `LLM_WORKSPACE` is a bind mount now, so it **survives**
+  `--delete` (only the memory + workbench-home volumes are wiped). (`app/src/browserd.py`, `JARVIS.sh`,
+  `workbench/Dockerfile`, `Docs/cli.md`, `LLM_READ_ONLY_FILES/JARVIS_Guides/maintenance.md`, …)
+
 ### Changed
 - 2026-08-01: **Unified, host-visible LLM directories (workspace + shared folders renamed).** The AI's
   working area is now a **host bind mount you can watch live**, and all three dirs share an `LLM_`

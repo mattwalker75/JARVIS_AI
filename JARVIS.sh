@@ -86,7 +86,8 @@
 #   LLM_READ_WRITE_FILES/              files JARVIS writes for you (LLM_READ_ONLY_FILES/ = files you share to it)
 #   backups/jarvis-memory-<ts>.tgz    semantic-memory backups (--backup-memory)
 #   backups/jarvis-workspace-<ts>.tgz workbench /LLM_WORKSPACE backups (--backup-workspace)
-#   These survive --delete (they are bind mounts); the semantic memory + /LLM_WORKSPACE Docker volumes are wiped.
+#   These (and LLM_WORKSPACE) survive --delete — they are bind mounts. --delete wipes only the
+#   Docker volumes (semantic memory + workbench home).
 #
 set -uo pipefail
 
@@ -97,7 +98,7 @@ APP_CONTAINER="jarvis-app"
 WB_CONTAINER="jarvis-workbench"
 MEM_CONTAINER="jarvis-memory"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
-WB_VOLUME="${PROJECT}_jarvis_workbench_work"
+# (LLM_WORKSPACE is a host bind mount now — ./LLM_WORKSPACE — not a Docker volume)
 APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"
 
 # LLM hosting/management lives OUTSIDE this script now — see ./JARVIS_LOCAL_LLM.sh (local runtimes
@@ -252,7 +253,7 @@ cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; clear_
 
 cmd_delete() {
   require_daemon
-  warn "DELETE: removing containers, network, and ALL data volumes (semantic-memory vector store + workbench home + /LLM_WORKSPACE)."
+  warn "DELETE: removing containers, network, and the data volumes (semantic-memory vector store + workbench home). Bind mounts — config, shared folders, and LLM_WORKSPACE — survive."
   dc down -v --remove-orphans
   clear_autopilot_state
   ok "Removed."
@@ -298,50 +299,47 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
   fi
 }
 
-# The workbench /LLM_WORKSPACE (the LLM's persistent project/code dir) lives in the
-# jarvis_workbench_work volume. Back it up / restore it as a tarball.
+# The workbench /LLM_WORKSPACE is now a HOST bind mount (./LLM_WORKSPACE), so back it up /
+# restore it by tarring that host folder directly — no running container required.
 cmd_backup_workspace() {
-  require_daemon
-  container_running "$WB_CONTAINER" || { err "Workbench is not running. Start it first: ./JARVIS.sh --start"; return 1; }
+  local ws="${SCRIPT_DIR}/LLM_WORKSPACE"
+  [[ -d "$ws" ]] || { err "Workspace dir not found: $ws"; return 1; }
   mkdir -p "${SCRIPT_DIR}/backups"
   local ts file; ts="$(date +%Y%m%d-%H%M%S)"; file="${SCRIPT_DIR}/backups/jarvis-workspace-${ts}.tgz"
-  info "Backing up the workbench /LLM_WORKSPACE -> backups/jarvis-workspace-${ts}.tgz ..."
-  if docker exec "$WB_CONTAINER" sh -lc 'tar czf - -C /LLM_WORKSPACE .' > "$file" && [[ -s "$file" ]]; then
+  info "Backing up LLM_WORKSPACE -> backups/jarvis-workspace-${ts}.tgz ..."
+  if tar czf "$file" -C "$ws" . && [[ -s "$file" ]]; then
     ok "Backup written: backups/jarvis-workspace-${ts}.tgz ($(du -h "$file" | cut -f1 | tr -d ' '))"
   else
     err "Backup failed."; rm -f "$file"; return 1
   fi
 }
 
-cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /LLM_WORKSPACE)
-  require_daemon
-  local from="$1"
+cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty LLM_WORKSPACE)
+  local ws="${SCRIPT_DIR}/LLM_WORKSPACE" from="$1"
+  mkdir -p "$ws"
   if [[ -n "$from" ]]; then
     [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
-    warn "Restoring the workbench /LLM_WORKSPACE from ${from} — this REPLACES its current contents."
-    info "Stopping the workbench to restore cleanly..."
-    dc stop "$WB_CONTAINER" >/dev/null 2>&1 || true
-    if docker run --rm -i -v "${WB_VOLUME}:/data" alpine sh -c 'rm -rf /data/* /data/..?* 2>/dev/null; tar xzf - -C /data' < "$from"; then
-      dc up -d "$WB_CONTAINER" >/dev/null 2>&1 || return 1
-      ok "Workspace restored from ${from}. (the workbench desktop takes a few seconds to come back)"
+    warn "Restoring LLM_WORKSPACE from ${from} — this REPLACES its current contents."
+    find "$ws" -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+    if tar xzf "$from" -C "$ws"; then
+      ok "Workspace restored from ${from}."
     else
-      err "Restore failed."; dc up -d "$WB_CONTAINER" >/dev/null 2>&1 || true; return 1
+      err "Restore failed."; return 1
     fi
   else
-    warn "Resetting the workbench /LLM_WORKSPACE to EMPTY — this DESTROYS its current contents."
-    dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
-    docker volume rm "$WB_VOLUME" >/dev/null 2>&1 || true
-    dc up -d "$WB_CONTAINER" || return 1
-    ok "Fresh, empty /LLM_WORKSPACE deployed."
+    warn "Resetting LLM_WORKSPACE to EMPTY — this DESTROYS its current contents."
+    find "$ws" -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+    touch "$ws/.gitkeep"
+    ok "Fresh, empty LLM_WORKSPACE."
   fi
 }
 
 # Reset ONLY the dev OS container to its clean built image — the escape hatch for when the LLM
 # has installed a pile of packages / made a mess of the system. Recreating the container from
 # jarvis-workbench:local gives it a fresh writable layer, so every runtime apt/pip install and
-# system tweak is wiped. The DATA volumes are kept (/LLM_WORKSPACE build files + the workbench home /
-# any browser logins), and every OTHER container (app, memory, piper) + your config +
-# LLM_READ_WRITE_FILES are left completely untouched.
+# system tweak is wiped. Kept: the /LLM_WORKSPACE bind mount (build files) + the workbench-home
+# volume (desktop / any browser logins), and every OTHER container (app, memory, piper) + your config
+# + LLM_READ_WRITE_FILES are left completely untouched.
 cmd_reset_workbench() {
   require_daemon
   info "RESET WORKBENCH: recreating the dev OS container ($WB_CONTAINER) from its clean image..."

@@ -50,8 +50,9 @@ In `--terminal` you can also manage saved conversations: `/sessions`, `/save [na
 
 ## Backup & restore
 
-Backups are written to `backups/`. The semantic memory and `/LLM_WORKSPACE` live in Docker
-volumes (wiped by `--delete`), so back them up if you care about them.
+Backups are written to `backups/`. The semantic memory lives in a Docker volume (wiped by
+`--delete`), so back it up if you care about it. `LLM_WORKSPACE` is now a **host bind mount**
+(`./LLM_WORKSPACE`), so it survives `--delete` — but you can still snapshot it below.
 
 | Command | What it does |
 | --- | --- |

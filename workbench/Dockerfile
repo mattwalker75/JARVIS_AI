@@ -143,9 +143,11 @@ RUN npm install -g --prefix /usr/local \
       pm2 concurrently npm-run-all \
    || true
 
-# Persistent project workspace (backed by a named volume in docker-compose) — work
-# done here survives image rebuilds. This is the LLM's default working directory.
+# The LLM's working/build area — bind-mounted from ./LLM_WORKSPACE on the host
+# (see docker-compose.yml), so it's visible on your Mac and persists across rebuilds.
+# Set it as the container's default working directory.
 RUN mkdir -p /LLM_WORKSPACE
+WORKDIR /LLM_WORKSPACE
 
 # Friendly aliases for tools Ubuntu ships under different names.
 RUN ln -sf "$(command -v fdfind 2>/dev/null)" /usr/local/bin/fd 2>/dev/null || true; \

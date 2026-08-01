@@ -2,7 +2,7 @@
 """JARVIS browser daemon — deterministic DOM-level browser control for the agent.
 
 Runs ONE persistent headed Chromium on the workbench desktop (DISPLAY=:1, so the
-user can watch it work), with the profile stored under /workspace/.browser_profile
+user can watch it work), with the profile stored under /LLM_WORKSPACE/.browser_profile
 so logins/cookies survive restarts and rebuilds. Driven over HTTP from the app
 container (POST / {"op": ...}); started lazily by the browser_* tools.
 
@@ -53,7 +53,7 @@ def ensure_page():
         pw = sync_playwright().start()
     if ctx is None:
         ctx = pw.chromium.launch_persistent_context(
-            "/workspace/.browser_profile",
+            "/LLM_WORKSPACE/.browser_profile",
             headless=False,
             args=["--no-sandbox", "--window-size=1010,700", "--window-position=8,8"],
             viewport={"width": 1000, "height": 640},

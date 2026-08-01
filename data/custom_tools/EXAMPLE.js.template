@@ -2,7 +2,7 @@
 //   1. copy to a .js file in this folder (data/custom_tools/), e.g. dice.js
 //   2. restart the app:  docker compose restart jarvis-app
 // The tool appears in the model's toolset automatically — no core edits needed.
-// (Model-written tools can also load from /READ_WRITE_FILES/custom_tools if you set
+// (Model-written tools can also load from /LLM_READ_WRITE_FILES/custom_tools if you set
 //  "custom_tools": {"allow_model_authored": true} in JARVIS_CONFIG.json.)
 module.exports = {
   name: "roll_dice",

@@ -36,7 +36,8 @@ build files and browser logins, and leaves the app, memory, config, and LLM_READ
 ## Full teardown
 
 ```
-./JARVIS.sh --stop --delete       # removes containers + the memory/LLM_WORKSPACE volumes
+./JARVIS.sh --stop --delete       # removes containers + the Docker volumes (memory + workbench home)
+                                  #   LLM_WORKSPACE is a host folder now, so it (+ your files) survive
 ./JARVIS.sh --setup --start       # rebuild + start fresh
 ```
 Your `config/`, secrets, and the shared folders survive `--delete` (they're on disk, not volumes).
