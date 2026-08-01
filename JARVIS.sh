@@ -34,14 +34,14 @@
 #       --backup-memory   Save the semantic memory (Mem0 vector store) to backups/jarvis-memory-<ts>.tgz.
 #       --restore-memory [--from <file>]   Restore the memory from a backup tarball,
 #                      or (no --from) reset to a FRESH empty memory.
-#       --backup-workspace   Save the workbench /workspace to backups/jarvis-workspace-<ts>.tgz.
-#       --restore-workspace [--from <file>]   Restore /workspace from a backup,
+#       --backup-workspace   Save the workbench /LLM_WORKSPACE to backups/jarvis-workspace-<ts>.tgz.
+#       --restore-workspace [--from <file>]   Restore /LLM_WORKSPACE from a backup,
 #                      or (no --from) reset it to EMPTY.
 #       --reset-workbench   DELETE & REBUILD only the dev OS container (the Linux the LLM works in),
 #                      back to its clean image — wipes everything the LLM installed/changed at RUNTIME
-#                      (apt & pip packages, system tweaks). KEEPS /workspace build files + browser
-#                      logins, and leaves the app, memory, config, and READ_WRITE_FILES untouched.
-#                      (Also rebuild the IMAGE from the Dockerfile: --setup. Also wipe /workspace:
+#                      (apt & pip packages, system tweaks). KEEPS /LLM_WORKSPACE build files + browser
+#                      logins, and leaves the app, memory, config, and LLM_READ_WRITE_FILES untouched.
+#                      (Also rebuild the IMAGE from the Dockerfile: --setup. Also wipe /LLM_WORKSPACE:
 #                      --restore-workspace --fresh.)
 #   -h, --help         Show this help.
 #
@@ -69,7 +69,7 @@
 #   # Back up / restore the LLM's semantic memory (Mem0 vector store):
 #   ./JARVIS.sh --backup-memory
 #   ./JARVIS.sh --restore-memory --from backups/jarvis-memory-20260628-101500.tgz
-#   ./JARVIS.sh --backup-workspace        # the LLM's /workspace project/code dir
+#   ./JARVIS.sh --backup-workspace        # the LLM's /LLM_WORKSPACE project/code dir
 #   ./JARVIS.sh --restore-workspace --from backups/jarvis-workspace-20260628-101500.tgz
 #
 #   # Stop the stack, or fully tear it down (removes containers, network, AND
@@ -83,10 +83,10 @@
 # Data & persistence (on the host, via bind mounts):
 #   data/sessions/<id>.json        saved conversations ("Save current" in the web UI; /save in --terminal)
 #   data/tasks.json                scheduled tasks + notification history
-#   READ_WRITE_FILES/              files JARVIS writes for you (READ_ONLY_FILES/ = files you share to it)
+#   LLM_READ_WRITE_FILES/              files JARVIS writes for you (LLM_READ_ONLY_FILES/ = files you share to it)
 #   backups/jarvis-memory-<ts>.tgz    semantic-memory backups (--backup-memory)
-#   backups/jarvis-workspace-<ts>.tgz workbench /workspace backups (--backup-workspace)
-#   These survive --delete (they are bind mounts); the semantic memory + /workspace Docker volumes are wiped.
+#   backups/jarvis-workspace-<ts>.tgz workbench /LLM_WORKSPACE backups (--backup-workspace)
+#   These survive --delete (they are bind mounts); the semantic memory + /LLM_WORKSPACE Docker volumes are wiped.
 #
 set -uo pipefail
 
@@ -252,7 +252,7 @@ cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; clear_
 
 cmd_delete() {
   require_daemon
-  warn "DELETE: removing containers, network, and ALL data volumes (semantic-memory vector store + workbench home + /workspace)."
+  warn "DELETE: removing containers, network, and ALL data volumes (semantic-memory vector store + workbench home + /LLM_WORKSPACE)."
   dc down -v --remove-orphans
   clear_autopilot_state
   ok "Removed."
@@ -298,27 +298,27 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
   fi
 }
 
-# The workbench /workspace (the LLM's persistent project/code dir) lives in the
+# The workbench /LLM_WORKSPACE (the LLM's persistent project/code dir) lives in the
 # jarvis_workbench_work volume. Back it up / restore it as a tarball.
 cmd_backup_workspace() {
   require_daemon
   container_running "$WB_CONTAINER" || { err "Workbench is not running. Start it first: ./JARVIS.sh --start"; return 1; }
   mkdir -p "${SCRIPT_DIR}/backups"
   local ts file; ts="$(date +%Y%m%d-%H%M%S)"; file="${SCRIPT_DIR}/backups/jarvis-workspace-${ts}.tgz"
-  info "Backing up the workbench /workspace -> backups/jarvis-workspace-${ts}.tgz ..."
-  if docker exec "$WB_CONTAINER" sh -lc 'tar czf - -C /workspace .' > "$file" && [[ -s "$file" ]]; then
+  info "Backing up the workbench /LLM_WORKSPACE -> backups/jarvis-workspace-${ts}.tgz ..."
+  if docker exec "$WB_CONTAINER" sh -lc 'tar czf - -C /LLM_WORKSPACE .' > "$file" && [[ -s "$file" ]]; then
     ok "Backup written: backups/jarvis-workspace-${ts}.tgz ($(du -h "$file" | cut -f1 | tr -d ' '))"
   else
     err "Backup failed."; rm -f "$file"; return 1
   fi
 }
 
-cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /workspace)
+cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /LLM_WORKSPACE)
   require_daemon
   local from="$1"
   if [[ -n "$from" ]]; then
     [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
-    warn "Restoring the workbench /workspace from ${from} — this REPLACES its current contents."
+    warn "Restoring the workbench /LLM_WORKSPACE from ${from} — this REPLACES its current contents."
     info "Stopping the workbench to restore cleanly..."
     dc stop "$WB_CONTAINER" >/dev/null 2>&1 || true
     if docker run --rm -i -v "${WB_VOLUME}:/data" alpine sh -c 'rm -rf /data/* /data/..?* 2>/dev/null; tar xzf - -C /data' < "$from"; then
@@ -328,31 +328,31 @@ cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty /workspa
       err "Restore failed."; dc up -d "$WB_CONTAINER" >/dev/null 2>&1 || true; return 1
     fi
   else
-    warn "Resetting the workbench /workspace to EMPTY — this DESTROYS its current contents."
+    warn "Resetting the workbench /LLM_WORKSPACE to EMPTY — this DESTROYS its current contents."
     dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
     docker volume rm "$WB_VOLUME" >/dev/null 2>&1 || true
     dc up -d "$WB_CONTAINER" || return 1
-    ok "Fresh, empty /workspace deployed."
+    ok "Fresh, empty /LLM_WORKSPACE deployed."
   fi
 }
 
 # Reset ONLY the dev OS container to its clean built image — the escape hatch for when the LLM
 # has installed a pile of packages / made a mess of the system. Recreating the container from
 # jarvis-workbench:local gives it a fresh writable layer, so every runtime apt/pip install and
-# system tweak is wiped. The DATA volumes are kept (/workspace build files + the workbench home /
+# system tweak is wiped. The DATA volumes are kept (/LLM_WORKSPACE build files + the workbench home /
 # any browser logins), and every OTHER container (app, memory, piper) + your config +
-# READ_WRITE_FILES are left completely untouched.
+# LLM_READ_WRITE_FILES are left completely untouched.
 cmd_reset_workbench() {
   require_daemon
   info "RESET WORKBENCH: recreating the dev OS container ($WB_CONTAINER) from its clean image..."
   info "  WIPED: everything the LLM installed/changed at RUNTIME (apt & pip packages, system tweaks)."
-  info "  KEPT:  /workspace build files + the workbench home (desktop / browser logins), and every"
-  info "         other container (app, memory) + your config + READ_WRITE_FILES."
+  info "  KEPT:  /LLM_WORKSPACE build files + the workbench home (desktop / browser logins), and every"
+  info "         other container (app, memory) + your config + LLM_READ_WRITE_FILES."
   dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
   dc up -d "$WB_CONTAINER" || { err "Failed to bring the workbench back up."; return 1; }
   wait_http "$WB_PORT" "/" "Workbench desktop" || true
   ok "Workbench reset to its image baseline. (the desktop takes a few seconds to come back)"
-  info "Deeper wipes: /workspace too → ./JARVIS.sh --restore-workspace --fresh ; rebuild the image → ./JARVIS.sh --setup ."
+  info "Deeper wipes: /LLM_WORKSPACE too → ./JARVIS.sh --restore-workspace --fresh ; rebuild the image → ./JARVIS.sh --setup ."
 }
 
 usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }

@@ -35,9 +35,9 @@ services:
       - "127.0.0.1:9101-9150:9101-9150"   # web-app preview ports (serve_app tool)
     volumes:
       - jarvis_workbench_home:/config
-      - jarvis_workbench_work:/workspace
-      - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
-      - ./READ_WRITE_FILES:/READ_WRITE_FILES
+      - ./LLM_WORKSPACE:/LLM_WORKSPACE
+      - ./LLM_READ_ONLY_FILES:/LLM_READ_ONLY_FILES:ro
+      - ./LLM_READ_WRITE_FILES:/LLM_READ_WRITE_FILES
     shm_size: "1gb"
 
   jarvis-memory:
@@ -96,15 +96,14 @@ services:
       - /usr/src/app/node_modules
       - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json   # read-write: the UI persists settings here
       - ./config/JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
-      - ./READ_ONLY_FILES:/READ_ONLY_FILES:ro
-      - ./READ_WRITE_FILES:/READ_WRITE_FILES
+      - ./LLM_READ_ONLY_FILES:/LLM_READ_ONLY_FILES:ro
+      - ./LLM_READ_WRITE_FILES:/LLM_READ_WRITE_FILES
       - ./data:/data
       - ./Logs:/logs
       - ./Prompts:/Prompts   # active + saved system/master prompt files (editable outside the app)
-      - jarvis_workbench_work:/workspace   # so file tools (list_dir/read_file/analyze_image/write_file) can reach the AI's workbench build area
+      - ./LLM_WORKSPACE:/LLM_WORKSPACE   # so file tools (list_dir/read_file/analyze_image/write_file) can reach the AI's workbench build area
       - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   jarvis_workbench_home:
-  jarvis_workbench_work:
   jarvis_memory_data:

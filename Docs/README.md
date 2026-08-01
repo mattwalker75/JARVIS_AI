@@ -24,5 +24,5 @@ Detailed documentation for JARVIS, a personal local AI framework. Start with the
 
 - **Host paths** are relative to the repo root (e.g. `data/tasks.json`).
 - **Container paths** start with `/` and refer to inside a container
-  (e.g. `/READ_WRITE_FILES`, `/workspace`).
+  (e.g. `/LLM_READ_WRITE_FILES`, `/LLM_WORKSPACE`).
 - Commands assume you run them from the repo root.

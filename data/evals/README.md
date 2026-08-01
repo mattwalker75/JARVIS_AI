@@ -38,7 +38,7 @@ Each `*.json` file holds one case or an array of cases:
 ## Notes
 
 - Cases make **real model calls** and have **side effects** (they create
-  `eval_probe.*` files, a `/workspace` script, and store a test memory `XYZZY-42`).
+  `eval_probe.*` files, a `/LLM_WORKSPACE` script, and store a test memory `XYZZY-42`).
   Harmless, but that's why they live here and aren't run automatically.
 - `internet-and-tasks` depends on the network (api.ipify.org); it can flake if you're
   offline.

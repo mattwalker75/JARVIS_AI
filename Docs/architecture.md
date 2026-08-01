@@ -101,23 +101,24 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 | `./app` | `/usr/src/app` | App source (bind mount — edits apply on app restart) |
 | `./config/JARVIS_CONFIG.json` | `/cfg/JARVIS_CONFIG.json` | Config (read-write so the UI can persist settings) |
 | `./config/JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
-| `./READ_ONLY_FILES` | `/READ_ONLY_FILES` (ro) | Files you share to JARVIS |
-| `./READ_WRITE_FILES` | `/READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
+| `./LLM_READ_ONLY_FILES` | `/LLM_READ_ONLY_FILES` (ro) | Files you share to JARVIS |
+| `./LLM_READ_WRITE_FILES` | `/LLM_READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
 | `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state) |
 | `./Prompts` | `/Prompts` | Active + saved master/system prompt files (see [Prompts](prompts.md)) |
 | `./Logs` | `/logs` | Debug logs (per-day, rotated by size + retention) |
 | `jarvis_memory_data` | `/data/chroma` | Vector store (Docker volume) |
-| `jarvis_workbench_work` | `/workspace` | Workbench scratch/build dir — also mounted read-write into the app so file tools can reach it (Docker volume) |
+| `./LLM_WORKSPACE` | `/LLM_WORKSPACE` | The AI's working/build area — a **host bind mount** (visible on your Mac, so you can watch active work); also mounted into the app so file tools can reach it |
 | `jarvis_workbench_home` | `/config` | Workbench home (Docker volume) |
 
-Bind mounts (config, secrets, shared folders, `data/`) survive `--delete`; the Docker
-**volumes** (memory, workspace, workbench home) are wiped by it — back them up first
-(see [CLI](cli.md)).
+Bind mounts (config, secrets, shared folders, `data/`, and **`LLM_WORKSPACE`**) survive
+`--delete`; the Docker **volumes** (memory, workbench home) are wiped by it — back them up
+first (see [CLI](cli.md)). Note `LLM_WORKSPACE` is now a host folder, so the AI's working
+files persist through a `--delete`.
 
 To reset **just the workbench OS** (after the LLM has installed a pile of packages) without
 touching any data, `./JARVIS.sh --reset-workbench` recreates that one container from its clean
 image — the runtime-installed packages live in the container's writable layer, so recreating wipes
-them while the `/workspace` and home **volumes** (and every other container) are kept. See [CLI](cli.md#reset-the-dev-workbench).
+them while the `/LLM_WORKSPACE` bind mount (a host folder) and the home **volume** (and every other container) are kept. See [CLI](cli.md#reset-the-dev-workbench).
 
 ## Security model
 

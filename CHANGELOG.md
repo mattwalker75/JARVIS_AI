@@ -9,6 +9,19 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-08-01: **Unified, host-visible LLM directories (workspace + shared folders renamed).** The AI's
+  working area is now a **host bind mount you can watch live**, and all three dirs share an `LLM_`
+  prefix so there's no confusion about where things go:
+  `/workspace` → **`/LLM_WORKSPACE`** (was a hidden Docker volume `jarvis_workbench_work`, now
+  `./LLM_WORKSPACE` on your Mac), `/READ_ONLY_FILES` → **`/LLM_READ_ONLY_FILES`**,
+  `/READ_WRITE_FILES` → **`/LLM_READ_WRITE_FILES`**. Because `LLM_WORKSPACE` is now a bind mount, the
+  AI's build files **survive `--delete`** (only the memory + workbench-home volumes are wiped).
+  Swept across the codebase: docker-compose mounts, `app/**`, all `Prompts/*`, `TEMPLATES/*`, the
+  config template, the workbench `Dockerfile`, `JARVIS.sh`, `.gitignore`, all `Docs/*`, and the
+  self-help guides. (Container paths match the host names now, so the AI references the same folders
+  you see.) Requires `./JARVIS.sh --setup --start` to pick up the new mounts.
+
+### Changed
 - 2026-07-31: **Docs updated to match Architecture B + current state.** Rewrote the self-help guide
   `READ_ONLY_FILES/JARVIS_Guides/local-models-mlx.md` for the discovery-based MLX flow (`mlx-serve` /
   `mlx-ls` / `mlx-stop` / `mlx-up`, no config block); fixed `switching-models.md`'s MLX step. Corrected

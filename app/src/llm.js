@@ -146,7 +146,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   const sh = config.shared || {};
   const lastUserIdx = convo.map((m) => m.role).lastIndexOf("user");
   if (lastUserIdx >= 0 && typeof convo[lastUserIdx].content === "string") {
-    const notes = [`(Context — current date/time: ${new Date().toString()}. Shared folders: read-only = ${sh.read_only_dir || "/READ_ONLY_FILES"}, read-write = ${sh.read_write_dir || "/READ_WRITE_FILES"} — write files the user should receive into the read-write folder; a bare filename works.)`];
+    const notes = [`(Context — current date/time: ${new Date().toString()}. Shared folders: read-only = ${sh.read_only_dir || "/LLM_READ_ONLY_FILES"}, read-write = ${sh.read_write_dir || "/LLM_READ_WRITE_FILES"} — write files the user should receive into the read-write folder; a bare filename works.)`];
     // Auto-hint: nudge the model toward a relevant skill for THIS turn (on by default;
     // toggle with the skills_autohint config flag / the /hints UI command).
     if (config.skills_autohint !== false) {

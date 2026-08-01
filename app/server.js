@@ -60,7 +60,7 @@ app.get("/api/selftest", async (_req, res) => {
     const r = await tools.searchMemory("self-test connectivity probe", 1);
     out.semantic_memory = { ok: true, stored_memories: (r.results || []).length };
   } catch (e) { out.semantic_memory = { error: e.message }; }
-  try { out.workbench = await tools.runShell("whoami; uname -sr; echo '--- shared ---'; ls -1 /READ_ONLY_FILES /READ_WRITE_FILES 2>&1"); }
+  try { out.workbench = await tools.runShell("whoami; uname -sr; echo '--- shared ---'; ls -1 /LLM_READ_ONLY_FILES /LLM_READ_WRITE_FILES 2>&1"); }
   catch (e) { out.workbench = { error: e.message }; }
   try { out.shared_rw = await tools.listDir(config.shared.read_write_dir); }
   catch (e) { out.shared_rw = { error: e.message }; }
@@ -305,7 +305,7 @@ app.get("/api/models", async (_req, res) => {
 // Files: browse / download / delete the shared folders.
 function sharedBase(which) {
   const s = config.shared || {};
-  return which === "ro" ? (s.read_only_dir || "/READ_ONLY_FILES") : (s.read_write_dir || "/READ_WRITE_FILES");
+  return which === "ro" ? (s.read_only_dir || "/LLM_READ_ONLY_FILES") : (s.read_write_dir || "/LLM_READ_WRITE_FILES");
 }
 function safeJoin(base, rel) {
   let abs = path.resolve(base, rel || ".");
@@ -362,11 +362,11 @@ app.post("/api/upload", (req, res) => {
     const buf = Buffer.from(m[1], "base64");
     if (buf.length > 20 * 1024 * 1024) return res.status(413).json({ error: "file too large (20MB max)" });
     const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, "_") || "file";
-    const rw = (config.shared && config.shared.read_write_dir) || "/READ_WRITE_FILES";
+    const rw = (config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES";
     const dir = path.join(rw, "uploads");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, safe), buf);
-    res.json({ path: "/READ_WRITE_FILES/uploads/" + safe, bytes: buf.length });
+    res.json({ path: "/LLM_READ_WRITE_FILES/uploads/" + safe, bytes: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

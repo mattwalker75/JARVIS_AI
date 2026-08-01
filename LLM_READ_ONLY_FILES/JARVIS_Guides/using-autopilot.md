@@ -35,7 +35,7 @@ same plan (no rebuild), **Modify**, or **✕ Dismiss**. A finished run shows **�
 ## Tips
 
 - Write a clear objective and say **where to save** the output (deliverables go to
-  `/READ_WRITE_FILES`).
+  `/LLM_READ_WRITE_FILES`).
 - Guarded mode is best for unattended runs.
 - The live **Plan** ledger (banner above the chat) shows each step's status — use the drawer handle
   at its bottom to show/hide the steps.

@@ -29,7 +29,7 @@ tabbed side panel showing what JARVIS is doing.
   command); 🔄 re-runs the last turn. Typing a bare "stop" while busy also interrupts.
 - **Persistence** — the conversation survives a browser refresh (localStorage). **New chat** clears it.
 - **Drag-drop** — drop a file onto the chat to upload it to the shared folder for
-  JARVIS to read (it lands in `/READ_WRITE_FILES/uploads/`).
+  JARVIS to read (it lands in `/LLM_READ_WRITE_FILES/uploads/`).
 
 ## Header controls
 

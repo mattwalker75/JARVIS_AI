@@ -14,7 +14,7 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
 | `-i`, `--status` | Show what's running + app health. |
 | `-x`, `--stop` | Stop the stack (keeps all data). |
-| `-d`, `--delete` | Remove containers, network, and **all data volumes** (semantic memory + `/workspace` + workbench home). Bind mounts survive. |
+| `-d`, `--delete` | Remove containers, network, and the **data volumes** (semantic memory + workbench home). Bind mounts survive — including config, the shared folders, and **`LLM_WORKSPACE`** (the AI's working files persist on your Mac). |
 | `-h`, `--help` | Full help. |
 
 ## Scripting (no browser)
@@ -50,15 +50,15 @@ In `--terminal` you can also manage saved conversations: `/sessions`, `/save [na
 
 ## Backup & restore
 
-Backups are written to `backups/`. The semantic memory and `/workspace` live in Docker
+Backups are written to `backups/`. The semantic memory and `/LLM_WORKSPACE` live in Docker
 volumes (wiped by `--delete`), so back them up if you care about them.
 
 | Command | What it does |
 | --- | --- |
 | `--backup-memory` | Tarball the Chroma vector store to `backups/`. |
-| `--backup-workspace` | Tarball the workbench `/workspace` to `backups/`. |
+| `--backup-workspace` | Tarball the workbench `/LLM_WORKSPACE` to `backups/`. |
 | `--restore-memory --from <file>` | Restore memory from a backup (replaces current). |
-| `--restore-workspace --from <file>` | Restore `/workspace` from a backup. |
+| `--restore-workspace --from <file>` | Restore `/LLM_WORKSPACE` from a backup. |
 
 ```bash
 ./JARVIS.sh --backup-memory
@@ -76,10 +76,10 @@ every runtime `apt`/`pip` install and system tweak is wiped:
 ```
 
 - **Wiped:** everything the LLM installed/changed at runtime (the container's OS layer).
-- **Kept:** `/workspace` build files and the workbench home (desktop + any browser logins).
-- **Untouched:** the app, memory, config, and `READ_WRITE_FILES` — nothing else restarts.
+- **Kept:** `/LLM_WORKSPACE` build files and the workbench home (desktop + any browser logins).
+- **Untouched:** the app, memory, config, and `LLM_READ_WRITE_FILES` — nothing else restarts.
 
-For a deeper reset: also wipe `/workspace` with `--restore-workspace --fresh`, or rebuild the
+For a deeper reset: also wipe `/LLM_WORKSPACE` with `--restore-workspace --fresh`, or rebuild the
 workbench **image** with `--setup`.
 
 ## Typical sessions

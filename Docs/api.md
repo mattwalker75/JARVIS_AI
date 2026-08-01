@@ -80,7 +80,7 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/files?dir=rw|ro` | List files in a shared folder (recursive; sizes + mtimes). |
 | `GET /api/files/raw?dir=…&path=…[&download=1]` | Open/preview or download a file (symlink-safe). |
 | `DELETE /api/files?dir=rw&path=…` | Delete a file (read-write folder only). |
-| `POST /api/upload` | Upload a file: `{name, dataUrl}` (base64). Lands in `/READ_WRITE_FILES/uploads/`. |
+| `POST /api/upload` | Upload a file: `{name, dataUrl}` (base64). Lands in `/LLM_READ_WRITE_FILES/uploads/`. |
 
 ### Tasks & notifications
 

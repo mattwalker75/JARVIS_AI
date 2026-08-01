@@ -74,7 +74,7 @@ downtime into a single catch-up, and recover cleanly if the app restarts mid-run
 A task chooses its output:
 - `post_to_chat(msg)` — speak into the live chat window,
 - `notify_user(msg)` — a passive alert/badge (and the **stop signal** for recurring tasks),
-- `append_log`/`write_file` to `/READ_WRITE_FILES` — a persistent file.
+- `append_log`/`write_file` to `/LLM_READ_WRITE_FILES` — a persistent file.
 
 Notifications appear in-app (🔔), as a browser notification, spoken (if audio is on),
 and as a desktop toast on the workbench.

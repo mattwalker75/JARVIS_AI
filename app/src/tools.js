@@ -37,7 +37,7 @@ async function runShell(command, timeoutS, signal) {
   const exec = await container.exec({
     Cmd: ["timeout", "-k", "5", String(t), "bash", "-lc", tagged], AttachStdout: true, AttachStderr: true, User: "0",
     Env: ["DISPLAY=:1"], // so GUI commands target the watchable desktop
-    WorkingDir: "/workspace", // persistent project dir (survives rebuilds)
+    WorkingDir: "/LLM_WORKSPACE", // persistent project dir (survives rebuilds)
   });
   const stream = await exec.start({ hijack: true, stdin: false });
   return await new Promise((resolve, reject) => {
@@ -87,18 +87,18 @@ async function runShell(command, timeoutS, signal) {
 }
 
 // Normalize a workbench path: a relative path (e.g. "engine.js", "./src/x.js") is resolved
-// against /workspace (the workbench working dir), so the model doesn't have to remember the
+// against /LLM_WORKSPACE (the workbench working dir), so the model doesn't have to remember the
 // absolute prefix. Absolute paths pass through unchanged.
 function toWorkbenchPath(p, example) {
-  if (p == null || String(p).trim() === "") throw new Error("path is required, e.g. " + (example || "/workspace/app.py"));
+  if (p == null || String(p).trim() === "") throw new Error("path is required, e.g. " + (example || "/LLM_WORKSPACE/app.py"));
   p = String(p).trim();
-  return p.startsWith("/") ? p : "/workspace/" + p.replace(/^\.?\/+/, "");
+  return p.startsWith("/") ? p : "/LLM_WORKSPACE/" + p.replace(/^\.?\/+/, "");
 }
-// Write a file anywhere in the workbench (e.g. /workspace/app.py) RELIABLY, with no
+// Write a file anywhere in the workbench (e.g. /LLM_WORKSPACE/app.py) RELIABLY, with no
 // shell-quoting issues — content is base64-piped in. Use this to create code/config
 // files for the workbench instead of run_shell heredocs/echo.
 async function writeWorkbenchFile(p, content) {
-  p = toWorkbenchPath(p, "/workspace/app.py");
+  p = toWorkbenchPath(p, "/LLM_WORKSPACE/app.py");
   const b64 = Buffer.from(content == null ? "" : String(content)).toString("base64");
   const dir = String(p).replace(/\/[^/]*$/, "") || "/";
   const r = await runShell(`mkdir -p ${shq(dir)} && printf %s ${shq(b64)} | base64 -d > ${shq(p)} && wc -c < ${shq(p)}`);
@@ -107,14 +107,14 @@ async function writeWorkbenchFile(p, content) {
 }
 
 // Targeted string-replace edit of an existing workbench file — avoids error-prone whole-file
-// rewrites. Reads via the shared /workspace mount when possible (no truncation), else base64
+// rewrites. Reads via the shared /LLM_WORKSPACE mount when possible (no truncation), else base64
 // out of the container; writes back reliably as root via writeWorkbenchFile.
 async function editWorkbenchFile(p, oldStr, newStr, replaceAll) {
-  p = toWorkbenchPath(p, "/workspace/doom.html");
+  p = toWorkbenchPath(p, "/LLM_WORKSPACE/doom.html");
   if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
   newStr = newStr == null ? "" : String(newStr);
   let content;
-  try { content = fs.readFileSync(p, "utf8"); }               // /workspace + shared dirs are mounted into the app
+  try { content = fs.readFileSync(p, "utf8"); }               // /LLM_WORKSPACE + shared dirs are mounted into the app
   catch (_) {
     const r = await runShell(`base64 -w0 < ${shq(p)} 2>/dev/null || base64 < ${shq(p)}`);
     if (r.exit_code) throw new Error(`cannot read ${p}: ${(r.output || "").slice(0, 200)}`);
@@ -143,12 +143,12 @@ function resolveShared(p, mustWrite) {
   catch { try { abs = path.join(fs.realpathSync(path.dirname(abs)), path.basename(abs)); } catch (_) {} }
   const inRo = abs === ro || abs.startsWith(ro + path.sep);
   const inRw = abs === rw || abs.startsWith(rw + path.sep);
-  // /workspace is the workbench's persistent build area (the AI works there). It's a
+  // /LLM_WORKSPACE is the workbench's persistent build area (the AI works there). It's a
   // shared volume also mounted into the app, so list_dir/read_file/write_file/analyze_image
   // can operate on it directly (read + write) instead of only the user-exchange folders.
-  const inWs = abs === "/workspace" || abs.startsWith("/workspace/");
-  if (mustWrite && !inRw && !inWs) throw new Error(`write is only allowed under ${rw} or /workspace`);
-  if (!inRo && !inRw && !inWs) throw new Error(`path must be under ${ro} (read-only), ${rw} (read-write), or /workspace (workbench build area)`);
+  const inWs = abs === "/LLM_WORKSPACE" || abs.startsWith("/LLM_WORKSPACE/");
+  if (mustWrite && !inRw && !inWs) throw new Error(`write is only allowed under ${rw} or /LLM_WORKSPACE`);
+  if (!inRo && !inRw && !inWs) throw new Error(`path must be under ${ro} (read-only), ${rw} (read-write), or /LLM_WORKSPACE (workbench build area)`);
   return abs;
 }
 
@@ -219,7 +219,7 @@ async function writeFile(p, content, append) {
   return { [append ? "appended" : "written"]: abs, bytes: Buffer.byteLength(data) };
 }
 
-// Targeted string-replace edit of a shared (user-facing) file — the /READ_WRITE_FILES
+// Targeted string-replace edit of a shared (user-facing) file — the /LLM_READ_WRITE_FILES
 // counterpart of edit_workbench_file. Prefer over rewriting the whole file.
 async function editFile(p, oldStr, newStr, replaceAll) {
   const abs = resolveShared(p, true);
@@ -399,7 +399,7 @@ async function webSearch(query, limit = 8) {
 }
 
 // --- desktop control (computer use) on the watchable XFCE desktop ---
-const SCREEN_PATH = "/READ_WRITE_FILES/.jarvis_screen.png"; // mounted in both app + workbench
+const SCREEN_PATH = "/LLM_READ_WRITE_FILES/.jarvis_screen.png"; // mounted in both app + workbench
 const px = (n) => Math.round(Number(n)) || 0;
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 
@@ -518,7 +518,7 @@ async function readDocument(p, offset, maxChars) {
 
 // --- browser_* tools: deterministic DOM-level browser control via a Playwright ---
 // daemon in the workbench (headed on the visible desktop; profile persists under
-// /workspace/.browser_profile so logins survive). Far more reliable than pixel
+// /LLM_WORKSPACE/.browser_profile so logins survive). Far more reliable than pixel
 // clicking for anything inside a web page.
 const BROWSERD_URL = "http://jarvis-workbench:9251";
 const BROWSERD_PY = fs.readFileSync(path.join(__dirname, "browserd.py"), "utf8");
@@ -534,12 +534,12 @@ async function ensureBrowserd() {
     // `pkill -f browserd.py` matches and kills THIS shell before the daemon can start
     // (the historical cause of "browser daemon failed to start" with an empty error).
     // setsid + </dev/null so the daemon escapes the exec's process group and survives.
-    await runShell("fuser -k 9251/tcp 2>/dev/null; sleep 0.3; setsid nohup python3 /opt/jarvis/browserd.py > /workspace/.browserd.log 2>&1 < /dev/null & disown; echo started");
+    await runShell("fuser -k 9251/tcp 2>/dev/null; sleep 0.3; setsid nohup python3 /opt/jarvis/browserd.py > /LLM_WORKSPACE/.browserd.log 2>&1 < /dev/null & disown; echo started");
     for (let i = 0; i < 30; i++) {
       await tsleep(1000);
       try { const r = await fetch(BROWSERD_URL, { signal: AbortSignal.timeout(1500) }); if (r.ok) { log.info("browser", `browser daemon is up (after ${i + 1}s)`); return; } } catch (_) {}
     }
-    const logTail = await runShell("tail -20 /workspace/.browserd.log 2>/dev/null");
+    const logTail = await runShell("tail -20 /LLM_WORKSPACE/.browserd.log 2>/dev/null");
     const detail = (logTail.output || "").trim() ||
       "(no daemon output — check that Playwright + Chromium are installed in the workbench and that DISPLAY=:1 is available)";
     log.error("browser", "browser daemon failed to start", { detail: detail.slice(0, 800) });
@@ -616,16 +616,16 @@ async function serveApp(command, port, cwd) {
   if (!command) throw new Error("command is required (the server start command)");
   port = parseInt(port, 10);
   if (!(port >= PREVIEW_MIN && port <= PREVIEW_MAX)) throw new Error(`port must be in ${PREVIEW_MIN}-${PREVIEW_MAX} (these are the ports exposed to the user's browser)`);
-  const dir = cwd || "/workspace";
+  const dir = cwd || "/LLM_WORKSPACE";
   await runShell(`fuser -k ${port}/tcp 2>/dev/null; true`); // free the port if something's on it
-  await runShell(`cd ${shq(dir)} 2>/dev/null; nohup bash -lc ${shq(command)} > /workspace/.preview_${port}.log 2>&1 & disown; echo launched`);
+  await runShell(`cd ${shq(dir)} 2>/dev/null; nohup bash -lc ${shq(command)} > /LLM_WORKSPACE/.preview_${port}.log 2>&1 & disown; echo launched`);
   // Reachable from another container == bound to 0.0.0.0 == reachable from the host mapping.
   let reachable = false, status = null;
   for (let i = 0; i < 10; i++) {
     await tsleep(1000);
     try { const r = await fetch(`http://jarvis-workbench:${port}/`, { signal: AbortSignal.timeout(2500) }); status = r.status; reachable = true; break; } catch (_) {}
   }
-  const log = await runShell(`tail -n 20 /workspace/.preview_${port}.log 2>/dev/null`);
+  const log = await runShell(`tail -n 20 /LLM_WORKSPACE/.preview_${port}.log 2>/dev/null`);
   // What's actually in the served directory? Helps catch the common cwd/entry mix-up
   // (serving a folder with no index.html so GET / is just a directory listing, not the app).
   const ls = await runShell(`cd ${shq(dir)} 2>/dev/null && ls -1 2>/dev/null | grep -iE '\\.html?$' | head -20`);
@@ -665,22 +665,22 @@ const toolDefs = [
     description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
     parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer", description: "Max seconds before the command is killed (default 120, max 600)." } }, required: ["command"] } } },
   { type: "function", function: { name: "write_workbench_file",
-    description: "Write a text/code file in your workbench (e.g. /workspace/app.py; a relative path like app.py resolves under /workspace). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /READ_WRITE_FILES instead.)",
-    parameters: { type: "object", properties: { path: { type: "string", description: "Absolute workbench path, e.g. /workspace/app.py" }, content: { type: "string" } }, required: ["path", "content"] } } },
+    description: "Write a text/code file in your workbench (e.g. /LLM_WORKSPACE/app.py; a relative path like app.py resolves under /LLM_WORKSPACE). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /LLM_READ_WRITE_FILES instead.)",
+    parameters: { type: "object", properties: { path: { type: "string", description: "Absolute workbench path, e.g. /LLM_WORKSPACE/app.py" }, content: { type: "string" } }, required: ["path", "content"] } } },
   { type: "function", function: { name: "edit_workbench_file",
     description: "Make a TARGETED edit to an existing workbench file by replacing an exact snippet — STRONGLY PREFER this over rewriting the whole file with write_workbench_file when changing existing code. It's safer and cheaper: you only emit the small piece that changes, so you don't reintroduce bugs elsewhere or waste tokens re-writing the whole file. Provide old_string = the exact text to find (copy it verbatim, including indentation/whitespace; include enough surrounding context to be UNIQUE) and new_string = what to replace it with. Fails if old_string is missing or appears more than once (then add more context or set replace_all=true). Read the file first so old_string matches exactly.",
     parameters: { type: "object", properties: {
-      path: { type: "string", description: "Absolute workbench path, e.g. /workspace/doom.html" },
+      path: { type: "string", description: "Absolute workbench path, e.g. /LLM_WORKSPACE/doom.html" },
       old_string: { type: "string", description: "Exact text to replace (must be unique in the file unless replace_all)." },
       new_string: { type: "string", description: "Replacement text (use \"\" to delete the old text)." },
       replace_all: { type: "boolean", description: "Replace every occurrence instead of requiring a unique match." },
     }, required: ["path", "old_string", "new_string"] } } },
   { type: "function", function: { name: "serve_app",
-    description: "Run a web app/server inside the workbench and expose it so the USER can open it in their OWN browser to preview/test it (e.g. before you hand over the code). The app MUST serve a real, interactive HTML page at GET / (a working UI the user can actually use) — NOT just JSON/API endpoints, or the browser shows 'Cannot GET /' and it looks broken. Build the app under /workspace, then call this with the command that starts the server BOUND TO 0.0.0.0 on one of the preview ports (9101-9150). The tool reports whether GET / returned 200 (ok_homepage); if it didn't, add the homepage UI and call again BEFORE telling the user it's ready. Returns http://localhost:<port> for the user to visit; the server keeps running in the background. Bind-correct examples: 'python3 -m http.server 9101 --bind 0.0.0.0' (serves files incl. index.html); a Node/Express app that serves a page at '/' and listens on 0.0.0.0:9102; 'flask run --host 0.0.0.0 --port 9103'. Also save the final code to /READ_WRITE_FILES.",
+    description: "Run a web app/server inside the workbench and expose it so the USER can open it in their OWN browser to preview/test it (e.g. before you hand over the code). The app MUST serve a real, interactive HTML page at GET / (a working UI the user can actually use) — NOT just JSON/API endpoints, or the browser shows 'Cannot GET /' and it looks broken. Build the app under /LLM_WORKSPACE, then call this with the command that starts the server BOUND TO 0.0.0.0 on one of the preview ports (9101-9150). The tool reports whether GET / returned 200 (ok_homepage); if it didn't, add the homepage UI and call again BEFORE telling the user it's ready. Returns http://localhost:<port> for the user to visit; the server keeps running in the background. Bind-correct examples: 'python3 -m http.server 9101 --bind 0.0.0.0' (serves files incl. index.html); a Node/Express app that serves a page at '/' and listens on 0.0.0.0:9102; 'flask run --host 0.0.0.0 --port 9103'. Also save the final code to /LLM_READ_WRITE_FILES.",
     parameters: { type: "object", properties: {
       command: { type: "string", description: "Command that starts the server, listening on 0.0.0.0:<port>." },
       port: { type: "integer", description: "One of 9101-9150 (exposed to the host browser)." },
-      cwd: { type: "string", description: "Working directory to run in (default /workspace)." },
+      cwd: { type: "string", description: "Working directory to run in (default /LLM_WORKSPACE)." },
     }, required: ["command", "port"] } } },
   { type: "function", function: { name: "list_dir",
     description: "List a directory inside the shared folders (read-only or read-write).",
@@ -689,10 +689,10 @@ const toolDefs = [
     description: "Read a TEXT file from the shared folders. Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document).",
     parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "integer", description: "Character offset to start from (for long files)." }, max_chars: { type: "integer", description: "Max characters to return (default 50000)." } }, required: ["path"] } } },
   { type: "function", function: { name: "write_file",
-    description: "Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /workspace, use write_workbench_file. To CHANGE part of an existing shared file, prefer edit_file.",
+    description: "Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /LLM_WORKSPACE, use write_workbench_file. To CHANGE part of an existing shared file, prefer edit_file.",
     parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, append: { type: "boolean", description: "Append to the end instead of overwriting (default false)." } }, required: ["path", "content"] } } },
   { type: "function", function: { name: "edit_file",
-    description: "Make a TARGETED edit to an existing shared file (in /READ_WRITE_FILES) by replacing an exact snippet — prefer this over rewriting the whole file with write_file. old_string must match verbatim (including whitespace) and be unique unless replace_all=true; new_string is what to put in its place (\"\" deletes). (For workbench /workspace files, use edit_workbench_file.)",
+    description: "Make a TARGETED edit to an existing shared file (in /LLM_READ_WRITE_FILES) by replacing an exact snippet — prefer this over rewriting the whole file with write_file. old_string must match verbatim (including whitespace) and be unique unless replace_all=true; new_string is what to put in its place (\"\" deletes). (For workbench /LLM_WORKSPACE files, use edit_workbench_file.)",
     parameters: { type: "object", properties: {
       path: { type: "string" },
       old_string: { type: "string", description: "Exact text to replace (unique unless replace_all)." },
@@ -726,9 +726,9 @@ const toolDefs = [
     description: "Look at the current desktop screen. This captures the screen and returns a TEXT analysis from a vision model: a description of what is visible plus the interactive elements (buttons, links, fields, icons, tabs) with their approximate CENTER pixel coordinates (x, y from the top-left). Use those coordinates with click/type/move_mouse to act. Optionally pass 'question' to focus the analysis (e.g. 'where is the address bar?', 'what are the search results?'). Take a screenshot to locate elements before acting, and again afterward to verify the result. The screen is 1024x768.",
     parameters: { type: "object", properties: { question: { type: "string", description: "Optional: focus the visual analysis on a specific question about the screen." } }, required: [] } } },
   { type: "function", function: { name: "analyze_image",
-    description: "Look at / analyze an image FILE with the vision model — describe it, read text in it, or answer a question about it. Use this for images the user uploaded (they land in /READ_WRITE_FILES/uploads/) or any image in the shared folders. Pass the image's path and an optional question.",
+    description: "Look at / analyze an image FILE with the vision model — describe it, read text in it, or answer a question about it. Use this for images the user uploaded (they land in /LLM_READ_WRITE_FILES/uploads/) or any image in the shared folders. Pass the image's path and an optional question.",
     parameters: { type: "object", properties: {
-      path: { type: "string", description: "Path to the image, e.g. /READ_WRITE_FILES/uploads/photo.jpg" },
+      path: { type: "string", description: "Path to the image, e.g. /LLM_READ_WRITE_FILES/uploads/photo.jpg" },
       question: { type: "string", description: "Optional: what to focus on or ask about the image." }
     }, required: ["path"] } } },
   { type: "function", function: { name: "check_email",
@@ -741,8 +741,8 @@ const toolDefs = [
     description: "Send a plain-text email FROM the user's own account (the 'email' secret). Confirm with the user before sending anything they haven't explicitly asked you to send.",
     parameters: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "subject", "body"] } } },
   { type: "function", function: { name: "read_document",
-    description: "Extract the TEXT of a PDF, DOCX, ODT, RTF, EPUB, or HTML document from the shared folders (e.g. a file the user uploaded to /READ_WRITE_FILES/uploads/ or one you downloaded with fetch_url save_to). Paged: a truncated response tells you the offset to continue from.",
-    parameters: { type: "object", properties: { path: { type: "string", description: "Document path, e.g. /READ_WRITE_FILES/uploads/report.pdf" }, offset: { type: "integer" }, max_chars: { type: "integer", description: "Default 15000." } }, required: ["path"] } } },
+    description: "Extract the TEXT of a PDF, DOCX, ODT, RTF, EPUB, or HTML document from the shared folders (e.g. a file the user uploaded to /LLM_READ_WRITE_FILES/uploads/ or one you downloaded with fetch_url save_to). Paged: a truncated response tells you the offset to continue from.",
+    parameters: { type: "object", properties: { path: { type: "string", description: "Document path, e.g. /LLM_READ_WRITE_FILES/uploads/report.pdf" }, offset: { type: "integer" }, max_chars: { type: "integer", description: "Default 15000." } }, required: ["path"] } } },
   { type: "function", function: { name: "browser_goto",
     description: "PREFERRED way to work with websites: open a URL in the agent-controlled browser (visible on the workbench desktop; logins/cookies persist across sessions). Then use browser_snapshot to see the page structure and browser_click/browser_fill to act by SELECTOR — deterministic, no pixel-coordinate guessing. Use the pixel tools (screenshot/click) only for non-browser desktop apps.",
     parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"] } } },
@@ -998,14 +998,14 @@ async function _execTool(name, args, signal) {
 // Put a JS file in ./data/custom_tools/ (host side) exporting
 //   module.exports = { name, description, parameters, retryable, handler: async (args) => ... }
 // and restart the app. If custom_tools.allow_model_authored is true in config,
-// /READ_WRITE_FILES/custom_tools is ALSO loaded — files JARVIS itself can write.
+// /LLM_READ_WRITE_FILES/custom_tools is ALSO loaded — files JARVIS itself can write.
 // (Default OFF: model-authored code executing in the app container is a real
 // escalation path; enable it deliberately.)
 const customRegistry = {};
 function loadCustomTools() {
   const dirs = ["/data/custom_tools"];
   if (config.custom_tools && config.custom_tools.allow_model_authored) {
-    dirs.push(((config.shared && config.shared.read_write_dir) || "/READ_WRITE_FILES") + "/custom_tools");
+    dirs.push(((config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES") + "/custom_tools");
   }
   for (const dir of dirs) {
     let files = [];

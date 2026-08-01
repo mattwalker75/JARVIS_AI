@@ -18,17 +18,17 @@ Chat UI is at http://localhost:8110/ ; the workbench desktop at http://localhost
 ./JARVIS.sh --reset-workbench
 ```
 Deletes & rebuilds ONLY the workbench container (the Linux the LLM works in) from its clean image —
-wipes every apt/pip package and system tweak it installed at runtime. **Keeps** your `/workspace`
-build files and browser logins, and leaves the app, memory, config, and READ_WRITE_FILES untouched.
+wipes every apt/pip package and system tweak it installed at runtime. **Keeps** your `/LLM_WORKSPACE`
+build files and browser logins, and leaves the app, memory, config, and LLM_READ_WRITE_FILES untouched.
 
 - Also rebuild the **image** (e.g. after a Dockerfile change): `./JARVIS.sh --setup`
-- Also wipe **/workspace** (the LLM's build files): `./JARVIS.sh --restore-workspace --fresh`
+- Also wipe **/LLM_WORKSPACE** (the LLM's build files): `./JARVIS.sh --restore-workspace --fresh`
 
 ## Backups
 
 ```
 ./JARVIS.sh --backup-memory       # semantic memory -> backups/
-./JARVIS.sh --backup-workspace    # the LLM's /workspace -> backups/
+./JARVIS.sh --backup-workspace    # the LLM's /LLM_WORKSPACE -> backups/
 ./JARVIS.sh --restore-memory --from <file>
 ./JARVIS.sh --restore-workspace --from <file>
 ```
@@ -36,7 +36,7 @@ build files and browser logins, and leaves the app, memory, config, and READ_WRI
 ## Full teardown
 
 ```
-./JARVIS.sh --stop --delete       # removes containers + the memory/workspace volumes
+./JARVIS.sh --stop --delete       # removes containers + the memory/LLM_WORKSPACE volumes
 ./JARVIS.sh --setup --start       # rebuild + start fresh
 ```
 Your `config/`, secrets, and the shared folders survive `--delete` (they're on disk, not volumes).

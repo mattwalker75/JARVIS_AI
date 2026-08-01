@@ -184,7 +184,7 @@ function dismiss() {
 
 function guardClause(mode) {
   return mode === "guarded"
-    ? " SAFE MODE: do NOT take irreversible EXTERNAL actions on your own — no sending email/messages, posting online, purchases, or deleting/overwriting the user's files outside /workspace. If a step truly needs one, mark it blocked (plan_update status=blocked with a note) and continue with the rest; the user will handle it. Building and testing in /workspace is unrestricted."
+    ? " SAFE MODE: do NOT take irreversible EXTERNAL actions on your own — no sending email/messages, posting online, purchases, or deleting/overwriting the user's files outside /LLM_WORKSPACE. If a step truly needs one, mark it blocked (plan_update status=blocked with a note) and continue with the rest; the user will handle it. Building and testing in /LLM_WORKSPACE is unrestricted."
     : " FULL AUTONOMY: take whatever actions the objective genuinely requires.";
 }
 

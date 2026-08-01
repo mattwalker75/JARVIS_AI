@@ -36,7 +36,7 @@ reached over `host.docker.internal`). The optional LiteLLM gateway now lives in 
 
 The app drives the workbench through the Docker socket (`docker exec`), reaches
 memory over the internal network, and shares two host folders
-(`READ_ONLY_FILES/` → you-to-JARVIS, `READ_WRITE_FILES/` ↔ both ways).
+(`LLM_READ_ONLY_FILES/` → you-to-JARVIS, `LLM_READ_WRITE_FILES/` ↔ both ways).
 
 ## Quick start
 

@@ -22,10 +22,10 @@ Plain-language definitions of the parts of JARVIS.
 - **Workbench** — a full Linux desktop in a container where the LLM works as root: runs commands,
   writes/tests code, drives a browser. Watch it live in the **Workbench** tab.
 
-- **/workspace** — the workbench's scratch/build area (in-progress work). Separate from the shared
-  folders. Finished deliverables get copied to **/READ_WRITE_FILES**.
+- **/LLM_WORKSPACE** — the workbench's scratch/build area (in-progress work). Separate from the shared
+  folders. Finished deliverables get copied to **/LLM_READ_WRITE_FILES**.
 
-- **Shared folders** — **READ_ONLY_FILES** (you → JARVIS, read-only) and **READ_WRITE_FILES**
+- **Shared folders** — **LLM_READ_ONLY_FILES** (you → JARVIS, read-only) and **LLM_READ_WRITE_FILES**
   (both ways; where JARVIS saves your deliverables and where UI uploads land).
 
 - **Autopilot** — give an objective + time budget and JARVIS works autonomously (build/test/refine)

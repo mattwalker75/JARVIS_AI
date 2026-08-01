@@ -200,7 +200,7 @@ namespaced Chroma collection — see [Memory](memory-and-scheduling.md).
 
 ```jsonc
 "workbench": { "container": "jarvis-workbench", "desktop_url": "http://localhost:8111/" },
-"shared":    { "read_only_dir": "/READ_ONLY_FILES", "read_write_dir": "/READ_WRITE_FILES" }
+"shared":    { "read_only_dir": "/LLM_READ_ONLY_FILES", "read_write_dir": "/LLM_READ_WRITE_FILES" }
 ```
 
 ## `personas` (optional)
@@ -276,7 +276,7 @@ Read live — change `level` from the Config tab and it applies immediately. Sec
 "custom_tools": { "allow_model_authored": false }
 ```
 Tools in `data/custom_tools/*.js` always load. Setting `allow_model_authored: true`
-**also** loads `/READ_WRITE_FILES/custom_tools/*.js` — letting JARVIS write its own
+**also** loads `/LLM_READ_WRITE_FILES/custom_tools/*.js` — letting JARVIS write its own
 tools. That's an escalation path (model-authored code runs in the app container), so
 it's **off by default**. See [Extending](extending.md#custom-tools).
 

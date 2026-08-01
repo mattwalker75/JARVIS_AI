@@ -145,7 +145,7 @@ RUN npm install -g --prefix /usr/local \
 
 # Persistent project workspace (backed by a named volume in docker-compose) — work
 # done here survives image rebuilds. This is the LLM's default working directory.
-RUN mkdir -p /workspace
+RUN mkdir -p /LLM_WORKSPACE
 
 # Friendly aliases for tools Ubuntu ships under different names.
 RUN ln -sf "$(command -v fdfind 2>/dev/null)" /usr/local/bin/fd 2>/dev/null || true; \

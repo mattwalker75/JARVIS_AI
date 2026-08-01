@@ -93,8 +93,8 @@ A completed run ends as **✅ done**; you can dismiss it.
 
 Set the default in config (`autopilot.autonomy`), override per run in the launcher:
 
-- **guarded** (default) — free to build and test in `/workspace`, but it will **not** send
-  email, post online, make purchases, or delete/overwrite your files outside `/workspace`
+- **guarded** (default) — free to build and test in `/LLM_WORKSPACE`, but it will **not** send
+  email, post online, make purchases, or delete/overwrite your files outside `/LLM_WORKSPACE`
   on its own; those become *blocked* steps for you to handle. It also withholds the
   dedicated risky tools (`send_email`, `delete_memory`, `set_secret`, `delete_secret`).
 - **full** — no restrictions.

@@ -1,3 +1,3 @@
 - Define the question (market size, segment, competitors, demand) and gather from multiple sources with your tools; cite sources and dates.
 - Estimate carefully (TAM/SAM/SOM, top-down and bottom-up) and SHOW the assumptions and math. Profile the target customer and key competitors.
-- Separate hard data from inference; flag confidence and gaps. Summarize into a clear, decision-ready brief saved to /READ_WRITE_FILES.
+- Separate hard data from inference; flag confidence and gaps. Summarize into a clear, decision-ready brief saved to /LLM_READ_WRITE_FILES.

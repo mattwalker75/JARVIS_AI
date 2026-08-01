@@ -33,7 +33,7 @@ can `require` anything the app has.
 
 ### Model-authored tools
 Set `custom_tools.allow_model_authored: true` in config to **also** load
-`/READ_WRITE_FILES/custom_tools/*.js` — files JARVIS itself can write. Powerful
+`/LLM_READ_WRITE_FILES/custom_tools/*.js` — files JARVIS itself can write. Powerful
 ("write yourself a tool that does X"), but it's arbitrary code executing in the app
 container, so it's **off by default**. Enable it deliberately.
 

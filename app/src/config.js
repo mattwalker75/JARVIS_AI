@@ -46,7 +46,7 @@ const PLANNER_RULE =
 // whole files (bugs), debugging runtime issues by re-reading static code (can't see the error),
 // and putting build files in the user-facing folder.
 const CODING_RULE =
-  "\n\nWORKBENCH CODING: Build and iterate in /workspace (that is your scratch/build area). Save FINISHED deliverables for the user to /READ_WRITE_FILES — do NOT put in-progress build files there, and do NOT look for your own code there (it's in /workspace). " +
+  "\n\nWORKBENCH CODING: Build and iterate in /LLM_WORKSPACE (that is your scratch/build area). Save FINISHED deliverables for the user to /LLM_READ_WRITE_FILES — do NOT put in-progress build files there, and do NOT look for your own code there (it's in /LLM_WORKSPACE). " +
   "To CHANGE an existing file, use edit_workbench_file (a targeted find-and-replace of an exact snippet) instead of rewriting the whole file with write_workbench_file — whole-file rewrites are slow and tend to reintroduce bugs. Use write_workbench_file only to CREATE a file or replace a small one. " +
   "To DEBUG a web app that renders wrong/blank or misbehaves at RUNTIME: serve it, then browser_goto its URL and call browser_console to read the actual JavaScript error + console output (browser_goto also reports load-time errors). Do NOT try to diagnose a runtime rendering bug by only re-reading the static HTML/JS — you cannot see a runtime error that way. " +
   "After you CREATE or EDIT code, quickly syntax-check it before moving on (e.g. run_shell `node -c file.js`, `python3 -m py_compile file.py`, `bash -n script.sh`, or just run it) — this catches typos and undefined variables you introduced, instead of shipping a silently-broken file.";

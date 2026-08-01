@@ -10,7 +10,7 @@ folder so JARVIS can read them at runtime and walk you through the steps.
 > "How do I run something on Autopilot?"
 
 — or use the **`/guide`** command in chat (`/guide switching models`, or `/guide` alone to
-list topics). JARVIS reads the matching guide from `/READ_ONLY_FILES/JARVIS_Guides/` and
+list topics). JARVIS reads the matching guide from `/LLM_READ_ONLY_FILES/JARVIS_Guides/` and
 walks you through it.
 
 ## Guides
