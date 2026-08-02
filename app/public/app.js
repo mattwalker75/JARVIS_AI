@@ -1511,15 +1511,19 @@ const pMaster = () => $("cfg-master-prompt"), pSystem = () => $("cfg-system-prom
 async function loadActivePrompts() {   // fill the editor from the active (default) set
   try { const d = await (await fetch("/api/prompts/default")).json(); if (pMaster()) pMaster().value = d.master || ""; if (pSystem()) pSystem().value = d.system || ""; } catch (_) {}
 }
-async function renderPromptPresets() {   // DEFAULT pinned first; the ACTIVE set is marked and shown selected
+async function renderPromptPresets() {   // DEFAULT (general base) pinned first; the ACTIVE set is marked and shown selected
   const sel = $("cfg-prompt-preset"); if (!sel) return;
   let list = [], active = null;
   try { const d = await (await fetch("/api/prompts")).json(); list = d.prompts || []; active = d.active || null; } catch (_) {}
+  // DEFAULT == the general base assistant (stored as the protected "stock" set). Surface it only as
+  // DEFAULT, never as a separate row, and treat "stock is live" as "DEFAULT is active".
+  list = list.filter((n) => n !== "stock");
+  const defaultActive = active === "stock";
   // DEFAULT is always the first entry.
-  sel.innerHTML = '<option value="default">DEFAULT</option>';
+  sel.innerHTML = '<option value="default">' + (defaultActive ? "DEFAULT (active)" : "DEFAULT") + "</option>";
   if (list.length) { const sep = document.createElement("option"); sep.value = ""; sep.disabled = true; sep.textContent = "— saved prompt sets —"; sel.appendChild(sep); }
   list.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = (n === active) ? n + " (active)" : n; sel.appendChild(o); });
-  // Show whichever set is currently active; if none matches (a hand-edited default), show DEFAULT.
+  // Show whichever set is currently active; the general base (or a hand-edited default) shows as DEFAULT.
   sel.value = (active && list.includes(active)) ? active : "default";
 }
 (function initPromptLibrary() {
@@ -1540,8 +1544,18 @@ async function renderPromptPresets() {   // DEFAULT pinned first; the ACTIVE set
   });
   if (loadB) loadB.addEventListener("click", async () => {
     const name = sel && sel.value; if (!name) return;
-    try { const p = await (await fetch("/api/prompts/" + encodeURIComponent(name))).json(); if (p.error) return toast("Load failed: " + p.error, false); if (pMaster()) pMaster().value = p.master || ""; if (pSystem()) pSystem().value = p.system || ""; toast(`Loaded "${name}" into the editor. Click “Save as active” to use it.`, true); }
-    catch (e) { toast("Load failed: " + e.message, false); }
+    // DEFAULT loads the general base assistant (the protected "stock" set), not the already-active slot.
+    const src = name === "default" ? "stock" : name;
+    const label = name === "default" ? "DEFAULT (general assistant)" : `"${name}"`;
+    try {
+      const p = await (await fetch("/api/prompts/" + encodeURIComponent(src))).json();
+      if (p.error) return toast("Load failed: " + p.error, false);
+      if (pMaster()) pMaster().value = p.master || ""; if (pSystem()) pSystem().value = p.system || "";
+      const d = await put("default");   // apply it right away: make it the ACTIVE prompt (default_*)
+      if (d.error) return toast(`Loaded ${label}, but applying failed: ` + d.error, false);
+      await renderPromptPresets();       // reflect the new active set in the dropdown
+      toast(`Loaded and applied ${label} — active on the next turn. (Edit the boxes + "Save as active" to tweak.)`, true);
+    } catch (e) { toast("Load failed: " + e.message, false); }
   });
   if (delB) delB.addEventListener("click", async () => {
     const name = sel && sel.value; if (!name) return;

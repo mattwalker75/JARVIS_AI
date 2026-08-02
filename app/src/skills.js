@@ -2,9 +2,17 @@
 // Skills are served directly from skills_data.js (no database). The list_skills /
 // get_skill tools read this in-memory catalog; edit skills_data.js and reload.
 const SKILLS = require("./skills_data");
+const { activePromptName } = require("./config");
+
+// A skill with a `prompts` list is a SPECIALTY skill — only surfaced when one of those
+// prompt sets is the active one (e.g. the survival KB skill under the "survivalist" prompt).
+// Skills without `prompts` are global and always available.
+function inScope(s, active) { return !s.prompts || (active && s.prompts.includes(active)); }
 
 function list() {
-  return SKILLS.map((s) => ({ name: s.name, category: s.category, summary: s.summary }))
+  const active = activePromptName();
+  return SKILLS.filter((s) => inScope(s, active))
+    .map((s) => ({ name: s.name, category: s.category, summary: s.summary }))
     .sort((a, b) => (a.category + a.name).localeCompare(b.category + b.name));
 }
 
@@ -33,14 +41,17 @@ const TRIGGERS = {
   "internet": /\b(search (the web|online|for)|look up|google (it|the)|find (info|information|out) (on|about)|latest news|current price|what'?s the latest)\b/i,
   "desktop-control": /\b(desktop app|gui app|non-?browser app|application window|xfce)\b/i,
   "app-integration": /\b(add (a )?(note|record|entry|content|data) (to|in)|update (the )?(note|content|record)|my_business_manager|the (app|application|program) I (uploaded|installed|created)|inside (the|your) app|backed by (real )?files|the app'?s (data|notes|database))\b/i,
+  "survival-knowledge-base": /\b(survival|survive|emergency|evacuat|shelter|purif|tourniquet|first ?aid|wildfire|tornado|hurricane|frostbite|forag|prepared|bug.?out|off.?grid|snakebite|no power|drinkable water)\b/i,
 };
 
 // Return a one-line hint pointing at up to 2 relevant skills, or null. Called once per
 // user turn by the tool loop when config.skills_autohint is on.
 function hint(text) {
   if (!text || typeof text !== "string") return null;
+  const active = activePromptName();
   const matched = [];
   for (const s of SKILLS) {
+    if (!inScope(s, active)) continue;   // don't hint a specialty skill outside its prompt
     const re = TRIGGERS[s.name];
     if (re && re.test(text)) matched.push(s.name);
   }

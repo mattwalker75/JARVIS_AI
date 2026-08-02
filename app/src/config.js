@@ -70,6 +70,19 @@ function systemPrompt(persona) {
   return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
 }
 
+// Which SAVED prompt set (if any) currently equals the active default_* content — i.e. the
+// name of the prompt in use. Returns null if the active default is a custom/hand-edited one.
+// Read live (small files), so it reflects the current prompt without a restart.
+function activePromptName() {
+  const norm = (s) => String(s || "").replace(/\r\n/g, "\n").trim();
+  const dm = norm(readPromptFile("default_master.prompt")), ds = norm(readPromptFile("default_system.prompt"));
+  let names;
+  try { names = [...new Set(fs.readdirSync(PROMPTS_DIR).map((f) => (f.match(/^(.+)_(?:master|system)\.prompt$/) || [])[1]).filter(Boolean))].filter((n) => n !== "default"); }
+  catch (_) { return null; }
+  for (const n of names) { if (norm(readPromptFile(n + "_master.prompt")) === dm && norm(readPromptFile(n + "_system.prompt")) === ds) return n; }
+  return null;
+}
+
 // "single" => every task tier uses llm.model (the models block is ignored).
 // "multi"  => use the per-task tiers (with fallback). If unset, infer: multi when a
 // non-empty models block is present, else single.
@@ -227,4 +240,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, readFullConfig, writeFullConfig, logLevel };
+module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

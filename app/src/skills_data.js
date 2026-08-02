@@ -268,4 +268,20 @@ module.exports = [
       "Be HONEST: report only what tools actually returned; if a check finds nothing or a tool errors, say so — never invent a result.",
     ].join("\n"),
   },
+  {
+    name: "survival-knowledge-base",
+    category: "reference",
+    prompts: ["survivalist"],   // specialty skill — only shown when the 'survivalist' prompt is active
+    summary: "Answer survival/emergency questions FROM the offline Survival Knowledge Base (49 guides + manuals, maps, per-state info).",
+    details: [
+      "The knowledge base is an OFFLINE folder at /LLM_READ_ONLY_FILES/Survival_Knowledge_Base — 49 in-depth guides plus reference manuals, road/topo maps, and per-state local info. Answer survival, preparedness, and emergency questions FROM it, not from general memory.",
+      "START HERE: read_file /LLM_READ_ONLY_FILES/Survival_Knowledge_Base/START-HERE.md — a life-threat triage plus a 'pick your situation' router to the right guide. Then INDEX.md for the full topic list, GLOSSARY.md for terms, CHECKLISTS.md for printable checklists.",
+      "GUIDES: each topic is topics/<topic>/<topic>.md (e.g. topics/water/water.md, topics/first-aid/first-aid.md, topics/food-preservation-cooking/food-preservation-cooking.md). read_file the matching guide(s) and answer from their step-by-step sections; prefer the specific guide over general advice.",
+      "DEEPER SOURCES: the reference manuals are PDFs in reference/manuals/ — use read_document on them. Images live in each topic's images/ folder, and the offline maps in reference/maps/ (national + all 50 state road maps + street-level North Texas) — use analyze_image to read/verify them.",
+      "LOCATION: for a place-specific question also read reference/local/<state>.md (deepest for texas/oklahoma/arkansas; home base is Anna, TX). For radios/frequencies read reference/comms-frequencies.md.",
+      "PRIORITIES: give calm, ordered steps following the guides' Rule of 3s (air/severe bleeding -> shelter/temperature -> water -> food) and the two key decisions (shelter-in-place vs evacuate; stay vs go). Offer more than one method when the guide gives them, with concrete quantities and times.",
+      "SAFETY: for anything medical, chemical, electrical, or structural, repeat the guide's warnings, never invent drug/herbal doses, and say to get professional help the moment it's reachable. If it isn't in the KB or you're unsure, say so — never fabricate.",
+      "CLICKABLE CITATIONS (open in a new tab): guide/section -> [Water — Method 1: Boiling](/view?dir=ro&path=Survival_Knowledge_Base/topics/water/water.md#method-1-boiling) where the anchor is the heading lowercased, punctuation dropped, spaces->hyphens. PDF -> [FM 21-76](/api/files/raw?dir=ro&path=Survival_Knowledge_Base/reference/manuals/fm21-76_survival_manual.pdf) (add #page=N if known). Image/map -> link the raw file the same way. End answers with a short 'Sources:' line linking the 1-3 guides you actually used.",
+    ].join("\n"),
+  },
 ];
