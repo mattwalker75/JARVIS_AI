@@ -19,15 +19,14 @@ backups/*.sql
 data/*.json
 data/sessions/
 
-# Shared file-exchange folders (ignore the user's files, but keep the READMEs
-# and the shipped self-help guides so JARVIS can read them at runtime).
+# READ-WRITE folder = the AI's deliverables / scratch — NOT tracked (can be huge or personal).
 LLM_READ_WRITE_FILES/*
 !LLM_READ_WRITE_FILES/.gitkeep
 !LLM_READ_WRITE_FILES/README.txt
-LLM_READ_ONLY_FILES/*
-!LLM_READ_ONLY_FILES/.gitkeep
-!LLM_READ_ONLY_FILES/README.txt
-!LLM_READ_ONLY_FILES/JARVIS_Guides/
+
+# READ-ONLY folder = committed reference content (self-help guides, knowledge bases) — TRACKED IN
+# FULL so it ships with the repo. Nothing under it is ignored; OS junk (.DS_Store) is handled globally
+# above. Put anything you want versioned/shipped here (e.g. Survival_Knowledge_Base/).
 
 # local config backup (contains a real key)
 config/JARVIS_CONFIG.*backup*.json
