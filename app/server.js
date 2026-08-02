@@ -11,6 +11,7 @@ const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
 const chatlog = require("./src/chatlog");
 const tts = require("./src/tts");
+const mdview = require("./src/mdview");
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uploads
@@ -343,6 +344,20 @@ app.get("/api/files/raw", (req, res) => {
     if (req.query.download) return res.download(abs);
     res.sendFile(abs);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Open a Markdown guide RENDERED in a browser tab (and, via #anchor, scrolled to a section).
+// Non-Markdown files (PDF/image) fall through to the raw file API so they open natively.
+app.get("/view", (req, res) => {
+  try {
+    const which = req.query.dir === "rw" ? "rw" : "ro"; // knowledge base is read-only by default
+    const rel = String(req.query.path || "");
+    const abs = safeJoin(sharedBase(which), rel);
+    if (!/\.(md|markdown|txt)$/i.test(abs)) {
+      return res.redirect("/api/files/raw?dir=" + which + "&path=" + encodeURIComponent(rel));
+    }
+    const md = fs.readFileSync(abs, "utf8");
+    res.type("html").send(mdview.renderPage({ mdText: md, filePathRel: rel, sharedWhich: which }));
+  } catch (e) { res.status(400).type("text").send("Cannot view file: " + e.message); }
 });
 app.delete("/api/files", (req, res) => {
   try {
