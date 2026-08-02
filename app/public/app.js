@@ -1511,16 +1511,16 @@ const pMaster = () => $("cfg-master-prompt"), pSystem = () => $("cfg-system-prom
 async function loadActivePrompts() {   // fill the editor from the active (default) set
   try { const d = await (await fetch("/api/prompts/default")).json(); if (pMaster()) pMaster().value = d.master || ""; if (pSystem()) pSystem().value = d.system || ""; } catch (_) {}
 }
-async function renderPromptPresets() {   // list the active 'DEFAULT' set (pinned first) + saved sets
+async function renderPromptPresets() {   // DEFAULT pinned first; the ACTIVE set is marked and shown selected
   const sel = $("cfg-prompt-preset"); if (!sel) return;
-  const cur = sel.value;
-  let list = [];
-  try { const d = await (await fetch("/api/prompts")).json(); list = d.prompts || []; } catch (_) {}
-  // Pin the active set as "DEFAULT" at the very top so it can be loaded from the dropdown too.
+  let list = [], active = null;
+  try { const d = await (await fetch("/api/prompts")).json(); list = d.prompts || []; active = d.active || null; } catch (_) {}
+  // DEFAULT is always the first entry.
   sel.innerHTML = '<option value="default">DEFAULT</option>';
   if (list.length) { const sep = document.createElement("option"); sep.value = ""; sep.disabled = true; sep.textContent = "— saved prompt sets —"; sel.appendChild(sep); }
-  list.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
-  sel.value = (cur === "default" || list.includes(cur)) ? cur : "default";
+  list.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = (n === active) ? n + " (active)" : n; sel.appendChild(o); });
+  // Show whichever set is currently active; if none matches (a hand-edited default), show DEFAULT.
+  sel.value = (active && list.includes(active)) ? active : "default";
 }
 (function initPromptLibrary() {
   const sel = $("cfg-prompt-preset");
@@ -1529,7 +1529,7 @@ async function renderPromptPresets() {   // list the active 'DEFAULT' set (pinne
   const body = () => JSON.stringify({ master: pMaster() ? pMaster().value : "", system: pSystem() ? pSystem().value : "" });
   const put = (name) => fetch("/api/prompts/" + encodeURIComponent(name), { method: "POST", headers: { "Content-Type": "application/json" }, body: body() }).then((r) => r.json());
   if (saveActiveB) saveActiveB.addEventListener("click", async () => {
-    try { const d = await put("default"); if (d.error) return toast("Save failed: " + d.error, false); toast("Saved as ACTIVE — applies on the next turn (Prompts/default_*.prompt).", true); }
+    try { const d = await put("default"); if (d.error) return toast("Save failed: " + d.error, false); await renderPromptPresets(); toast("Saved as ACTIVE — applies on the next turn (Prompts/default_*.prompt).", true); }
     catch (e) { toast("Save failed: " + e.message, false); }
   });
   if (saveAsB) saveAsB.addEventListener("click", async () => {

@@ -134,12 +134,18 @@ function writeSet(name, master, system) {
   fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_master.prompt`), String(master || ""));
   fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_system.prompt`), String(system || ""));
 }
-app.get("/api/prompts", (_req, res) => {   // list saved set NAMES (excluding the active 'default')
+app.get("/api/prompts", (_req, res) => {   // saved set NAMES + which one (if any) is currently ACTIVE
   try {
     fs.mkdirSync(PROMPTS_DIR, { recursive: true });
     const names = [...new Set(fs.readdirSync(PROMPTS_DIR).map((f) => (f.match(/^(.+)_(?:master|system)\.prompt$/) || [])[1]).filter(Boolean))]
       .filter((n) => n !== "default").sort();
-    res.json({ dir: PROMPTS_DIR, prompts: names });
+    // The live prompt lives in default_*; report which saved set (if any) has identical content
+    // so the UI can show which one is active. If none matches, the active default is a custom edit.
+    const norm = (s) => String(s || "").replace(/\r\n/g, "\n").trim();
+    const dm = norm(readPart("default", "master")), ds = norm(readPart("default", "system"));
+    let active = null;
+    for (const n of names) { if (norm(readPart(n, "master")) === dm && norm(readPart(n, "system")) === ds) { active = n; break; } }
+    res.json({ dir: PROMPTS_DIR, prompts: names, active });
   } catch (e) { res.json({ dir: PROMPTS_DIR, prompts: [], error: e.message }); }
 });
 app.get("/api/prompts/:name", (req, res) => {
