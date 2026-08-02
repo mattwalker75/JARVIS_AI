@@ -1511,14 +1511,16 @@ const pMaster = () => $("cfg-master-prompt"), pSystem = () => $("cfg-system-prom
 async function loadActivePrompts() {   // fill the editor from the active (default) set
   try { const d = await (await fetch("/api/prompts/default")).json(); if (pMaster()) pMaster().value = d.master || ""; if (pSystem()) pSystem().value = d.system || ""; } catch (_) {}
 }
-async function renderPromptPresets() {   // list saved set names (excludes 'default')
+async function renderPromptPresets() {   // list the active 'DEFAULT' set (pinned first) + saved sets
   const sel = $("cfg-prompt-preset"); if (!sel) return;
   const cur = sel.value;
   let list = [];
   try { const d = await (await fetch("/api/prompts")).json(); list = d.prompts || []; } catch (_) {}
-  sel.innerHTML = '<option value="">— saved prompt sets —</option>';
+  // Pin the active set as "DEFAULT" at the very top so it can be loaded from the dropdown too.
+  sel.innerHTML = '<option value="default">DEFAULT</option>';
+  if (list.length) { const sep = document.createElement("option"); sep.value = ""; sep.disabled = true; sep.textContent = "— saved prompt sets —"; sel.appendChild(sep); }
   list.forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
-  if (cur && list.includes(cur)) sel.value = cur;
+  sel.value = (cur === "default" || list.includes(cur)) ? cur : "default";
 }
 (function initPromptLibrary() {
   const sel = $("cfg-prompt-preset");
