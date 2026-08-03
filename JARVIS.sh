@@ -31,6 +31,9 @@
 #   -i, --status       Show whether the containers are running.
 #   -x, --stop         Stop the stack (keeps data volumes).
 #   -d, --delete       Remove containers, network, and ALL data volumes.
+#                      If long-term memory is online, it first ASKS whether to back it up
+#                      (runs --backup-memory on "yes"). Add -f/--force to skip that prompt.
+#   -f, --force        Skip interactive confirmations (currently: --delete's memory-backup prompt).
 #       --backup-memory   Save the semantic memory (Mem0 vector store) to backups/jarvis-memory-<ts>.tgz.
 #       --restore-memory [--from <file>]   Restore the memory from a backup tarball,
 #                      or (no --from) reset to a FRESH empty memory.
@@ -72,10 +75,12 @@
 #   ./JARVIS.sh --backup-workspace        # the LLM's /LLM_WORKSPACE project/code dir
 #   ./JARVIS.sh --restore-workspace --from backups/jarvis-workspace-20260628-101500.tgz
 #
-#   # Stop the stack, or fully tear it down (removes containers, network, AND
-#   # all data volumes -- wipes the semantic memory + workspace):
+#   # Stop the stack, or fully tear it down. --delete removes containers, network, and the
+#   # data volumes (semantic memory + workbench home); bind mounts -- LLM_WORKSPACE, config,
+#   # Prompts, and the shared folders -- survive.
 #   ./JARVIS.sh --stop
-#   ./JARVIS.sh --stop --delete
+#   ./JARVIS.sh --stop --delete           # if memory is online, asks: back it up first? [y/N]
+#   ./JARVIS.sh --stop --delete --force   # skip that prompt and just delete (no backup)
 #
 #   # Health check (memory + workbench + internet + vault):
 #   curl http://localhost:8110/api/selftest
@@ -100,6 +105,7 @@ MEM_CONTAINER="jarvis-memory"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
 # (LLM_WORKSPACE is a host bind mount now — ./LLM_WORKSPACE — not a Docker volume)
 APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"
+FORCE=0   # set by -f/--force; when 1, --delete skips its "back up memory first?" prompt
 
 # LLM hosting/management lives OUTSIDE this script now — see ./JARVIS_LOCAL_LLM.sh (local runtimes
 # like Ollama + an optional LiteLLM gateway). JARVIS just talks to whatever URL is in
@@ -279,6 +285,20 @@ cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; clear_
 
 cmd_delete() {
   require_daemon
+  # --delete wipes the semantic-memory volume. If memory is ONLINE (so there may be memories worth
+  # keeping), offer to back it up first — unless -f/--force, or there's no terminal to prompt on.
+  if [[ "$FORCE" != "1" ]] && container_running "$MEM_CONTAINER"; then
+    if [[ -t 0 ]]; then
+      printf '%b' "${C_YEL}?? ${C_RESET}Long-term memory is online. Back it up before deleting? [y/N] "
+      local ans; read -r ans
+      case "$(lc "$ans")" in
+        y|yes) cmd_backup_memory || { err "Memory backup failed — aborting delete so nothing is lost."; return 1; } ;;
+        *)     info "Skipping memory backup." ;;
+      esac
+    else
+      warn "Long-term memory is online but there's no terminal to prompt — skipping backup. Run --backup-memory first, or pass --force to silence this."
+    fi
+  fi
   warn "DELETE: removing containers, network, and the data volumes (semantic-memory vector store + workbench home). Bind mounts — config, shared folders, and LLM_WORKSPACE — survive."
   dc down -v --remove-orphans
   clear_autopilot_state
@@ -384,9 +404,12 @@ usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${
 main() {
   require_compose_file
   [[ $# -eq 0 ]] && { usage; exit 1; }
+  # Pre-scan for -f/--force so it applies to --delete regardless of flag order.
+  for a in "$@"; do case "$(lc "$a")" in -f|--force) FORCE=1 ;; esac; done
   local rc=0
   while [[ $# -gt 0 ]]; do
     case "$(lc "$1")" in
+      -f|--force)   : ;;   # modifier, handled in the pre-scan above
       -c|--check)   cmd_check  || rc=$? ;;
       -b|--setup)   cmd_setup  || rc=$? ;;
       -u|--start)   cmd_start  || rc=$? ;;
