@@ -404,7 +404,9 @@ app.delete("/api/sessions/:id", (req, res) => res.json({ deleted: sessions.del(r
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
-const SYSTEM = systemPrompt();
+// NOTE: do NOT cache systemPrompt() here. The active prompt lives in Prompts/default_*.prompt and
+// can change at runtime (Config → Prompts → Load, or "Save as active"). systemPrompt() reads those
+// files live, so we call it per turn — a cached copy would freeze the prompt until an app restart.
 
 // Broadcast scheduler notifications to every connected browser.
 function broadcast(obj) {
@@ -446,7 +448,7 @@ wss.on("connection", (ws) => {
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
       : [];
     const history = all.slice(-40);   // cap the context sent to the model (unbounded history = cost + latency)
-    const messages = [{ role: "system", content: data.persona ? systemPrompt(data.persona) : SYSTEM }, ...history];
+    const messages = [{ role: "system", content: systemPrompt(data.persona) }, ...history];   // read live so prompt switches apply on the next turn (no restart)
     const emit = (ev) => { try { ws.send(JSON.stringify(ev)); } catch (_) {} };
 
     // One in-flight request per connection: don't overwrite an active AbortController

@@ -198,7 +198,8 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       ...(toolset.length ? { tools: toolset, tool_choice: "auto" } : {}),   // omit tools entirely when disabled
       stream_options: { include_usage: true },
     };
-    log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}`);
+    let activePrompt; if (i === 0) { try { activePrompt = require("./config").activePromptName(); } catch (_) {} }
+    log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}` + (i === 0 ? ` prompt=${activePrompt || "custom"}` : ""));
     log.debug("llm", "request", { model: lastModel, tool_names: toolset.map((t) => t.function && t.function.name), messages: body.messages });
     let msg, turnUsage, finish;
     try {

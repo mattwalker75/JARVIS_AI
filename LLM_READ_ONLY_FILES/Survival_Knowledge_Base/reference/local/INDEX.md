@@ -16,6 +16,12 @@ Local emergency data for navigating a disaster when the internet is down — **e
 | **Oklahoma** | [oklahoma.md](oklahoma.md) |
 | **Arkansas** | [arkansas.md](arkansas.md) |
 
+**Home-area road & egress sheet** — a no-map-needed "where am I / how do I get out" companion for the Anna home base (main roads, cardinal egress routes, hospitals/ERs, water bodies, Red River crossings into Oklahoma, flat-country landmarks). Pairs with the [offline maps](../maps/INDEX.md) and their [coverage index](../maps/north-texas/COVERAGE.md):
+
+| Area | Sheet |
+|---|---|
+| **Anna / Collin & Grayson County** (roads, landmarks, egress) | [north-texas-anna-roads.md](north-texas-anna-roads.md) |
+
 **Light sheets** — the other **47 states**, with the *durable* essentials only (state emergency-management agency + website, NWS forecast offices, NOAA Weather Radio band, state DOT/511 road info, American Red Cross region, and each state's main hazards). Deliberately **no** fragile per-utility phone numbers, hospital lists, or repeater frequencies — those go stale fastest and are best verified locally at the time.
 
 Files are named `<state>.md` (e.g. `ohio.md`, `new-york.md`, `north-carolina.md`, `rhode-island.md`) — one per state, all 50 present.

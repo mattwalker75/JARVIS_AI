@@ -73,6 +73,8 @@ Then make the **two universal decisions**: **(1) shelter in place or evacuate?**
 - Communicate without internet/phone → [Communication](topics/communication/communication.md) · Radio frequencies → [Comms Frequencies](reference/comms-frequencies.md)
 - Evacuate / bug out / stranded vehicle → [Evacuation & Bug-Out](topics/evacuation-bugout-vehicle/evacuation-bugout-vehicle.md)
 - Vehicle breakdown (flat, battery, overheat, stuck) → [Vehicle Emergencies](topics/transportation-vehicle-emergencies/transportation-vehicle-emergencies.md)
+- Siphon / store / stretch fuel; is my gas still good? → [Fuel — Siphoning, Storage & Shelf Life](topics/fuel-siphoning-storage/fuel-siphoning-storage.md)
+- **Near Anna, TX** — where am I / how do I get out (roads, hospitals, Red River crossings) → [Anna Roads & Egress Sheet](reference/local/north-texas-anna-roads.md)
 
 **Home · Utilities · Structural**
 - Shut off water/power/gas; burst pipe; storm damage → [Structural & Utility Emergencies](topics/structural-utility-emergencies/structural-utility-emergencies.md)
