@@ -150,6 +150,31 @@ wait_http() { # $1 port  $2 path  $3 label
   warn "$3 not responding yet on http://localhost:$1$2 (may still be starting)."; return 1
 }
 
+# The memory service (Mem0) embeds text with a model served by a LOCAL Ollama on the host
+# (mem0.embed_base_url, default host.docker.internal:11434 -> localhost:11434 from here). The chat
+# LLM may be cloud, but memory still needs this embedder up — so if it's unreachable, print the full
+# clean-install steps to enable it. Non-fatal: the stack runs fine, only long-term memory is affected.
+check_memory_embedder() {
+  local url model port tags
+  url="$(read_cfg mem0.embed_base_url "http://host.docker.internal:11434/v1")"
+  model="$(read_cfg mem0.embed_model "nomic-embed-text")"
+  # Only meaningful for a LOCAL Ollama we can actually probe from the host.
+  case "$url" in
+    *host.docker.internal*|*localhost*|*127.0.0.1*) : ;;
+    *) return 0 ;;
+  esac
+  port="$(printf '%s' "$url" | sed -n 's#.*:\([0-9]\{2,5\}\).*#\1#p')"; [[ -z "$port" ]] && port=11434
+  tags="$(curl -sf --max-time 3 "http://localhost:${port}/api/tags" 2>/dev/null)"
+  if [[ -z "$tags" ]]; then
+    warn "memory embedder unreachable — perform the following steps to enable memory"
+    echo "    - Install Ollama"
+    echo "    - Run:  ollama pull ${model}"
+    echo "    - Run:  ollama serve"
+  elif ! printf '%s' "$tags" | grep -q "$model"; then
+    warn "memory embedder is running but the '${model}' model isn't pulled — run:  ollama pull ${model}"
+  fi
+}
+
 # Autopilot run state + the task-ledger plan persist in data/ (bind mount) so a run survives
 # an app auto-restart. The deliberate lifecycle commands (stop/delete/setup/start), though,
 # should hand you a clean slate — no zombie Autopilot banner or leftover plan. Wipe them here.
@@ -190,6 +215,7 @@ cmd_start() {
   echo -e "${C_BOLD}  Semantic memory:${C_RESET}    http://localhost:${MEM_PORT}/"
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
   echo -e "  ${C_BOLD}Model:${C_RESET} set an endpoint in the Config tab. Cloud → paste the provider URL; local → run  ${C_BOLD}./JARVIS_LOCAL_LLM.sh start${C_RESET}  and paste the URL it prints."
+  check_memory_embedder
 }
 
 cmd_reload() {
