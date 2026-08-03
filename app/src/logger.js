@@ -30,9 +30,12 @@ function ensureDir() {
 
 // --- rotation + retention (level-5 logs grow fast; keep the dir bounded) ---
 function logCfg() { const l = (cfg.config && cfg.config.logging) || {}; return { maxMb: Number(l.max_mb) || 50, retainDays: Number(l.retain_days) || 14 }; }
-let _cleaned = false;
+let _cleanedDay = "";
 function cleanupOldLogs() {
-  if (_cleaned) return; _cleaned = true;
+  // Run at most once per calendar day (not once per process) so retain_days is actually enforced on
+  // a long-lived server — the first log write after midnight re-prunes.
+  const today = new Date().toISOString().slice(0, 10);
+  if (_cleanedDay === today) return; _cleanedDay = today;
   try {
     const { retainDays } = logCfg();
     const cutoff = Date.now() - retainDays * 86400000;
@@ -56,21 +59,29 @@ function rotateIfBig(file, day) {
 }
 
 // Gather current secret values (vault + provider api keys) to scrub from output.
+const SECRET_KEY_RE = /pass|secret|token|api[_-]?key|auth|credential|cookie|private[_-]?key/i;
 function secretValues() {
-  const vals = [];
+  const out = new Set();
+  const add = (v) => { if (typeof v === "string" && v.length >= 4) out.add(v); };
   try {
+    // The vault is secret by definition: scrub every field of every entry.
     const secrets = cfg.getSecrets ? cfg.getSecrets() : {};
     for (const entry of Object.values(secrets || {})) {
-      if (entry && typeof entry === "object") {
-        for (const v of Object.values(entry)) if (typeof v === "string" && v.length >= 6) vals.push(v);
+      if (entry && typeof entry === "object") for (const v of Object.values(entry)) add(v);
+    }
+    // Config: recursively scrub any string whose KEY looks like a credential (db.password, any
+    // *_api_key, oauth tokens, cookies …) — not just a fixed allowlist. Non-secret config keys
+    // (base_url, model, …) are left intact so logs stay readable.
+    const walk = (o, depth) => {
+      if (!o || typeof o !== "object" || depth > 6) return;
+      for (const [k, v] of Object.entries(o)) {
+        if (typeof v === "string") { if (SECRET_KEY_RE.test(k)) add(v); }
+        else walk(v, depth + 1);
       }
-    }
-    const llm = (cfg.config && cfg.config.llm) || {};
-    for (const k of ["api_key", "anthropic_api_key", "gemini_api_key"]) {
-      if (typeof llm[k] === "string" && llm[k].length >= 6) vals.push(llm[k]);
-    }
+    };
+    walk(cfg.config || {}, 0);
   } catch (_) {}
-  return vals;
+  return [...out];
 }
 function redact(s) {
   let out = String(s);

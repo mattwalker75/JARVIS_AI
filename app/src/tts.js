@@ -33,4 +33,4 @@ async function synth(text, voice, rate) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-module.exports = { voices, synth, piperBase };
+module.exports = { voices, synth };

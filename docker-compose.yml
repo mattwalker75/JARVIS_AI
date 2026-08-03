@@ -23,8 +23,12 @@ services:
     image: jarvis-workbench:local
     container_name: jarvis-workbench
     restart: unless-stopped
-    security_opt:
-      - seccomp:unconfined
+    # Hardened: use Docker's DEFAULT seccomp profile instead of disabling it, so the container the
+    # LLM runs a root shell in can't reach the full host-kernel syscall surface. If a GUI app in the
+    # workbench desktop misbehaves after this change (some webtop apps need extra syscalls), restore
+    # the old behavior by UN-COMMENTING the two lines below:
+    # security_opt:
+    #   - seccomp:unconfined
     environment:
       PUID: "1000"
       PGID: "1000"
@@ -57,6 +61,32 @@ services:
       - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
       - jarvis_memory_data:/data
 
+  # Filtered Docker API in front of the raw socket. The app talks to THIS (over the internal
+  # network) instead of mounting /var/run/docker.sock itself, so an app-process compromise can no
+  # longer drive the full daemon (build images, mount host root, etc.). The app only needs to exec
+  # into the workbench, so we allow the containers+exec API and POST; everything else stays denied.
+  # NOTE: this blocks images/networks/volumes/swarm/system/host-info. It does not, on its own,
+  # forbid container CREATE within the containers API — for maximum lockdown swap this for a
+  # path-allowlisting proxy (e.g. wollomatic/socket-proxy) restricted to the workbench exec routes.
+  jarvis-docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: jarvis-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"   # /containers/<workbench>/exec
+      EXEC: "1"         # /exec/<id>/start
+      POST: "1"         # exec is a POST; without this the proxy is read-only and run_shell fails
+      IMAGES: "0"
+      NETWORKS: "0"
+      VOLUMES: "0"
+      INFO: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    expose:
+      - "2375"
+
   jarvis-piper:
     build:
       context: ./piper
@@ -80,6 +110,8 @@ services:
     depends_on:
       jarvis-piper:
         condition: service_started
+      jarvis-docker-proxy:
+        condition: service_started
     # Reach a local LLM runtime / gateway running on the HOST (via ./JARVIS_LOCAL_LLM.sh).
     # Automatic on Docker Desktop (macOS/Windows); this maps it on Linux too. Cloud endpoints
     # don't need it.
@@ -89,20 +121,24 @@ services:
       JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
       JARVIS_TASKS_FILE: /data/tasks.json
       PORT: "80"
+      # Reach the Docker daemon ONLY through the filtered proxy (not the raw socket). To revert to
+      # the direct socket: delete these two vars and re-add the docker.sock mount below.
+      DOCKER_PROXY_HOST: jarvis-docker-proxy
+      DOCKER_PROXY_PORT: "2375"
     ports:
       - "127.0.0.1:${APP_PORT:-8110}:80"
     volumes:
-      - ./app:/usr/src/app
+      - ./app:/usr/src/app:ro   # app can't rewrite its own code; host edits still live-reload (container reads them)
       - /usr/src/app/node_modules
       - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json   # read-write: the UI persists settings here
-      - ./config/JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json
+      - ./config/JARVIS_SECRETS.json:/cfg/JARVIS_SECRETS.json   # read-write: the UI persists secrets here
       - ./LLM_READ_ONLY_FILES:/LLM_READ_ONLY_FILES:ro
       - ./LLM_READ_WRITE_FILES:/LLM_READ_WRITE_FILES
       - ./data:/data
       - ./Logs:/logs
       - ./Prompts:/Prompts   # active + saved system/master prompt files (editable outside the app)
       - ./LLM_WORKSPACE:/LLM_WORKSPACE   # so file tools (list_dir/read_file/analyze_image/write_file) can reach the AI's workbench build area
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Raw docker.sock mount removed — the app now uses jarvis-docker-proxy (see env above).
 
 volumes:
   jarvis_workbench_home:

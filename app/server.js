@@ -86,8 +86,12 @@ app.post("/api/models/probe", async (req, res) => {
   const llm = (config && config.llm) || {};
   // Prefer what the user typed in the form; fall back to the saved config so "List models"
   // works even when the field is left blank but a key/endpoint is already configured.
-  const base = String((req.body || {}).base_url || llm.base_url || "").replace(/\/+$/, "");
-  const key = (req.body || {}).api_key || llm.api_key || "";
+  const savedBase = String(llm.base_url || "").replace(/\/+$/, "");
+  const base = String((req.body || {}).base_url || savedBase || "").replace(/\/+$/, "");
+  // NEVER send the SAVED provider key to a user-supplied host — that would exfiltrate the key via
+  // SSRF. Use the body's key if the user typed one; otherwise only reuse the stored key when the
+  // target IS the saved endpoint.
+  const key = (req.body || {}).api_key || (base === savedBase ? llm.api_key : "") || "";
   if (!base) return res.json({ models: [], error: "Enter an endpoint URL first." });
   const headers = key ? { Authorization: "Bearer " + key } : {};
   try {
@@ -343,11 +347,18 @@ app.get("/api/files", (req, res) => {
     res.json({ dir: which, files: out });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Only these extensions may render INLINE (same-origin) in the browser. Everything else — notably
+// .html/.htm/.svg/.xml, which can run script — is forced to download, so untrusted content the LLM
+// fetched and saved into the shared folders can't execute in the app's own origin (stored XSS).
+const INLINE_OK_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".pdf", ".txt"]);
 app.get("/api/files/raw", (req, res) => {
   try {
     const which = req.query.dir === "ro" ? "ro" : "rw";
     const abs = safeJoin(sharedBase(which), String(req.query.path || ""));
-    if (req.query.download) return res.download(abs);
+    res.setHeader("X-Content-Type-Options", "nosniff");   // don't let the browser sniff a safer type into script
+    if (req.query.download || !INLINE_OK_EXT.has(path.extname(abs).toLowerCase())) {
+      return res.download(abs);   // Content-Disposition: attachment — never renders in our origin
+    }
     res.sendFile(abs);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -403,7 +414,21 @@ app.get("/api/sessions/:id/export", (req, res) => {
 app.delete("/api/sessions/:id", (req, res) => res.json({ deleted: sessions.del(req.params.id) }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: "/ws" });
+// Reject cross-origin WebSocket handshakes. WS is exempt from CORS, so without this any website
+// the user visits could open ws://127.0.0.1/ws and drive the full tool-calling loop (read/exfil
+// files, secrets, shell) — a drive-by RCE. Browsers always send Origin; non-browser clients (CLI)
+// send none and are allowed. Same-host origins (localhost/127.0.0.1/[::1], any port) are allowed.
+function wsOriginAllowed(origin) {
+  if (!origin) return true;                       // non-browser client (no Origin header)
+  try {
+    const h = new URL(origin).hostname.replace(/^\[|\]$/g, "");
+    return h === "localhost" || h === "127.0.0.1" || h === "::1";
+  } catch { return false; }
+}
+const wss = new WebSocketServer({
+  server, path: "/ws",
+  verifyClient: (info) => wsOriginAllowed(info.origin || (info.req && info.req.headers && info.req.headers.origin)),
+});
 // NOTE: do NOT cache systemPrompt() here. The active prompt lives in Prompts/default_*.prompt and
 // can change at runtime (Config → Prompts → Load, or "Save as active"). systemPrompt() reads those
 // files live, so we call it per turn — a cached copy would freeze the prompt until an app restart.
@@ -472,6 +497,11 @@ wss.on("connection", (ws) => {
 });
 
 const PORT = process.env.PORT || 80;
-server.listen(PORT, () => {
-  console.log(`JARVIS app listening on ${PORT}` + (loadError ? `  [CONFIG ERROR: ${loadError}]` : ""));
+// Bind host is configurable. Default 0.0.0.0 because in the Docker deployment the app must accept
+// the forwarded connection on the container interface — the localhost boundary is enforced by the
+// compose port mapping (127.0.0.1:8110:80), NOT by this bind. Set BIND_HOST=127.0.0.1 only when
+// running the app directly on a host (no container) to enforce localhost-only there too.
+const BIND_HOST = process.env.BIND_HOST || "0.0.0.0";
+server.listen(PORT, BIND_HOST, () => {
+  console.log(`JARVIS app listening on ${BIND_HOST}:${PORT}` + (loadError ? `  [CONFIG ERROR: ${loadError}]` : ""));
 });

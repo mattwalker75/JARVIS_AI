@@ -55,7 +55,7 @@ function restoreHistory() {
   let saved; try { saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch (_) { saved = []; }
   if (!Array.isArray(saved) || !saved.length) return;
   for (const m of saved) {
-    if (m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string") { addMessage(m.role, m.content); history.push(m); }
+    if (m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string") { addMessage(m.role, m.content, null, true); history.push(m); }
   }
 }
 let cfg = null, ws = null;
@@ -248,19 +248,19 @@ function renderAssistant(b, text) {
   return level;
 }
 
-function addMessage(role, text, cls) {
+function addMessage(role, text, cls, silent) {
   const wrap = document.createElement("div"); wrap.className = "msg " + role;
   const b = document.createElement("div"); b.className = "bubble" + (cls ? " " + cls : "");
   if (role === "assistant" && !cls) {            // rich-render normal assistant messages
     const level = renderAssistant(b, text);
-    if (level) flashChat(level);
+    if (level && !silent) flashChat(level);      // don't re-flash the screen when REPLAYING history
   } else {
     b.innerHTML = esc(text);                       // user / error / notice stay plain
   }
   wrap.appendChild(b);
   if (role === "assistant") {   // hover-to-copy on assistant replies
     const copy = document.createElement("button");
-    copy.className = "copy-btn"; copy.title = "Copy"; copy.textContent = "⧉";
+    copy.className = "copy-btn"; copy.title = "Copy"; copy.setAttribute("aria-label", "Copy message"); copy.textContent = "⧉";
     copy.addEventListener("click", () => {
       const txt = b.textContent || "";
       (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject())
@@ -502,8 +502,14 @@ function regenerate() {
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected.", "error"); return; }
   if (history.length && history[history.length - 1].role === "assistant") {
     history.pop(); saveHistory();
-    const bubbles = messagesEl.querySelectorAll(".msg.assistant:not(.working-msg):not(.think-msg)");
-    const last = bubbles[bubbles.length - 1]; if (last) last.remove();
+    // Remove the last GENUINE reply bubble — not a notice/error/retry/working row, which are also
+    // .msg.assistant and would otherwise be deleted instead, leaving a stale answer on screen.
+    const replies = [...messagesEl.querySelectorAll(".msg.assistant")].filter((w) => {
+      if (w.classList.contains("working-msg") || w.classList.contains("think-msg")) return false;
+      const b = w.querySelector(".bubble");
+      return b && !b.classList.contains("notice") && !b.classList.contains("error");
+    });
+    const last = replies[replies.length - 1]; if (last) last.remove();
   }
   if (!history.length || history[history.length - 1].role !== "user") { addMessage("assistant", "Nothing to regenerate yet.", "notice"); return; }
   stickBottom = true; showWorking("working…");
@@ -1032,7 +1038,7 @@ async function refreshSessions() {
 }
 function loadConversation(messages) {
   messagesEl.innerHTML = ""; history.length = 0;
-  (messages || []).forEach((m) => { addMessage(m.role, m.content); history.push({ role: m.role, content: m.content }); });
+  (messages || []).forEach((m) => { addMessage(m.role, m.content, null, true); history.push({ role: m.role, content: m.content }); });
   saveHistory(); resetSessUsage(); refreshContextMeter();   // reset usage + show the loaded convo's context estimate
 }
 async function saveCurrent() {
@@ -1044,6 +1050,7 @@ async function saveCurrent() {
   } catch (e) { alert("save failed: " + e); }
 }
 function newSession() {
+  if (history.length && !confirm("Start a new chat? The current conversation will be cleared.")) return;
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
   try { fetch("/api/plan", { method: "DELETE" }); } catch (_) {} renderPlan(null);   // a fresh chat starts with no active plan (don't inherit a stale one)

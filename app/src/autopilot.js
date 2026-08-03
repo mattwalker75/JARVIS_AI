@@ -72,10 +72,11 @@ function start({ objective, minutes, autonomy, verbose }) {
   const minutesN = Math.max(1, Math.min(Number(minutes) || Number(ap.default_minutes) || 30, 720)); // cap 12h
   const mode = ((autonomy || ap.autonomy || "guarded") === "full") ? "full" : "guarded";
   const maxCycles = Math.max(1, Number(ap.max_cycles) || 100);
+  const maxCost = Math.max(0, Number(ap.max_cost_usd) || 0);   // 0 = no cost ceiling (time/cycles still apply)
   try { planner.clear(); } catch (_) {}   // a NEW objective starts fresh — never inherit a stale plan from a previous task
   run = {
     id: "ap_" + nowMs().toString(36), objective, autonomy: mode, minutes: minutesN,
-    deadline: nowMs() + minutesN * 60000, maxCycles, cycles: 0, noProgress: 0, errors: 0,
+    deadline: nowMs() + minutesN * 60000, maxCycles, maxCost, cycles: 0, noProgress: 0, errors: 0,
     status: "running", startedAt: new Date().toISOString(), wrapUp: false, budgetHit: false, hardStop: false,
     pauseRequested: false, objectiveChanged: false, lastSummary: "", idleWork: 0, tokens: 0, cost: 0, verbose: !!verbose,
   };
@@ -139,7 +140,7 @@ function modify({ objective }) {
 }
 // Extend the time budget (and rescue a run that was about to stop on the budget).
 function extend({ minutes }) {
-  if (run) {
+  if (run && !run.ended) {   // extending an ENDED run would bump counters without resuming — use continueRun instead
     const add = Math.max(1, Math.min(Number(minutes) || 15, 720));
     run.deadline += add * 60000; run.minutes += add;
     if (run.budgetHit) { run.budgetHit = false; run.wrapUp = false; if (run.status === "stopping" && !run.hardStop) run.status = "running"; }
@@ -193,7 +194,7 @@ async function loop() {
   while (run) {
     if (run.hardStop) return finish("stopped", `hard-stopped after ${run.cycles} cycle(s).`, null);
     if (run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // keep run alive
-    if (!run.wrapUp && (nowMs() >= run.deadline || run.cycles >= run.maxCycles)) { run.wrapUp = true; run.budgetHit = true; run.status = "stopping"; emitStatus(); }
+    if (!run.wrapUp && (nowMs() >= run.deadline || run.cycles >= run.maxCycles || (run.maxCost && run.cost >= run.maxCost))) { run.wrapUp = true; run.budgetHit = true; run.status = "stopping"; emitStatus(); }
 
     const before = planner.get();
     const doneBefore = before ? before.steps.filter((s) => s.status === "done").length : 0;

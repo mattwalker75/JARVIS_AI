@@ -8,7 +8,12 @@ const Docker = require("dockerode");
 const { config, getSecrets, setSecret: cfgSetSecret, deleteSecret: cfgDeleteSecret } = require("./config");
 const log = require("./logger");
 
-const docker = new Docker({ socketPath: "/var/run/docker.sock" });
+// Prefer a FILTERED docker-socket proxy (set DOCKER_PROXY_HOST in compose) so the app never
+// touches the raw daemon socket. Falls back to the local socket when no proxy is configured, so
+// this is backward compatible — unset DOCKER_PROXY_HOST to revert to the direct-socket behavior.
+const docker = process.env.DOCKER_PROXY_HOST
+  ? new Docker({ host: process.env.DOCKER_PROXY_HOST, port: Number(process.env.DOCKER_PROXY_PORT) || 2375, protocol: "http" })
+  : new Docker({ socketPath: "/var/run/docker.sock" });
 
 // Truncate long tool output keeping the HEAD and the TAIL (errors usually live at the
 // tail of a log) with an explicit marker so the model KNOWS content was cut.
@@ -274,13 +279,31 @@ function decodeDuck(href) {
 // SSRF guard: refuse to fetch private/loopback/link-local addresses so a
 // prompt-injected page can't make JARVIS hit internal services or cloud metadata.
 function isPrivateIp(ip) {
-  if (net.isIP(ip) === 4) {
-    const p = ip.split(".").map(Number);
-    return p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
-      (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127);
+  if (!ip) return true;                                  // fail closed
+  let s = String(ip).toLowerCase().trim().replace(/^\[|\]$/g, "");
+  // Unwrap IPv4-mapped/embedded IPv6 so the v4 range checks below catch e.g. ::ffff:169.254.169.254
+  const mappedDotted = s.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mappedDotted) s = mappedDotted[1];
+  const mappedHex = s.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16), lo = parseInt(mappedHex[2], 16);
+    s = [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join(".");
   }
-  const s = (ip || "").toLowerCase();
-  return s === "::1" || s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd") || s.startsWith("::ffff:127.") || s.startsWith("::ffff:10.") || s.startsWith("::ffff:192.168.");
+  if (net.isIP(s) === 4) {
+    const p = s.split(".").map(Number);
+    return p[0] === 10 || p[0] === 127 || p[0] === 0 || (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+      (p[0] === 192 && p[1] === 168) || (p[0] === 169 && p[1] === 254) || (p[0] === 100 && p[1] >= 64 && p[1] <= 127) ||
+      (p[0] === 192 && p[1] === 0 && p[2] === 0) || p[0] >= 224;   // IETF protocol assignments / multicast / reserved
+  }
+  if (net.isIP(s) === 6) {
+    if (s === "::1" || s === "::") return true;                    // loopback / unspecified
+    if (/^(0+:){7}0*1$/.test(s)) return true;                      // expanded loopback
+    if (s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd")) return true;  // link-local / ULA
+    if (s.startsWith("::ffff:") || s.startsWith("::")) return true;// any remaining mapped/embedded form
+    if (s.startsWith("2002:") || s.startsWith("64:ff9b")) return true;  // 6to4 / NAT64 (can embed private v4)
+    return false;
+  }
+  return true;   // not a valid IP literal -> fail closed
 }
 // Self-check exception: the model serves preview apps on the WORKBENCH at ports
 // 9101-9150. Allow fetch_url to reach those (so it can inspect the page it just served),
@@ -312,6 +335,50 @@ async function assertPublicUrl(url) {
   if (ips.some(isPrivateIp)) throw new Error("blocked by SSRF guard: refusing to fetch a private/loopback/link-local address (" + ips.join(",") + ")");
 }
 
+// DNS-rebinding protection: validate the resolved IP at CONNECT time (the SAME resolution that's
+// actually dialed), closing the TOCTOU gap where global fetch re-resolves independently of
+// assertPublicUrl. Requires undici; if it's not installed we degrade to global fetch — the IPv6/
+// mapped isPrivateIp checks and cross-origin credential stripping still apply. Only fetch_url uses
+// this dispatcher, so internal service calls (memory/piper/LLM) on the global fetch are unaffected.
+let ssrfFetch = fetch, ssrfDispatcher = null;
+try {
+  const undici = require("undici");
+  const dnsCb = require("dns");
+  ssrfDispatcher = new undici.Agent({
+    connect: {
+      lookup: (hostname, options, cb) => {
+        dnsCb.lookup(hostname, { all: true, family: (options && options.family) || 0 }, (err, addrs) => {
+          if (err) return cb(err);
+          if (!addrs.length) return cb(new Error("SSRF guard: host did not resolve"));
+          const exempt = hostname === WORKBENCH_HOST;   // allow self-check of its own served preview app
+          if (!exempt && addrs.some((a) => isPrivateIp(a.address))) {
+            return cb(new Error("blocked by SSRF guard (connect-time): private address " + addrs.map((a) => a.address).join(",")));
+          }
+          if (options && options.all) return cb(null, addrs);
+          return cb(null, addrs[0].address, addrs[0].family);
+        });
+      },
+    },
+  });
+  ssrfFetch = undici.fetch;
+} catch (_) { /* undici unavailable — DNS-pinning off; other SSRF guards remain in force */ }
+
+const FETCH_MAX_BYTES = Number(process.env.FETCH_MAX_BYTES) || 64 * 1024 * 1024;   // hard cap on one fetch_url body
+// Stream the body with a byte ceiling so a huge/hostile response can't exhaust memory.
+async function readCapped(resp, maxBytes) {
+  if (!resp.body || typeof resp.body.getReader !== "function") return Buffer.from(await resp.arrayBuffer());
+  const reader = resp.body.getReader();
+  const chunks = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) { try { await reader.cancel(); } catch (_) {} throw new Error(`response too large (> ${maxBytes} bytes)`); }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
 async function fetchUrl(url, opts = {}) {
   if (!/^https?:\/\//i.test(url)) throw new Error("url must start with http:// or https://");
   url = routePreviewUrl(url); // localhost:<preview-port> -> the workbench where it's served
@@ -322,36 +389,55 @@ async function fetchUrl(url, opts = {}) {
   // Follow redirects MANUALLY so every hop is re-checked by the SSRF guard (a public
   // page 302ing to an internal address must be blocked, not followed).
   let current = url, resp;
+  let startOrigin = null; try { startOrigin = new URL(url).origin; } catch (_) {}
   for (let hop = 0; hop <= 5; hop++) {
     await assertPublicUrl(current);
-    // Retry ONCE on a timeout — research sites are often slow, and a lone timeout was the
-    // single most common fetch failure. Non-timeout errors propagate immediately.
+    // Retry ONCE on a timeout — research sites are often slow, and a lone timeout was the single
+    // most common fetch failure. ONLY for idempotent methods: retrying a POST/PUT/DELETE that timed
+    // out after the server already acted would double-execute it. Non-timeout errors propagate.
+    const idempotent = /^(GET|HEAD)$/i.test(opts.method || "GET");
     for (let attempt = 0; ; attempt++) {
       try {
-        resp = await fetch(current, {
+        resp = await ssrfFetch(current, {
           method: opts.method || "GET", headers: reqHeaders, body,
           redirect: "manual", signal: AbortSignal.timeout(timeoutMs),
+          ...(ssrfDispatcher ? { dispatcher: ssrfDispatcher } : {}),
         });
         break;
       } catch (e) {
         const isTimeout = e && (e.name === "TimeoutError" || /aborted due to timeout|timed out/i.test(e.message || ""));
-        if (isTimeout && attempt < 1) continue;
+        if (isTimeout && idempotent && attempt < 1) continue;
         throw e;
       }
     }
     if (resp.status >= 300 && resp.status < 400 && resp.headers.get("location")) {
       current = routePreviewUrl(new URL(resp.headers.get("location"), current).href);
+      // On a CROSS-ORIGIN redirect, drop credentials so a page can't 302 us to attacker.com and
+      // capture a caller-supplied Authorization/Cookie (e.g. a bearer token from get_secret).
+      try {
+        if (startOrigin && new URL(current).origin !== startOrigin) {
+          for (const k of Object.keys(reqHeaders)) {
+            if (/^(authorization|cookie|proxy-authorization)$/i.test(k)) delete reqHeaders[k];
+          }
+        }
+      } catch (_) {}
       if (hop === 5) throw new Error("too many redirects");
       continue;
     }
     break;
+  }
+  // Cap how much we buffer so a malicious/huge response can't OOM the app. Reject early on an
+  // oversized Content-Length, and stream-read with a hard byte ceiling as the real guard.
+  const declared = Number(resp.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > FETCH_MAX_BYTES) {
+    throw new Error(`response too large (${declared} bytes > ${FETCH_MAX_BYTES} cap)`);
   }
   const ct = resp.headers.get("content-type") || "";
   const isText = /text|html|json|xml|javascript|csv|urlencoded/i.test(ct) || ct === "";
   // Binary responses: save to the shared folder (for analyze_image / read_document)
   // instead of returning mojibake.
   if (!isText) {
-    const buf = Buffer.from(await resp.arrayBuffer());
+    const buf = await readCapped(resp, FETCH_MAX_BYTES);
     if (opts.save_to) {
       const abs = resolveShared(opts.save_to, true);
       fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -360,7 +446,7 @@ async function fetchUrl(url, opts = {}) {
     }
     return { url: current, status: resp.status, content_type: ct, note: "binary content (" + buf.length + " bytes) — re-call with save_to:'downloads/<name>' to save it to the shared folder, then use analyze_image or read_document on it" };
   }
-  let text = await resp.text();
+  let text = (await readCapped(resp, FETCH_MAX_BYTES)).toString("utf8");
   if (/html/i.test(ct)) text = stripHtml(text);
   const off = Math.max(0, Number(opts.offset) || 0);
   const slice = text.slice(off, off + 15000);
@@ -892,7 +978,16 @@ const AUDIT_FILE = process.env.JARVIS_AUDIT_FILE || "/data/audit.log";
 function audit(name, args, status, ms) {
   try {
     const safe = JSON.parse(JSON.stringify(args == null ? {} : args));
-    for (const k of Object.keys(safe)) if (/pass|secret|token|api_?key|password/i.test(k)) safe[k] = "***";
+    // Recursively mask secret-looking fields at ANY depth — e.g. fetch_url's headers.Authorization
+    // or a nested json.password — not just top-level keys.
+    const scrub = (o, depth) => {
+      if (!o || typeof o !== "object" || depth > 6) return;
+      for (const k of Object.keys(o)) {
+        if (/pass|secret|token|api_?key|password|authorization|cookie|credential/i.test(k)) o[k] = "***";
+        else if (typeof o[k] === "object") scrub(o[k], depth + 1);
+      }
+    };
+    scrub(safe, 0);
     fs.appendFileSync(AUDIT_FILE, JSON.stringify({ t: new Date().toISOString(), tool: name, args: safe, status, ms }) + "\n");
   } catch (_) {}
 }
@@ -1028,7 +1123,9 @@ require("./mcp").init().then((defs) => { for (const d of defs) toolDefs.push(d);
 
 // Retryability lives WITH the tool (read-only/idempotent tools only — mutating tools
 // are never auto-retried to avoid double execution).
-const RETRYABLE = new Set(["fetch_url", "web_search", "search_memory", "list_memories", "screenshot", "read_file", "read_document", "list_dir", "browser_snapshot", "browser_extract", "browser_console", "check_email", "read_email"]);
+// NOTE: fetch_url is deliberately NOT here — it can POST/PUT/DELETE, and auto-retrying a mutating
+// request risks double execution. GET timeouts are already retried once inside fetchUrl (idempotent only).
+const RETRYABLE = new Set(["web_search", "search_memory", "list_memories", "screenshot", "read_file", "read_document", "list_dir", "browser_snapshot", "browser_extract", "browser_console", "check_email", "read_email"]);
 function isRetryable(name) {
   if (RETRYABLE.has(name)) return true;
   const c = customRegistry[name];

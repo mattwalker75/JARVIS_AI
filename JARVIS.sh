@@ -325,6 +325,11 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
   local from="$1"
   if [[ -n "$from" ]]; then
     [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
+    # Refuse a tarball with absolute or ../ members before feeding it to BusyBox tar (which can honor
+    # them). Extraction only mounts the memory volume, so impact is bounded, but reject unsafe archives.
+    if tar tzf "$from" 2>/dev/null | grep -qE '(^|/)\.\.(/|$)|^/|^~'; then
+      err "Backup contains unsafe paths (absolute or '..'); refusing to restore: $from"; return 1
+    fi
     warn "Restoring semantic memory from ${from} — this REPLACES the current memories."
     info "Stopping the memory service to restore cleanly..."
     dc stop "$MEM_CONTAINER" >/dev/null 2>&1 || true

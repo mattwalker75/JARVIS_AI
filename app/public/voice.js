@@ -20,6 +20,7 @@
   let speaking = false;
   let wantRunning = false;
   let silenceTimer = null;
+  let srRestartAt = 0, srStreak = 0;   // backoff for the continuous recognizer's onend->restart loop
 
   const setState = (s) => handlers.onState && handlers.onState(s);
   const reportError = (m) => handlers.onError && handlers.onError(m);
@@ -80,7 +81,16 @@
     recognition.lang = "en-US"; recognition.continuous = true; recognition.interimResults = true;
     recognition.onresult = onResult;
     recognition.onerror = (e) => handleError(e.error);
-    recognition.onend = () => { recognition = null; if (wantRunning && !speaking) setTimeout(startRecognition, 250); };
+    recognition.onend = () => {
+      recognition = null;
+      if (!(wantRunning && !speaking)) return;
+      // Exponential backoff if onend keeps firing immediately (some browsers hot-loop on
+      // no-speech/aborted), instead of hammering start() every 250ms.
+      const now = Date.now();
+      srStreak = (now - srRestartAt < 1500) ? Math.min(srStreak + 1, 5) : 0;
+      srRestartAt = now;
+      setTimeout(startRecognition, Math.min(250 * Math.pow(2, srStreak), 5000));
+    };
     try { recognition.start(); } catch (_) {}
   }
   function stopRecognition() { wantRunning = false; if (recognition) { try { recognition.stop(); } catch (_) {} recognition = null; } }

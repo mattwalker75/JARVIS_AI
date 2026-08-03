@@ -163,7 +163,12 @@ async function runTask(task) {
   };
   let result = "";
   try {
-    result = await llm.chat({ messages: [{ role: "system", content: sys }, { role: "user", content: task.prompt }], emit, tier: "cheap", excludeTools: ["schedule_task", "update_task", "cancel_task"] });
+    // Scheduled tasks run UNATTENDED and can ingest untrusted content (email/web), so like
+    // Autopilot's guarded mode they must NOT have the irreversible/external tools — otherwise a
+    // prompt-injected task could exfiltrate (send_email) or destroy (delete_secret/delete_memory).
+    // Mirrors autopilot.js RISKY_TOOLS (kept local to avoid a circular require).
+    const RISKY_TOOLS = ["send_email", "delete_memory", "set_secret", "delete_secret"];
+    result = await llm.chat({ messages: [{ role: "system", content: sys }, { role: "user", content: task.prompt }], emit, tier: "cheap", excludeTools: ["schedule_task", "update_task", "cancel_task", ...RISKY_TOOLS] });
   } catch (e) {
     hadError = true;
     result = "error: " + e.message;

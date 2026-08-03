@@ -272,9 +272,9 @@ module.exports = [
     name: "survival-knowledge-base",
     category: "reference",
     prompts: ["survivalist"],   // specialty skill — only shown when the 'survivalist' prompt is active
-    summary: "Answer survival/emergency questions FROM the offline Survival Knowledge Base (49 guides + manuals, maps, per-state info).",
+    summary: "Answer survival/emergency questions FROM the offline Survival Knowledge Base (50 guides + manuals, maps, per-state info).",
     details: [
-      "The knowledge base is an OFFLINE folder at /LLM_READ_ONLY_FILES/Survival_Knowledge_Base — 49 in-depth guides plus reference manuals, road/topo maps, and per-state local info. Answer survival, preparedness, and emergency questions FROM it, not from general memory.",
+      "The knowledge base is an OFFLINE folder at /LLM_READ_ONLY_FILES/Survival_Knowledge_Base — 50 in-depth guides plus reference manuals, road/topo maps, and per-state local info. Answer survival, preparedness, and emergency questions FROM it, not from general memory.",
       "START HERE: read_file /LLM_READ_ONLY_FILES/Survival_Knowledge_Base/START-HERE.md — a life-threat triage plus a 'pick your situation' router to the right guide. Then INDEX.md for the full topic list, GLOSSARY.md for terms, CHECKLISTS.md for printable checklists.",
       "GUIDES: each topic is topics/<topic>/<topic>.md (e.g. topics/water/water.md, topics/first-aid/first-aid.md, topics/food-preservation-cooking/food-preservation-cooking.md). read_file the matching guide(s) and answer from their step-by-step sections; prefer the specific guide over general advice.",
       "DEEPER SOURCES: the reference manuals are PDFs in reference/manuals/ — use read_document on them. Images live in each topic's images/ folder, and the offline maps in reference/maps/ (national + all 50 state road maps + street-level North Texas) — use analyze_image to read/verify them.",

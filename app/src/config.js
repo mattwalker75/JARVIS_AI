@@ -150,8 +150,9 @@ function setSetting(pathStr, value) {
   }
   o[parts[parts.length - 1]] = value;
   // Write IN PLACE: CONFIG_FILE is a bind-mounted single file, so a tmp+rename swap fails
-  // with EBUSY (can't rename over a mount point). One writeFileSync is fine for a config
-  // that's only changed occasionally by a single user.
+  // with EBUSY (can't rename over a mount point). Back up first so a crash mid-write (which would
+  // truncate the file and wipe every persisted setting on next boot) is recoverable.
+  _backup(CONFIG_FILE);
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
   return { path: pathStr, value };
 }
@@ -225,7 +226,7 @@ try {
   secretsDoc = { secrets: {} };
 }
 function getSecrets() { return secretsDoc.secrets; }
-function persistSecrets() { fs.writeFileSync(SECRETS_FILE, JSON.stringify(secretsDoc, null, 2)); }
+function persistSecrets() { _backup(SECRETS_FILE); fs.writeFileSync(SECRETS_FILE, JSON.stringify(secretsDoc, null, 2)); }
 function setSecret(name, fields) {
   if (!name) throw new Error("secret name is required");
   const existing = secretsDoc.secrets[name] || {};
@@ -240,4 +241,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, CONFIG_FILE, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };
+module.exports = { config, loadError, publicConfig, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

@@ -74,7 +74,7 @@ export_provider_keys() {
   command -v python3 >/dev/null 2>&1 || return 0
   local k
   for pair in "api_key:OPENAI_API_KEY" "anthropic_api_key:ANTHROPIC_API_KEY" "gemini_api_key:GEMINI_API_KEY"; do
-    k=$(python3 -c "import json;print(json.load(open('$CFG')).get('llm',{}).get('${pair%%:*}','') or '')" 2>/dev/null || true)
+    k=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('llm',{}).get(sys.argv[2],'') or '')" "$CFG" "${pair%%:*}" 2>/dev/null || true)
     [[ -n "$k" ]] && export "${pair##*:}=$k"
   done
 }
@@ -372,7 +372,7 @@ mlx_stop_target() {  # model|port|all
       [[ "$target" != "all" ]] && mlx_registry_remove "$target"
     fi
   done < <(mlx_discover)
-  if [[ "$target" == "all" ]]; then pkill -f "mlx_lm.server" 2>/dev/null || true; mlx_registry_remove all; ok "stopped all MLX servers."; fi
+  if [[ "$target" == "all" ]]; then pkill -f "mlx_lm\.server" 2>/dev/null || true; mlx_registry_remove all; ok "stopped all MLX servers."; fi
   [[ "$stopped" == 0 && "$target" != "all" ]] && warn "No running MLX server matched '$target'."
   return 0
 }

@@ -99,12 +99,6 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .session-item button.load { color: var(--accent); border-color: var(--accent); }
 .session-item button:hover { color: var(--text); }
 
-.switch { position: relative; display: inline-block; width: 46px; height: 24px; }
-.switch input { display: none; }
-.slider { position: absolute; inset: 0; background: #20384a; border-radius: 24px; transition: .2s; }
-.slider:before { content: ""; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px; background: #cfe7f2; border-radius: 50%; transition: .2s; }
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider:before { transform: translateX(22px); }
 
 :root { --drawer-w: 480px; }
 .layout { position: relative; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--drawer-w); gap: 0; min-height: 0; transition: grid-template-columns .18s ease; }
@@ -298,7 +292,6 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 @keyframes flashR { 0%,100% { box-shadow: inset 0 0 0 0 transparent; } 50% { box-shadow: inset 0 0 0 4px var(--danger); } }
 .bubble.error { border-color: var(--danger); color: #ffd7d7; }
 .bubble.notice { border-color: var(--gold); background: #1a2417; color: #fff3d6; }
-.bubble.typing { color: var(--muted); font-style: italic; }
 
 /* Persistent "still working" indicator: animated dots + label + elapsed timer. */
 .bubble.working { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-style: italic; }

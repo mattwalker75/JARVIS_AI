@@ -128,15 +128,15 @@
         <ol class="pb-steps" id="pb-steps"></ol>
         <div class="pb-handle" id="pb-handle" role="button" tabindex="0" title="Show / hide the plan steps" aria-label="Show or hide the plan steps"></div>
       </div>
-      <div class="messages" id="messages">
+      <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
         <div class="msg assistant"><div class="bubble">
           JARVIS online — ask me anything. (type <code>/help</code> for the help menu)
         </div></div>
       </div>
-      <button id="jump-bottom" class="jump-btn" title="Jump to latest" hidden>↓ Latest</button>
+      <button id="jump-bottom" class="jump-btn" title="Jump to latest" aria-label="Jump to latest message" hidden>↓ Latest</button>
       <form class="composer" id="composer">
         <textarea id="input" rows="1" autocomplete="off" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
-        <button id="regen" type="button" class="ghost regen-btn" title="Regenerate last response (/regen)">🔄</button>
+        <button id="regen" type="button" class="ghost regen-btn" title="Regenerate last response (/regen)" aria-label="Regenerate last response">🔄</button>
         <button id="send" type="submit">Send</button>
         <button id="stop" type="button" class="stop-btn" title="Stop processing (Esc)" hidden>⏹ Stop</button>
       </form>
@@ -191,7 +191,7 @@
         </div>
       </div>
       <div class="panel" id="panel-workbench">
-        <iframe id="desktop" title="JARVIS Workbench desktop"></iframe>
+        <iframe id="desktop" title="JARVIS Workbench desktop" sandbox="allow-scripts allow-same-origin allow-forms allow-clipboard-write"></iframe>
         <div class="desktop-bar">
           <button id="desktop-reload" class="ghost" title="Reconnect the desktop in this window — use this after opening it in a new tab, or if it's frozen">↻ Reconnect here</button>
           <a id="desktop-link" class="desktop-link" target="_blank" rel="noopener">Open in a new tab ↗</a>
