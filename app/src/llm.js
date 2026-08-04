@@ -393,12 +393,18 @@ async function streamChatCompletion(url, headers, body, emit, signal, watchdogOn
   // When the watchdog is OFF (patient mode), we wait indefinitely — a slow cold-load/prefill
   // on a local model is NOT a dead stream, and there is no per-token cost locally. Stop still
   // interrupts because the underlying fetch is bound to `signal`.
-  const IDLE_MS = (config.llm && config.llm.idle_timeout_ms) || 120000;
+  // Two separate allowances so a slow LOCAL model isn't falsely killed: PREFILL (time to the FIRST
+  // token) on a big context can take minutes, so it gets a much larger budget than a MID-STREAM
+  // stall (a live model streams continuously, so a long mid-stream silence really is a dead stream).
+  const IDLE_MS = (config.llm && config.llm.idle_timeout_ms) || 180000;
+  const FIRST_TOKEN_MS = (config.llm && config.llm.first_token_timeout_ms) || 600000;
+  let firstRead = true;
   async function readWithIdle() {
     if (!watchdogOn) return await reader.read();
+    const ms = firstRead ? FIRST_TOKEN_MS : IDLE_MS;
     let timer;
-    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`stream idle >${Math.round(IDLE_MS / 1000)}s — the model stopped sending data`)), IDLE_MS); });
-    try { return await Promise.race([reader.read(), timeout]); } finally { clearTimeout(timer); }
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`stream idle >${Math.round(ms / 1000)}s — ${firstRead ? "no first token yet (prefill too slow?)" : "the model stopped sending data"}`)), ms); });
+    try { const r = await Promise.race([reader.read(), timeout]); firstRead = false; return r; } finally { clearTimeout(timer); }
   }
   while (!done) {
     let r;
