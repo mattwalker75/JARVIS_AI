@@ -142,7 +142,18 @@ function resolveShared(p, mustWrite) {
   let abs;
   if (!p) abs = path.resolve(rw);
   else if (path.isAbsolute(p)) abs = path.resolve(p);
-  else abs = path.resolve(rw, p); // a bare/relative name goes into the read-write folder
+  else {
+    // A bare/relative name goes into the read-write folder. BUT tolerate the common LLM mistake of
+    // PREFIXING the shared-folder name onto a relative path (e.g. "LLM_READ_WRITE_FILES/plan.md"):
+    // re-root it to that folder instead of doubling it (…/LLM_READ_WRITE_FILES/LLM_READ_WRITE_FILES/plan.md).
+    const seg = p.replace(/^\.?\/+/, "");
+    const roName = path.basename(ro), rwName = path.basename(rw);
+    const under = (name) => seg === name || seg.startsWith(name + "/");
+    if (under(rwName)) abs = path.resolve(rw, seg.slice(rwName.length).replace(/^\/+/, ""));
+    else if (under(roName)) abs = path.resolve(ro, seg.slice(roName.length).replace(/^\/+/, ""));
+    else if (under("LLM_WORKSPACE")) abs = path.resolve("/LLM_WORKSPACE", seg.slice("LLM_WORKSPACE".length).replace(/^\/+/, ""));
+    else abs = path.resolve(rw, p);
+  }
   // Resolve symlinks so a link planted inside the shared dirs can't escape them.
   try { abs = fs.realpathSync(abs); }
   catch { try { abs = path.join(fs.realpathSync(path.dirname(abs)), path.basename(abs)); } catch (_) {} }
