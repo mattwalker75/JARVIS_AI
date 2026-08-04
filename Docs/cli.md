@@ -14,7 +14,8 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
 | `-i`, `--status` | Show what's running + app health. |
 | `-x`, `--stop` | Stop the stack (keeps all data). |
-| `-d`, `--delete` | Remove containers, network, and the **data volumes** (semantic memory + workbench home). Bind mounts survive — including config, the shared folders, and **`LLM_WORKSPACE`** (the AI's working files persist on your Mac). |
+| `-d`, `--delete` | Remove containers, network, and the **data volumes** (semantic memory + workbench home). Bind mounts survive — including config, the shared folders, and **`LLM_WORKSPACE`** (the AI's working files persist on your Mac). If memory is online, it first **asks whether to back it up** before wiping. |
+| `-f`, `--force` | Skip interactive confirmations — currently `--delete`'s "back up memory first?" prompt (e.g. `--stop --delete --force`). |
 | `-h`, `--help` | Full help. |
 
 ## Scripting (no browser)

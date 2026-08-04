@@ -58,7 +58,9 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
   "gemini_api_key": "",                           // optional — only used by the optional LiteLLM gateway (JARVIS_LOCAL_LLM.sh --gateway)
   "temperature": 0.4,
   "max_tokens": 12000,                            // per-turn cap; keep generous for local reasoning models
-  "idle_timeout_ms": 120000,                      // watchdog: abort a stream that sends no data for this long
+  "idle_timeout_ms": 180000,                      // watchdog: abort a MID-STREAM stall (no data for this long)
+  "first_token_timeout_ms": 600000,               // watchdog: separate, larger budget for the FIRST token
+                                                  //   (prefill on a slow local model with a big context)
   "idle_watchdog": true,                          // default for the 🐕 watchdog toggle (off = patient mode)
   "max_tool_iterations": 15,
   "completion_checks": 2,                          // times to re-verify "is it really done?" before accepting (0 = off)

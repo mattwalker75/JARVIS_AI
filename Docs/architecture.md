@@ -1,7 +1,9 @@
 # Architecture
 
-JARVIS is a four-container Docker Compose stack (project name `jarvis`), everything
-bound to `127.0.0.1` (localhost only). The LLM itself is **not** in the stack — the app
+JARVIS is a five-container Docker Compose stack (project name `jarvis`), everything
+bound to `127.0.0.1` (localhost only). The fifth container, `jarvis-docker-proxy`, is a
+**filtered Docker-API proxy** the app uses to reach the workbench (see below) instead of
+mounting the raw Docker socket. The LLM itself is **not** in the stack — the app
 is a pure OpenAI-dialect client and talks to whatever URL is in `llm.base_url` (see
 [LLM serving is external](#llm-serving-is-external)).
 
@@ -35,8 +37,11 @@ The brain. A Node.js/Express server that:
   (`app/src/sessions.js`), **chat log** (`app/src/chatlog.js`), and **config**
   (`app/src/config.js`).
 
-It reaches the workbench through the mounted Docker socket (`docker exec` as root),
-and everything else over the internal Docker network.
+It runs as a **non-root** user and reaches the workbench with `docker exec` **through the
+`jarvis-docker-proxy`** (a filtered Docker API restricted to containers+exec) rather than
+mounting the raw `/var/run/docker.sock` — so an app compromise can't drive the host daemon.
+Everything else goes over the internal Docker network. (Set `DOCKER_PROXY_HOST=""` and re-add
+the socket mount to fall back to the direct-socket behavior.)
 
 ### jarvis-memory (`:8120`) — semantic memory
 A small FastAPI wrapper (`memory/server.py`) around [Mem0](https://github.com/mem0ai/mem0),

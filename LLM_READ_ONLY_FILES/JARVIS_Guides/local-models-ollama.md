@@ -14,10 +14,17 @@ Print the full guide anytime with: `./JARVIS_LOCAL_LLM.sh config --backend ollam
    ```
    ollama pull qwen3:8b          # a chat model
    ollama pull qwen2.5vl:32b     # a VISION model (for screenshots / the vision tier)
+   ollama pull nomic-embed-text  # REQUIRED for long-term memory (see note below)
    ollama list                   # list what you've downloaded
    ollama rm qwen3:8b            # delete one to reclaim disk
    ```
    You don't "start" a model — Ollama loads it on demand. You just need it pulled.
+
+> **Long-term memory needs its own model.** JARVIS's semantic memory (add/search) embeds text with
+> **`nomic-embed-text`** on your host Ollama (`mem0.embed_base_url`, default `host.docker.internal:11434`)
+> — even when your CHAT model is a cloud provider. So Ollama must be **running with `nomic-embed-text`
+> pulled** whenever you use memory, or `search_memory`/`add_memory` fails. `./JARVIS.sh --start` now
+> checks this and prints the exact steps if the embedder is unreachable.
 
 3. **(optional) Tune** the runtime in the `ollama` block of `config/JARVIS_CONFIG.json`
    (context length, keep-alive, how many models stay resident). You can also edit these in the

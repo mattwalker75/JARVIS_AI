@@ -8,7 +8,47 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Security
+- 2026-08-04: **Security & quality hardening pass (multi-batch review).** Closed a **cross-site
+  WebSocket hijack** (any website the user visited could open `ws://127.0.0.1/ws` and drive the full
+  tool loop → RCE) via an Origin allowlist on `/ws`. Hardened `fetch_url` **SSRF**: IPv6/IPv4-mapped
+  private-range detection, credential (`Authorization`/`Cookie`) stripping on cross-origin redirects,
+  connect-time **DNS-rebind pinning** (undici), and a response **size cap**. Stopped
+  `/api/models/probe` from sending the **saved API key to a user-supplied host**. Non-image files
+  served from the shared folders now **force-download** instead of rendering inline (stored-XSS).
+  **Deep, key-based secret redaction** across logs + the audit trail; **backup-before-write** for the
+  config and secrets vault. Scheduled/background tasks no longer receive the irreversible tools
+  (`send_email`, `set_secret`, `delete_secret`, `delete_memory`); autopilot gained a **cost ceiling**
+  (`llm`/autopilot `max_cost_usd`). Infra: the app no longer mounts the raw Docker socket — it uses a
+  **filtered `jarvis-docker-proxy`** (containers+exec only); the app runs **non-root** with its source
+  mounted `:ro`; the workbench uses Docker's **default seccomp** profile (was `unconfined`).
+  (`app/server.js`, `app/src/{tools,llm,scheduler,config,logger,autopilot}.js`, `docker-compose.yml`,
+  `app/Dockerfile`, `app/package.json`)
+
+### Added
+- 2026-08-04: **Survival Knowledge Base expansion + offline behavior.** Added DFW-metro and
+  Sherman→Red River **maps** (10 USGS US Topo quads + 3 TxDOT district maps + a `COVERAGE.md`), a
+  **Fuel — Siphoning, Storage & Shelf Life** guide, and an **Anna roads/landmarks/egress** sheet (now
+  50 topic guides). The `survivalist` prompt gained **graceful-offline** behavior (try once, announce
+  offline on failure, stay local until the internet is restored) and a **prompt-scoped skill** that
+  surfaces the KB only under `survivalist`.
+- 2026-08-04: **`JARVIS.sh` memory safety + embedder check.** `--delete` now offers to **back up
+  long-term memory** first when it's online (skip with `-f`/`--force`); `--start` prints the exact
+  setup steps if the **memory embedder** (host Ollama + `nomic-embed-text`) is unreachable.
+- 2026-08-04: **Split streaming watchdog.** Separate **first-token (prefill)** vs **mid-stream** idle
+  allowances so a slow local model isn't falsely killed during a long prefill
+  (`llm.first_token_timeout_ms`, default 600000; `llm.idle_timeout_ms` raised to 180000).
+
 ### Fixed
+- 2026-08-04: **Live prompt switching + shared-path doubling.** The active system prompt was **cached
+  at boot** (a Config→Prompts change needed a restart) — now read live per turn, with the active
+  prompt name in the per-turn log. Fixed the **`DEFAULT`/Load** dropdown (loads the general base and
+  applies it immediately). Fixed **shared-path doubling** in the file tools: a path like
+  `LLM_READ_WRITE_FILES/x.md` no longer resolves to `…/LLM_READ_WRITE_FILES/LLM_READ_WRITE_FILES/x.md`.
+  Also: `mdview` `__bold__` + top-bar href escaping, autopilot `extend()` on an ended run, log
+  retention only running once per boot, voice-recognizer hot-loop backoff, `pkill` over-matching, and
+  `$CFG` shell interpolation. (`app/src/{config,tools,mdview,autopilot,logger}.js`,
+  `app/public/{app.js,voice.js}`, `JARVIS.sh`, `JARVIS_LOCAL_LLM.sh`)
 - 2026-08-01: **Follow-ups for the LLM_WORKSPACE bind-mount switch.** The token sweep missed a few
   spots and the volume→bind change broke two commands: (1) `browserd.py` and a custom-tools template
   still used the old paths — fixed; (2) the workbench `Dockerfile` now sets `WORKDIR /LLM_WORKSPACE`
@@ -21,6 +61,11 @@ infrastructure, security, documentation, or test-policy changes.
   `workbench/Dockerfile`, `Docs/cli.md`, `LLM_READ_ONLY_FILES/JARVIS_Guides/maintenance.md`, …)
 
 ### Changed
+- 2026-08-04: **UI/accessibility + cleanup.** New-chat now **confirms** before clearing the
+  conversation; regenerate targets the real reply (not notices/errors); added `aria-live` on the
+  message log, `aria-label`s on icon buttons, and a `sandbox` on the workbench iframe; replaying
+  history no longer re-flashes the screen. Removed dead CSS + unused exports and corrected the survival
+  guide count (49→50). (`app/public/{app.js,index.html,style.css}`, `app/src/{tts,skills_data}.js`)
 - 2026-08-01: **Unified, host-visible LLM directories (workspace + shared folders renamed).** The AI's
   working area is now a **host bind mount you can watch live**, and all three dirs share an `LLM_`
   prefix so there's no confusion about where things go:

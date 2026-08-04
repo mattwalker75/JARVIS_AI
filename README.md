@@ -28,14 +28,16 @@ Four containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
 | `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | 8120 |
 | `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
 | `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
+| `jarvis-docker-proxy` | Filtered Docker API (containers+exec only) the app uses to reach the workbench | internal |
 
 The **LLM is not in the stack** — the app talks OpenAI-dialect to whatever `llm.base_url`
 points at (a cloud provider, or a local runtime you start with `./JARVIS_LOCAL_LLM.sh`,
 reached over `host.docker.internal`). The optional LiteLLM gateway now lives in its own
 `litellm/docker-compose.yml`, started by that helper.
 
-The app drives the workbench through the Docker socket (`docker exec`), reaches
-memory over the internal network, and shares two host folders
+The app (running **non-root**) drives the workbench with `docker exec` **through the
+`jarvis-docker-proxy`** — a filtered Docker API — instead of mounting the raw Docker socket,
+reaches memory over the internal network, and shares two host folders
 (`LLM_READ_ONLY_FILES/` → you-to-JARVIS, `LLM_READ_WRITE_FILES/` ↔ both ways).
 
 ## Quick start

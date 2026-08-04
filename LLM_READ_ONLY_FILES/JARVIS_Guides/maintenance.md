@@ -38,9 +38,15 @@ build files and browser logins, and leaves the app, memory, config, and LLM_READ
 ```
 ./JARVIS.sh --stop --delete       # removes containers + the Docker volumes (memory + workbench home)
                                   #   LLM_WORKSPACE is a host folder now, so it (+ your files) survive
+./JARVIS.sh --stop --delete --force  # same, but SKIP the "back up memory first?" prompt (see below)
 ./JARVIS.sh --setup --start       # rebuild + start fresh
 ```
 Your `config/`, secrets, and the shared folders survive `--delete` (they're on disk, not volumes).
+
+**`--delete` protects your memory:** if the long-term memory service is running when you delete, it
+first **asks whether to back it up** (running `--backup-memory` on "yes") before wiping the volume.
+Add **`-f` / `--force`** to skip that prompt and delete immediately. Restore later with
+`./JARVIS.sh --restore-memory --from backups/jarvis-memory-<timestamp>.tgz`.
 
 > Config, secrets, and their templates live in the **`config/`** folder. Local-LLM runtimes
 > (Ollama/MLX) are managed separately by `./JARVIS_LOCAL_LLM.sh`, not `JARVIS.sh`.
