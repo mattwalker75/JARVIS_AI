@@ -274,6 +274,12 @@ async function loop() {
     run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
     run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
     run.idleWork = didWork ? 0 : run.idleWork + 1;
+    // Cycle history: what each cycle reported, browsable from the bar's 📜 button
+    // (GET /api/autopilot/history). Persisted with the run, capped so a 12-hour run
+    // can't bloat the state file.
+    run.history = run.history || [];
+    run.history.push({ cycle: run.cycles, at: new Date().toISOString(), wrapUp: !!run.wrapUp, didWork, summary: run.lastSummary.slice(0, 600) });
+    if (run.history.length > 200) run.history = run.history.slice(-200);
     // Verbose: finalize this cycle's streamed thinking as an (ephemeral) chat message so cycles
     // are separated. ephemeral = shown but not added to your chat's model-context history.
     if (run.verbose && reply && reply.trim()) { try { broadcast({ type: "reply", text: reply, ephemeral: true }); } catch (_) {} }
@@ -292,4 +298,10 @@ async function loop() {
   }
 }
 
-module.exports = { start, requestWrapUp, requestStop, forceStop, pause, resume, modify, extend, continueRun, dismiss, status, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };
+// Per-cycle summaries of the current (or ended-but-undismissed) run.
+function history() {
+  if (!run) return { objective: null, cycles: [] };
+  return { objective: run.objective, status: run.status, cycles: run.history || [] };
+}
+
+module.exports = { start, requestWrapUp, requestStop, forceStop, pause, resume, modify, extend, continueRun, dismiss, status, history, setBroadcast, restore, _RISKY_TOOLS: RISKY_TOOLS };

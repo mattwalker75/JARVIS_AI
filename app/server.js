@@ -113,6 +113,12 @@ app.post("/api/notifications/clear", (_req, res) => res.json(scheduler.clearNoti
 app.delete("/api/notifications/:id", (req, res) => res.json(scheduler.dismissNotification(req.params.id)));
 app.get("/api/tasks", (_req, res) => res.json(scheduler.list()));
 app.post("/api/tasks/cancel", (req, res) => res.json(scheduler.cancel((req.body || {}).id)));
+// Edit a task in place from the Tasks panel (prompt/label/interval/until/re-timing),
+// or pause/resume it ({paused: true|false}). Same engine as the update_task tool.
+app.post("/api/tasks/update", (req, res) => {
+  try { res.json(scheduler.update(req.body || {})); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
 // List models from an ARBITRARY endpoint (base_url + optional key), so the Config tab can
 // show a provider's models before you save. Tries the OpenAI-compatible /models, then the
 // Ollama /api/tags fallback.
@@ -191,6 +197,7 @@ app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || n
 app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
 const autopilot = require("./src/autopilot");
 app.get("/api/autopilot", (_req, res) => res.json(autopilot.status()));
+app.get("/api/autopilot/history", (_req, res) => res.json(autopilot.history()));
 app.post("/api/autopilot/start", (req, res) => {
   try { res.json(autopilot.start(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -250,10 +257,20 @@ app.delete("/api/memories/:id", async (req, res) => {
   try { res.json(await tools.execTool("delete_memory", { id: req.params.id })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Edit a memory in place (keeps its id) — the Memory tab's ✏️ button.
+app.put("/api/memories/:id", async (req, res) => {
+  try { res.json(await tools.execTool("update_memory", { id: req.params.id, text: (req.body || {}).text })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Merge near-duplicates + resolve contradictions across the whole store (smart tier).
 // Guarded server-side: unknown ids dropped, >50%-deletion plans refused.
 app.post("/api/memories/consolidate", async (_req, res) => {
   try { res.json(await tools.execTool("consolidate_memories", {})); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Run the memory+workspace backup pair NOW (the scheduled auto-backup's engine).
+app.post("/api/backup/run", async (_req, res) => {
+  try { res.json({ results: await require("./src/autobackup").runBackups() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -498,6 +515,7 @@ require("./src/planner").setOnChange((plan) => broadcast({ type: "plan", plan })
 autopilot.setBroadcast(broadcast);   // stream Autopilot tool-activity + status to open clients
 autopilot.restore();                 // resume an Autopilot run that was in flight before a restart
 scheduler.start();
+require("./src/autobackup").start(); // scheduled memory/workspace backups (backups.auto, off by default)
 
 wss.on("connection", (ws) => {
   ws.on("message", async (raw) => {
