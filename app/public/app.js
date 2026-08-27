@@ -555,6 +555,11 @@ function connectWS() {
     else if (d.type === "tool_result") { if (d.tool === "run_shell" || d.tool === "sub▸ run_shell") retireStreams(); addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
     else if (d.type === "tool_stream") { addStreamChunk(d); markActivity(); }
     else if (d.type === "tool_media") { addMediaActivity(d); markActivity(); }
+    else if (d.type === "failover") {
+      addMessage("assistant", `⚡ Primary model unavailable (${esc(d.reason || "endpoint failed")}) — continuing this turn on the fallback **${esc(d.to)}**.`, "notice");
+      addActivity("⚡ failover", d.from + " → " + d.to);
+      markActivity();
+    }
     else if (d.type === "usage") {
       addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
       sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
@@ -1668,6 +1673,12 @@ const CFG_FIELDS = [
   ["cfg-first-token-timeout", "llm.first_token_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
   ["cfg-smart-routing", "llm.smart_routing", "bool"],
+  ["cfg-failover-enabled", "llm.failover.enabled", "bool"],
+  ["cfg-failover-model", "llm.failover.model", "str"],
+  ["cfg-failover-url", "llm.failover.base_url", "str"],
+  ["cfg-failover-key", "llm.failover.api_key", "str"],
+  ["cfg-search-provider", "search.provider", "str"],
+  ["cfg-searxng-url", "search.searxng_url", "str"],
   ["cfg-history-budget", "llm.history_token_budget", "num"],
   ["cfg-turn-compaction", "llm.turn_compaction_chars", "num"],
   ["cfg-stall-seconds", "ui.stall_seconds", "num"],
@@ -1841,6 +1852,7 @@ function populateStructured() {
   if (getPath(cfgObj, "secret_access_notice") === undefined) { const e = $("cfg-secret-notice"); if (e) e.checked = true; }
   if (getPath(cfgObj, "llm.smart_routing") === undefined) { const e = $("cfg-smart-routing"); if (e) e.checked = true; }
   if (getPath(cfgObj, "voice.stt_engine") === undefined) { const e = $("cfg-stt-engine-field"); if (e) e.value = "browser"; }
+  if (getPath(cfgObj, "search.provider") === undefined) { const e = $("cfg-search-provider"); if (e) e.value = "duckduckgo"; }
   if (getPath(cfgObj, "autopilot.autonomy") === undefined) { const e = $("cfg-ap-autonomy"); if (e) e.value = "guarded"; }
   if (getPath(cfgObj, "voice.ambient_style") === undefined) { const e = $("cfg-ambient-style"); if (e) e.value = "face"; }
 }

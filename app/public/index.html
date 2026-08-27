@@ -313,6 +313,13 @@
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog on by default (the 🐕 toggle overrides per message)</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-smart-routing" title="Route judgment-heavy turns (plan-mode chat, Autopilot planning + wrap-up cycles) to the smart model tier. No-op when no smart tier is configured."> Smart-tier auto-routing (plan mode + Autopilot planning/wrap-up)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-failover-enabled" title="When the primary endpoint/model fails hard (down, repeated 5xx, stalled stream), the rest of the turn runs on the fallback below and the chat shows a notice."> Model failover</label>
+            <div class="cfg-grid">
+              <label>Fallback model<input id="cfg-failover-model" autocomplete="off" placeholder="required to enable, e.g. qwen3:8b or gpt-4o-mini"></label>
+              <label>Fallback endpoint<input id="cfg-failover-url" autocomplete="off" placeholder="empty = same endpoint"></label>
+              <label>Fallback API key<input id="cfg-failover-key" type="password" autocomplete="off" placeholder="only for a different endpoint"></label>
+            </div>
+            <div class="hint">Failover keeps chat alive through local-runtime hiccups (Ollama not started, gateway restarting). With a <b>different endpoint</b>, only the fallback key is ever sent there — the primary key never leaves its own endpoint.</div>
             <label>“Model is slow” warning after (seconds)<input id="cfg-stall-seconds" type="number" min="5" step="5" title="How long the working indicator waits with no progress before showing the amber 'model is slow' stall warning."></label>
             <div class="hint">Turn the watchdog OFF (🐕 in the header) for long coding tasks so slow local generations aren’t killed. Plan mode (🗺) makes JARVIS clarify + plan before executing.</div>
           </div>
@@ -386,6 +393,15 @@
               <label>Read-write dir<input id="cfg-shared-rw" autocomplete="off" placeholder="/LLM_READ_WRITE_FILES"></label>
             </div>
             <div class="hint">These are container paths/names wired in <code>docker-compose.yml</code> — change them only together with the compose file. The base image is read by <code>./JARVIS.sh --setup</code> when (re)building the workbench.</div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Web search</h5>
+            <div class="cfg-grid">
+              <label>Provider<select id="cfg-search-provider" title="duckduckgo = zero setup, rate-limit-prone HTML scrape. searxng = self-hosted metasearch sidecar with a real JSON API (started automatically by --start when selected; web_search falls back to DuckDuckGo if it's down)."><option value="duckduckgo">duckduckgo (default)</option><option value="searxng">searxng (self-hosted sidecar)</option></select></label>
+              <label>SearXNG URL<input id="cfg-searxng-url" autocomplete="off" placeholder="http://jarvis-searxng:8080"></label>
+            </div>
+            <div class="hint">Switching to SearXNG needs a stack restart once (<code>./JARVIS.sh --start</code> brings the sidecar container up); after that it applies live.</div>
           </div>
 
           <div class="cfg-section">

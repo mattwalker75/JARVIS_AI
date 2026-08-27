@@ -28,7 +28,14 @@
     "smart_routing": true,
     "_context_budgets_note": "Context-size discipline. history_token_budget: cap on the CHAT HISTORY sent each turn, estimated at ~4 chars/token (default 16000; 0 = size-blind 40-message cap only). turn_compaction_chars: once a single turn's tool results exceed this many characters, OLDER tool results are elided to a short head so long tool chains don't balloon the prefill (default 60000; 0 = off).",
     "history_token_budget": 16000,
-    "turn_compaction_chars": 60000
+    "turn_compaction_chars": 60000,
+    "_failover_note": "Optional model FAILOVER: when the primary endpoint/model fails hard (endpoint down, repeated 5xx, stalled stream), the rest of the turn runs on this fallback and the UI shows a notice. model: required to enable. base_url: empty = same endpoint (e.g. a smaller Ollama model), or a different endpoint (e.g. https://api.openai.com/v1 while local Ollama is down). api_key: only used with a different base_url \u2014 the primary key is NEVER sent to a different endpoint.",
+    "failover": {
+      "enabled": false,
+      "model": "",
+      "base_url": "",
+      "api_key": ""
+    }
   },
   "_local_models_comment": "Optional. Point llm.base_url at Ollama or a llama.cpp server to use local .gguf/.safetensors models. This block just records where your local model files live for reference / future direct serving.",
   "local_models": {
@@ -123,5 +130,10 @@
   "notifications": {
     "ntfy_url": "",
     "min_level": "info"
+  },
+  "_search_note": "Web-search backend for the web_search tool. 'duckduckgo' (default) scrapes DuckDuckGo's HTML \u2014 zero setup but rate-limit-prone. 'searxng' uses the OPTIONAL self-hosted SearXNG sidecar (real JSON metasearch API; ./JARVIS.sh --start brings the container up automatically when selected, and web_search falls back to DuckDuckGo if it's unreachable).",
+  "search": {
+    "provider": "duckduckgo",
+    "searxng_url": "http://jarvis-searxng:8080"
   }
 }
