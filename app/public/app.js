@@ -33,7 +33,8 @@ let chatPlan = localStorage.getItem("jarvis.plan") === "1";           // default
 function sendChatWS(extra) {
   // Strip UI-only fields (ts) — only {role, content} may reach the model API.
   if (extra && Array.isArray(extra.messages)) extra = { ...extra, messages: extra.messages.map(({ role, content }) => ({ role, content })) };
-  ws.send(JSON.stringify({ type: "chat", watchdog: chatWatchdog, planMode: chatPlan, ...extra }));
+  // chatId scopes the server-side plan ledger to THIS tab (see planner.js).
+  ws.send(JSON.stringify({ type: "chat", watchdog: chatWatchdog, planMode: chatPlan, chatId: chatsMeta.active, ...extra }));
 }
 
 // Apply the saved theme BEFORE anything renders further (default: dark, the JARVIS look).
@@ -224,6 +225,18 @@ function updateContextMeter(tok) {
   label.textContent = `${pct}% · ${k(tok)}/${k(ctxWindow)}`;
   m.title = `Context window: ${pct}% used (${tok.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens). A fresh chat resets it.`;
   const sb = $("ctx-summarize"); if (sb) sb.hidden = pct < 60;   // offer "Summarize & continue" once it's getting full
+  maybeAutoCompact(pct);
+}
+// Auto-compaction: once the window passes ui.auto_compact_pct (default 85%, 0 = off),
+// run Summarize-&-continue automatically instead of waiting for the button — long
+// conversations keep flowing instead of hitting the ceiling. Never fires mid-request.
+let autoCompactBusy = false;
+function maybeAutoCompact(pct) {
+  const threshold = Number(cfg && cfg.auto_compact_pct);
+  if (!(threshold > 0) || pct < threshold || autoCompactBusy || workingEl || history.length < 6) return;
+  autoCompactBusy = true;
+  addMessage("assistant", `🗜 Context is ${pct}% full — auto-compacting so we can keep going (set ui.auto_compact_pct to 0 to disable).`, "notice");
+  summarizeAndContinue().finally(() => { autoCompactBusy = false; });
 }
 // Summarize the conversation and REPLACE the sent context with that summary, so the window
 // actually shrinks (a pure "please summarize" wouldn't free anything) and we keep going.
@@ -516,6 +529,17 @@ function addStreamChunk(d) {
 function retireStreams() {
   for (const id of Object.keys(liveStreams)) { liveStreams[id].classList.remove("live"); delete liveStreams[id]; }
 }
+// Media preview: show what JARVIS actually captured (screenshot / browser_screenshot /
+// analyze_image) as a thumbnail — click toggles full size.
+function addMediaActivity(d) {
+  if (!d.image || !/^data:image\//.test(d.image)) return;
+  const e = addActivity(d.tool + " 📷", undefined, undefined);
+  const img = document.createElement("img");
+  img.className = "e-media"; img.src = d.image; img.alt = d.tool + " capture"; img.title = "Click to toggle full size";
+  img.addEventListener("click", () => img.classList.toggle("full"));
+  e.appendChild(img);
+  activityEl.scrollTop = activityEl.scrollHeight;
+}
 
 let wsBackoff = 1000, connLost = false;
 function connectWS() {
@@ -530,6 +554,7 @@ function connectWS() {
     if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
     else if (d.type === "tool_result") { if (d.tool === "run_shell" || d.tool === "sub▸ run_shell") retireStreams(); addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
     else if (d.type === "tool_stream") { addStreamChunk(d); markActivity(); }
+    else if (d.type === "tool_media") { addMediaActivity(d); markActivity(); }
     else if (d.type === "usage") {
       addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
       sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
@@ -571,9 +596,11 @@ function connectWS() {
       addMessage("assistant", "Error: " + d.error, "error");
       addRetry();
     } else if (d.type === "plan") {
-      renderPlan(d.plan);
+      planCache[d.key || "default"] = d.plan;
+      renderActivePlan();
     } else if (d.type === "autopilot") {
       renderAutopilot(d.status);
+      renderActivePlan();   // an Autopilot start/stop can change which plan the banner shows
     } else if (d.type === "open_autopilot") {
       if (window.openAutopilotPrefilled) window.openAutopilotPrefilled(d.objective, d.minutes, d.autonomy);
     } else if (d.type === "notification") {
@@ -888,6 +915,25 @@ document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () 
 }));
 
 // --- Persistent PLAN ledger banner -------------------------------------------
+// Plans are keyed per conversation (chat_<tab id> / autopilot / default). The banner
+// shows the ACTIVE TAB's plan — except while an Autopilot run is working, whose plan
+// takes precedence (that's the one changing live).
+const planCache = {};        // key -> latest plan (from WS pushes + fetches)
+let displayedPlanKey = null; // which plan the banner currently shows (for its ✕ Clear)
+function activePlanKey() { return "chat_" + String(chatsMeta.active).toLowerCase().replace(/[^a-z0-9_-]/g, ""); }
+function renderActivePlan() {
+  const apPlan = planCache["autopilot"], chatPlan = planCache[activePlanKey()];
+  let key = null, plan = null;
+  if (apRunning && apPlan && apPlan.status === "active") { key = "autopilot"; plan = apPlan; }
+  else if (chatPlan && chatPlan.status === "active") { key = activePlanKey(); plan = chatPlan; }
+  else if (apPlan && apPlan.status === "active") { key = "autopilot"; plan = apPlan; }
+  displayedPlanKey = key;
+  renderPlan(plan);
+}
+async function fetchPlanFor(key) {
+  try { planCache[key] = await (await fetch("/api/plan?key=" + encodeURIComponent(key))).json(); } catch (_) {}
+  renderActivePlan();
+}
 const PB_ICON = { done: "✓", active: "▸", pending: "○", blocked: "✕" };
 function renderPlan(plan) {
   const banner = $("plan-banner"); if (!banner) return;
@@ -923,7 +969,9 @@ function renderPlan(plan) {
   }
   if (clr) clr.addEventListener("click", async () => {
     if (!(await uiConfirm("Clear the current plan? The checklist is discarded (finished work is untouched).", { title: "Clear plan", okText: "Clear", danger: true }))) return;
-    try { await fetch("/api/plan", { method: "DELETE" }); } catch (_) {}
+    const key = displayedPlanKey || activePlanKey();
+    try { await fetch("/api/plan?key=" + encodeURIComponent(key), { method: "DELETE" }); } catch (_) {}
+    planCache[key] = null;
     banner.hidden = true;
   });
 })();
@@ -1192,6 +1240,7 @@ async function refreshTasks() {
     el.innerHTML =
       `<div class="t-top"><span class="t-label">${paused ? "⏸ " : ""}${esc(t.label || t.prompt.slice(0, 40))}</span>` +
       `<span><span class="badge ${recurring ? "recurring" : ""}">${paused ? "paused" : recurring ? "every " + Math.round(t.every_seconds / 60) + "m" : "once"}</span> ` +
+      `<button class="ghost file-btn t-hist" data-id="${esc(t.id)}" title="Recent runs of this task">📜</button>` +
       `<button class="ghost file-btn t-edit" data-id="${esc(t.id)}" title="Edit this task">✏️</button>` +
       `<button class="ghost file-btn t-pause" data-id="${esc(t.id)}" data-paused="${paused ? "1" : ""}" title="${paused ? "Resume this task" : "Pause this task (keeps it, skips runs)"}">${paused ? "▶" : "⏸"}</button>` +
       `<button class="cancel" data-id="${esc(t.id)}">cancel</button></span></div>` +
@@ -1257,6 +1306,14 @@ async function refreshNotes() {
   notes.slice().reverse().forEach((n) => addNoteEl(n));
 }
 if (tasksList) tasksList.addEventListener("click", async (e) => {
+  const histBtn = e.target.closest("button.t-hist");
+  if (histBtn) {
+    let runs = []; try { runs = await (await fetch("/api/tasks/history?id=" + encodeURIComponent(histBtn.dataset.id) + "&limit=30")).json(); } catch (_) {}
+    const rows = runs.map((r) =>
+      `<div class="aph-row"><div class="aph-meta">run ${r.runs} · ${esc(new Date(r.at).toLocaleString())}${r.notified ? " · 🔔 notified" : ""}${r.flag ? " · ⚠ " + esc(r.flag) : ""}</div>${esc(r.result || "(no output)")}</div>`).join("");
+    uiModal({ title: "Recent runs", bodyHtml: rows || "No recorded runs yet for this task.", okText: "Close", noCancel: true });
+    return;
+  }
   const pauseBtn = e.target.closest("button.t-pause");
   if (pauseBtn) { await taskUpdate({ id: pauseBtn.dataset.id, paused: !pauseBtn.dataset.paused }); return; }
   const editBtn = e.target.closest("button.t-edit");
@@ -1327,7 +1384,9 @@ async function newSession() {
   if (history.length && !(await uiConfirm("Start a new chat? The current conversation will be cleared.", { title: "New chat", okText: "New chat" }))) return;
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
-  try { fetch("/api/plan", { method: "DELETE" }); } catch (_) {} renderPlan(null);   // a fresh chat starts with no active plan (don't inherit a stale one)
+  // A fresh chat starts with no active plan — clear THIS tab's ledger only.
+  try { fetch("/api/plan?key=" + encodeURIComponent(activePlanKey()), { method: "DELETE" }); } catch (_) {}
+  planCache[activePlanKey()] = null; renderActivePlan();
   addMessage("assistant", "New session. JARVIS online — ask me anything. (type `/help` for the help menu)");
 }
 const newChatBtn = $("new-chat");
@@ -1538,7 +1597,8 @@ async function init() {
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
   if (Number(cfg.context_window) > 0) ctxWindow = Number(cfg.context_window);        // context-meter ceiling (immediate)
   try { const d = await (await fetch("/api/context-window")).json(); if (Number(d.context_window) > 0) ctxWindow = Number(d.context_window); } catch (_) {}   // refine: manual override / auto-detect (Ollama num_ctx / model)
-  try { renderPlan(await (await fetch("/api/plan")).json()); } catch (_) {}          // restore the active plan ledger
+  await fetchPlanFor(activePlanKey());                                               // restore this tab's plan ledger
+  fetchPlanFor("autopilot");                                                         // and any Autopilot plan (shown while a run works)
   if (cfg.autopilot) {                                                                // prefill Autopilot launcher defaults
     const mi = $("ap-minutes"); if (mi && cfg.autopilot.default_minutes) mi.value = cfg.autopilot.default_minutes;
     const au = $("ap-autonomy"); if (au && cfg.autopilot.autonomy) au.value = cfg.autopilot.autonomy;
@@ -1608,7 +1668,10 @@ const CFG_FIELDS = [
   ["cfg-first-token-timeout", "llm.first_token_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
   ["cfg-smart-routing", "llm.smart_routing", "bool"],
+  ["cfg-history-budget", "llm.history_token_budget", "num"],
+  ["cfg-turn-compaction", "llm.turn_compaction_chars", "num"],
   ["cfg-stall-seconds", "ui.stall_seconds", "num"],
+  ["cfg-auto-compact", "ui.auto_compact_pct", "num"],
   ["cfg-ollama-manage", "ollama.manage", "bool"],
   ["cfg-ollama-ctx", "ollama.context_length", "num"],
   ["cfg-ollama-keep", "ollama.keep_alive", "str"],
@@ -2060,6 +2123,7 @@ function switchChat(id) {
   messagesEl.innerHTML = ""; history.length = 0;
   currentSession = { id: null, name: null }; renderCurrent();
   restoreHistory(); resetSessUsage(); refreshContextMeter(); renderChatTabs();
+  fetchPlanFor(activePlanKey());       // the banner follows the active tab's ledger
   stickBottom = true; messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 async function closeChat(id) {

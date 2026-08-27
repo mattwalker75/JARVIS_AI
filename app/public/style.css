@@ -479,3 +479,7 @@ html[data-theme="light"] .modal-ok { color: #fff; }
 /* --- autopilot history modal rows --- */
 .aph-row { border-top: 1px solid var(--edge); padding: 7px 0; font-size: .8rem; }
 .aph-row .aph-meta { color: var(--muted); font-size: .7rem; margin-bottom: 2px; }
+
+/* --- Activity media previews (UI-11) --- */
+.entry img.e-media { display: block; max-width: 100%; max-height: 180px; border-radius: 8px; border: 1px solid var(--edge); margin-top: 6px; cursor: zoom-in; }
+.entry img.e-media.full { max-height: none; cursor: zoom-out; }

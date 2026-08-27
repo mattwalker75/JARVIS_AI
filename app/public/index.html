@@ -307,6 +307,9 @@
               <label>Idle timeout (ms)<input id="cfg-idle-timeout" type="number" min="5000" step="1000" title="Watchdog: how long with NO streamed data before a turn is treated as a stalled/dead model."></label>
               <label>Max tool steps / turn<input id="cfg-max-iter" type="number" min="1" max="100" title="Cap on tool-calling iterations within one turn (llm.max_tool_iterations)."></label>
               <label>First-token timeout (ms)<input id="cfg-first-token-timeout" type="number" min="10000" step="10000" title="Watchdog: separate, larger budget for the FIRST token — a slow local prefill on a big context can take minutes."></label>
+              <label>History budget (tokens)<input id="cfg-history-budget" type="number" min="0" step="1000" title="Cap on the chat history sent each turn (~4 chars/token). 0 = size-blind 40-message cap only."></label>
+              <label>Turn compaction (chars)<input id="cfg-turn-compaction" type="number" min="0" step="10000" title="Once one turn's tool results exceed this, older results are elided to a short head. 0 = off."></label>
+              <label>Auto-compact at (%)<input id="cfg-auto-compact" type="number" min="0" max="100" title="When the context meter reaches this %, the UI auto-runs Summarize & continue. 0 = never."></label>
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog on by default (the 🐕 toggle overrides per message)</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-smart-routing" title="Route judgment-heavy turns (plan-mode chat, Autopilot planning + wrap-up cycles) to the smart model tier. No-op when no smart tier is configured."> Smart-tier auto-routing (plan mode + Autopilot planning/wrap-up)</label>
