@@ -243,9 +243,14 @@ async function loop() {
       if (base || think) { try { broadcast(ev); } catch (_) {} }
     };
 
+    // Smart routing (llm.smart_routing, default on): the PLANNING cycle (no plan yet)
+    // and the WRAP-UP cycle carry the run's judgment-heavy work — route them to the
+    // smart tier. With no smart tier configured, modelFor falls back to chat (no-op).
+    const smartRouting = !(config.config && config.config.llm && config.config.llm.smart_routing === false);
+    const tier = smartRouting && (!before || run.wrapUp) ? "smart" : "chat";
     let reply = "";
     try {
-      reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: false,
+      reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: false, tier,
         excludeTools: run.autonomy === "guarded" ? RISKY_TOOLS : [] });
     } catch (e) {
       if (run && run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // paused mid-cycle

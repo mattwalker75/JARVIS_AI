@@ -12,6 +12,7 @@ const CONFIG_BACKUP_DIR = process.env.JARVIS_BACKUP_DIR || "/data";
 const SETTABLE = new Set([
   "voice.tts", "voice.stt", "voice.enabled", "voice.mic_mode", "voice.silence_timeout_seconds",
   "voice.followup_seconds", "voice.ambient_style", "voice.tts_engine", "voice.tts_voice", "voice.tts_rate", "voice.tts_pitch",
+  "voice.stt_engine",
   "llm.model", "llm.models.chat", "llm.temperature", "llm.max_tokens", "assistant_name",
   "skills_autohint",
 ]);
@@ -84,6 +85,11 @@ function modelMode() {
   return llm.models && Object.keys(llm.models).length ? "multi" : "single";
 }
 
+// A tier entry is either a model-name string, or an object with per-tier overrides:
+//   "smart": "qwen3:32b"                                       — just the model
+//   "smart": { "model": "qwen3:32b", "temperature": 0.2, "max_tokens": 8000 }
+const entryModel = (e) => (e && typeof e === "object" ? e.model : e);
+
 // Resolve a model for a task tier (chat | cheap | vision | smart). In multi-model
 // mode each tier can name ANY model the gateway knows (under llm.models), falling
 // back to the chat tier then llm.model. In single-model mode all tiers use llm.model.
@@ -91,7 +97,20 @@ function modelFor(tier) {
   const llm = config.llm || {};
   if (modelMode() === "single") return llm.model || "gpt-4o-mini";
   const m = llm.models || {};
-  return m[tier] || m.chat || llm.model || "gpt-4o-mini";
+  return entryModel(m[tier]) || entryModel(m.chat) || llm.model || "gpt-4o-mini";
+}
+
+// Per-tier generation overrides from the object form (empty when the tier is a plain
+// string / single mode) — llm.js merges these over the global llm.temperature/max_tokens.
+function paramsFor(tier) {
+  const llm = config.llm || {};
+  if (modelMode() === "single") return {};
+  const e = (llm.models || {})[tier];
+  if (!e || typeof e !== "object") return {};
+  const out = {};
+  if (Number.isFinite(Number(e.temperature))) out.temperature = Number(e.temperature);
+  if (Number(e.max_tokens) > 0) out.max_tokens = Number(e.max_tokens);
+  return out;
 }
 
 // Safe subset sent to the browser (no api_key, no db password).
@@ -104,7 +123,10 @@ function publicConfig() {
     provider: llm.provider || "",
     model: modelFor("chat"),
     model_mode: modelMode(),
-    models: modelMode() === "multi" ? (llm.models || {}) : {},
+    // Display map is always plain strings, even when a tier uses the object form.
+    models: modelMode() === "multi"
+      ? Object.fromEntries(Object.entries(llm.models || {}).map(([k, v]) => [k, entryModel(v) || ""]))
+      : {},
     voice: {
       enabled: v.enabled !== false,
       tts: v.tts !== false,
@@ -115,6 +137,7 @@ function publicConfig() {
       followup_seconds: Number(v.followup_seconds) || 0,
       ambient_style: v.ambient_style === "orb" ? "orb" : "face",
       mic_mode: v.mic_mode || "off",
+      stt_engine: v.stt_engine === "local" ? "local" : "browser",
       tts_engine: v.tts_engine === "piper" ? "piper" : "browser",
       tts_voice: v.tts_voice || "",
       tts_rate: v.tts_rate || 1.0,
@@ -250,4 +273,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, modelFor, modelMode, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };
+module.exports = { config, loadError, publicConfig, modelFor, modelMode, paramsFor, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

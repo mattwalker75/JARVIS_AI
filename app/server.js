@@ -250,6 +250,12 @@ app.delete("/api/memories/:id", async (req, res) => {
   try { res.json(await tools.execTool("delete_memory", { id: req.params.id })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Merge near-duplicates + resolve contradictions across the whole store (smart tier).
+// Guarded server-side: unknown ids dropped, >50%-deletion plans refused.
+app.post("/api/memories/consolidate", async (_req, res) => {
+  try { res.json(await tools.execTool("consolidate_memories", {})); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // REST chat for external automation (scripts, cron, Shortcuts, other machines via a
 // tunnel): same brain as the WS chat, one request/response. Body:
@@ -291,8 +297,17 @@ app.post("/api/config/full", (req, res) => {
     const r = writeFullConfig({ config: c, secrets: s });
     // writeFullConfig mutates the in-memory config in place, so changes apply on the next turn —
     // no --reload for ordinary settings (base_url/model/tiers/params/prompts/log level, etc.).
+    // Hot-reload the runtime-added tools too, so added/removed MCP servers and custom tools
+    // take effect without a restart (fire-and-forget; a dead server just logs and is skipped).
+    if (c !== undefined) tools.reloadExtraTools().catch(() => {});
     res.json({ ...r, reload_required: false, applied_live: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Hot-reload custom tools + MCP servers on demand (also runs automatically on config save).
+app.post("/api/tools/reload", async (_req, res) => {
+  try { res.json(await tools.reloadExtraTools()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Neural TTS (Piper) — the browser fetches audio from here when the voice engine is
@@ -310,6 +325,25 @@ app.post("/api/tts", async (req, res) => {
     res.setHeader("Content-Length", buf.length);
     res.send(buf);
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Local speech-to-text: the browser records an utterance (push-to-talk with the
+// "local" STT engine) and POSTs it here; it's transcribed by faster-whisper in the
+// workbench (fully local — no Google speech service). Needs the workbench running.
+app.post("/api/stt", async (req, res) => {
+  const { dataUrl, language } = req.body || {};
+  const m = /^data:(audio|video)\/[\w.+-]+;base64,(.+)$/s.exec(String(dataUrl || ""));
+  if (!m) return res.status(400).json({ error: "expected a base64 audio data URL" });
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > 25 * 1024 * 1024) return res.status(413).json({ error: "audio too large (25MB max)" });
+  const rw = (config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES";
+  const tmp = path.join(rw, `.jarvis_stt_${Date.now()}.webm`);   // dotfile: hidden from the Files tab
+  try {
+    fs.writeFileSync(tmp, buf);
+    const r = await tools.execTool("transcribe_audio", { path: tmp, language, model_size: "base" });
+    res.json({ text: (r.text || "").replace(/\[\d\d:\d\d\]\s*/g, "").trim(), language: r.language, duration_s: r.duration_s });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+  finally { try { fs.rmSync(tmp, { force: true }); } catch (_) {} }
 });
 
 // Available models for the header switcher. Works against BOTH backends: an
@@ -504,7 +538,11 @@ wss.on("connection", (ws) => {
 
     const ac = new AbortController(); ws._abort = ac;
     try {
-      const reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: data.watchdog, planMode: data.planMode });
+      // Smart routing (llm.smart_routing, default on): a plan-mode turn is clarify →
+      // plan → execute — judgment-heavy, so it runs on the smart tier when one is
+      // configured (modelFor falls back to chat otherwise).
+      const smartRouting = !(config.llm && config.llm.smart_routing === false);
+      const reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: data.watchdog, planMode: data.planMode, tier: data.planMode && smartRouting ? "smart" : undefined });
       chatlog.record("assistant", reply);
       emit({ type: "reply", text: reply });
     } catch (e) {

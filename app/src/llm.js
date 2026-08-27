@@ -2,7 +2,7 @@
 // OpenAI-compatible chat with a tool-calling loop. Works with OpenAI, Ollama,
 // or any compatible /chat/completions endpoint (incl. a LiteLLM gateway).
 // 'mock' replies offline.
-const { config, modelFor } = require("./config");
+const { config, modelFor, paramsFor } = require("./config");
 const tools = require("./tools");
 const log = require("./logger");
 
@@ -166,6 +166,25 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     // incomplete step (survives stalls/restarts — it's on disk). This is the core fix for
     // "forgets what it was working on."
     try { const pn = require("./planner").contextNote(); if (pn) notes.push("[" + pn + "]"); } catch (_) {}
+    // Opt-in per-turn memory auto-recall (memory_auto_recall: true in config): silently
+    // search the semantic store for the user's message and ride the top hits along in the
+    // volatile note — so recall doesn't depend on a small model REMEMBERING to call
+    // search_memory. Costs one embedding lookup per turn; never allowed to block a turn
+    // (3s cap, failures ignored). Skipped for noTools calls (summaries/clarify).
+    if (config.memory_auto_recall === true && !noTools) {
+      try {
+        const q = String(convo[lastUserIdx].content).slice(0, 300);
+        const r = await Promise.race([
+          tools.searchMemory(q, 4),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("memory recall timeout")), 3000)),
+        ]);
+        const hits = ((r && r.results) || []).filter((m) => m && m.memory);
+        if (hits.length) {
+          notes.push("(Possibly relevant long-term memories — auto-recalled; verify with search_memory if something seems off: " +
+            hits.map((m) => "“" + String(m.memory).replace(/\s+/g, " ").slice(0, 150) + "”").join("; ") + ")");
+        }
+      } catch (_) { /* memory service down/slow — the turn proceeds without recall */ }
+    }
     // Planning mode: steer the model to clarify → plan → execute step by step. Injected as
     // part of the volatile user-message suffix (NOT the system block) so the cached prefix
     // stays byte-stable whether plan mode is on or off.
@@ -193,6 +212,12 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   const addUsage = (u) => { if (u) { usage.prompt_tokens += u.prompt_tokens || 0; usage.completion_tokens += u.completion_tokens || 0; usage.total_tokens += u.total_tokens || 0; if (u.prompt_tokens) usage.context_tokens = u.prompt_tokens; } };
   const emitUsage = () => { if (emit && usage.total_tokens) emit({ type: "usage", model: lastModel, usage: { ...usage }, cost_usd: estimateCost(lastModel, usage) }); };
 
+  // Sub-tool execution context: tools that spawn their OWN LLM loop (delegate) must
+  // inherit this loop's exclusions, or an unattended run could reach a withheld tool
+  // (e.g. send_email) through a sub-agent.
+  const toolCtx = { excludeTools: excludeTools || [] };
+  // Per-tier overrides (object form under llm.models) beat the global params.
+  const tierParams = paramsFor(tier);
   for (let i = 0; i <= maxIter; i++) {
     if (signal && signal.aborted) return "⏹ Stopped.";
     // Vision routing happens inside the look-step (analyzeImage), not here — raw images
@@ -201,8 +226,8 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     const body = {
       model: lastModel,
       messages: oneSystemAtFront(convo),
-      temperature: llm.temperature ?? 0.4,
-      ...tokenLimitParam(lastModel, llm.max_tokens ?? 1200),   // max_tokens, or max_completion_tokens for models that require it
+      temperature: tierParams.temperature ?? llm.temperature ?? 0.4,
+      ...tokenLimitParam(lastModel, tierParams.max_tokens ?? llm.max_tokens ?? 1200),   // max_tokens, or max_completion_tokens for models that require it
       ...(toolset.length ? { tools: toolset, tool_choice: "auto" } : {}),   // omit tools entirely when disabled
       stream_options: { include_usage: true },
     };
@@ -230,7 +255,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
         if (emit) emit({ type: "tool", tool: tc.function.name, input: args });
         const started = Date.now();
         let result;
-        try { result = await execWithRetry(tc.function.name, args, signal); }
+        try { result = await execWithRetry(tc.function.name, args, signal, toolCtx); }
         catch (e) { result = { error: e.message }; }
         let summarized = result;
         if (result && result.__image__) {
@@ -291,7 +316,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
             if (emit) emit({ type: "tool", tool: c.name, input: c.args });
             const started = Date.now();
             let result;
-            try { result = await execWithRetry(c.name, c.args, signal); }
+            try { result = await execWithRetry(c.name, c.args, signal, toolCtx); }
             catch (e) { result = { error: e.message }; }
             if (result && result.__image__) { const { __image__, ...rest } = result; result = { note: "screenshot captured", ...rest }; }
             if (emit) emit({ type: "tool_result", tool: c.name, output: clip(result, 4000), ms: Date.now() - started });
@@ -343,13 +368,14 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   return "(Stopped after the maximum number of tool steps.)";
 }
 
-// Execute a tool, retrying read-only/idempotent ones on transient errors.
-async function execWithRetry(name, args, signal) {
+// Execute a tool, retrying read-only/idempotent ones on transient errors. `ctx` carries
+// the calling loop's tool exclusions for tools that spawn sub-loops (delegate).
+async function execWithRetry(name, args, signal, ctx) {
   const tries = tools.isRetryable(name) ? 3 : 1;
   let lastErr;
   for (let a = 0; a < tries; a++) {
     if (signal && signal.aborted) throw new Error("stopped");   // don't start/retry a tool after Stop
-    try { return await tools.execTool(name, args, signal); }
+    try { return await tools.execTool(name, args, signal, ctx); }
     catch (e) {
       lastErr = e;
       if (signal && signal.aborted) throw e;                    // Stop pressed mid-tool — don't retry

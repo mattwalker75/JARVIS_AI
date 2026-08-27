@@ -82,6 +82,15 @@ async function init() {
   return ext.map((t) => t.def);
 }
 
+// Re-handshake every configured server (config may have changed since startup) and
+// rebuild the tool list. Used by the hot-reload path — a config save no longer needs an
+// app restart to pick up added/removed MCP servers.
+async function reload() {
+  ext.length = 0;
+  for (const k of Object.keys(sessions)) delete sessions[k];
+  return await init();
+}
+
 function has(name) { return ext.some((t) => t.def.function.name === name); }
 
 async function call(name, args) {
@@ -96,4 +105,4 @@ async function call(name, args) {
   return res;
 }
 
-module.exports = { init, has, call };
+module.exports = { init, reload, has, call };
