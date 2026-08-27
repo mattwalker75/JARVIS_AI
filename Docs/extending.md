@@ -126,10 +126,15 @@ The model calls `list_skills()` then `get_skill(name)`.
 
 Skills are an in-memory catalog in `app/src/skills_data.js`, served by
 `app/src/skills.js`. Edit the data file and reload (`./JARVIS.sh --reload`) to change
-a playbook. The 18 skills cover: memory, the workbench shell, the internet, the
+a playbook. The 20 skills cover: memory, the workbench shell, the internet, the
 browser tools, vision, scheduling, task-authoring, data-analysis, error-recovery,
 credentials, email, document reading, document/image creation, shared files,
-web-preview, desktop control, and the login/monitor workflows.
+web-preview, desktop control, app-integration (working with an app the user
+uploaded), the login/monitor workflows, and the survival knowledge base.
+
+A skill with a `prompts` list is **prompt-scoped** — surfaced only while one of those
+prompt sets is active (e.g. the survival KB skill appears only under the
+`survivalist` prompt). Skills without `prompts` are global.
 
 ### Auto-hinting
 

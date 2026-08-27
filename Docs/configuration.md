@@ -38,6 +38,13 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `personas` | Optional alternate system prompts. |
 | `mcp` | Optional external MCP tool servers. |
 | `custom_tools` | Custom-tool loading options. |
+| `skills_autohint` | Per-turn skill nudges on/off. |
+| `autopilot` | Autonomy mode, default time budget, cycle cap. |
+| `ui` | Front-end behavior (stall warning delay). |
+| `logging` | Debug log level, rotation, retention. |
+| `backups` | How many config/secrets backups to keep in `data/`. |
+| `security` | Extra allowed `Host`/`Origin` hostnames. |
+| `secret_access_notice` | Chat notice on every `get_secret` read. |
 
 ## `llm`
 
@@ -198,6 +205,10 @@ For a cloud embedder, drop `embed_base_url` and set `embed_model` to e.g.
 `text-embedding-3-small` (uses `llm.api_key`). Switching embedders creates a fresh,
 namespaced Chroma collection — see [Memory](memory-and-scheduling.md).
 
+Optional overrides: `llm_model` / `llm_base_url` point Mem0's own extraction LLM
+somewhere other than the app's `llm.base_url`/`model` (only used with `infer: true`),
+and `infer: true` re-enables Mem0's LLM extraction/dedup stages.
+
 ## `workbench` and `shared`
 
 ```jsonc
@@ -271,6 +282,35 @@ See [Autopilot & the Planner](autopilot.md).
 }
 ```
 Read live — change `level` from the Config tab and it applies immediately. Secrets are redacted.
+
+## `backups` (optional)
+
+```jsonc
+"backups": { "retain": 10 }   // newest N config/secrets backups kept in data/ (0 = keep everything)
+```
+Before every save from the Config tab, the previous `JARVIS_CONFIG.json` /
+`JARVIS_SECRETS.json` is copied to `data/<name>.backup.<timestamp>.json`. Each config
+backup contains the live `api_key`, so the pile is pruned to the newest `retain`
+per file on every new backup.
+
+## `security` (optional)
+
+```jsonc
+"security": { "allowed_hosts": [] }   // e.g. ["jarvis.tail1234.ts.net"]
+```
+Every REST and WebSocket request must carry a localhost `Host` (and, when a browser
+sends one, `Origin`) or it's rejected with 403 — this blocks CSRF and DNS-rebinding
+attacks from websites you visit. If you front JARVIS with a reverse proxy or tunnel
+under a different hostname, list that hostname here.
+
+## `secret_access_notice` (optional)
+
+```jsonc
+"secret_access_notice": true   // default
+```
+When the model reads a credential with `get_secret`, a 🔑 notice is posted into the
+live chat so vault access is always visible in the moment (the audit log records it
+regardless). Set `false` to silence the notices.
 
 ## `custom_tools` (optional)
 

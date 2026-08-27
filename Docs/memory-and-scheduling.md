@@ -10,7 +10,9 @@ it **remembers** across conversations, and it can **do things on a schedule**.
 JARVIS has real long-term memory via the `jarvis-memory` sidecar — a FastAPI wrapper
 (`memory/server.py`) around [Mem0](https://github.com/mem0ai/mem0), backed by a local
 **Chroma** vector store. Facts are embedded and recalled by **meaning**, not exact
-match.
+match. The sidecar is **internal-only** (reached at `http://jarvis-memory:8000` on the
+compose network, no host port) — the store has no auth, so it's deliberately not
+exposed to other local processes.
 
 ### How the model uses it
 - `add_memory("Matt prefers dark mode")` — save a fact.

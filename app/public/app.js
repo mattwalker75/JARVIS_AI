@@ -1,4 +1,27 @@
 "use strict";
+// JARVIS web UI — main frontend module. Sections, in file order (search the marker text):
+//
+//   Chat basics ......... scroll/stick-to-bottom, code-copy, history persistence (top of file)
+//   Context & usage ..... session token/cost totals, context meter, summarizeAndContinue
+//   Working indicator ... showWorking/hideWorking, stall detection, header status pill
+//   Rendering ........... fmt() safe-markdown renderer, importance flags, addMessage
+//   WebSocket ........... connectWS — the full server-event switch (tokens/tools/plan/…)
+//   Memory viewer ....... refreshMemories/renderMemories
+//   "--- Files tab"
+//   "--- Settings persistence + model switcher"
+//   "--- Regenerate the last response"
+//   "--- Slash commands"
+//   Send & input ........ send(), autoGrow, Enter/Esc/Cmd-K handlers, tab switching
+//   "--- Persistent PLAN ledger banner"
+//   "--- Autopilot" ..... launcher, clarify wizard, live status bar
+//   "--- Mode toggles" .. stream watchdog + plan mode
+//   "--- Resizable / collapsible side drawer"
+//   "--- Tasks panel" ... tasks + notifications + quick-add
+//   "--- Sessions" ...... save/load/export/import conversations
+//   Voice & ambient ..... mic modes, TTS engine/voice settings, ambient avatar wiring
+//   Drag-drop upload .... uploadFile/setupDropZone
+//   init() .............. startup sequence (config fetch, restore, connect)
+//   "===== Config tab" .. full config/secrets editor, model pickers, prompt library
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input"), stopBtn = $("stop");
 const statusEl = $("jarvis-status");   // always-visible working/idle pill in the header

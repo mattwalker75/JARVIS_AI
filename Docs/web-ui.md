@@ -71,6 +71,9 @@ Type these in the message box:
 | `/persona [name\|off]` | Switch [persona](extending.md#personas) (no name lists them). |
 | `/hints [on\|off]` | Toggle skill auto-hints (no arg shows the state); persists to config. |
 | `/remember <fact>` | Save a fact to long-term memory. |
+| `/guide [topic]` | JARVIS reads its self-help guides (`/LLM_READ_ONLY_FILES/JARVIS_Guides/`) and walks you through the topic (no topic lists them). |
+| `/ro [request]` | Run the request against the **read-only** shared folder's files (no request lists them). |
+| `/rw [request]` | Run the request against the **read-write** shared folder's files (no request lists them). |
 | `/files`, `/tasks`, `/memory`, `/activity`, `/workbench` | Open that side panel. |
 
 ## Keyboard shortcuts

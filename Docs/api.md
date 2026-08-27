@@ -4,6 +4,12 @@ The app (`:8110`, localhost only) exposes a WebSocket for the live UI and a REST
 for everything else — including `POST /api/chat` for external automation. No auth
 (single-user, localhost); don't expose it to a network.
 
+Every request — REST and WebSocket alike — is validated against a **localhost
+`Host`/`Origin` allowlist**, which blocks CSRF and DNS-rebinding from websites you
+visit. Plain `curl`/scripts on the same machine pass automatically. If you front
+JARVIS with a proxy or tunnel under a different hostname, add that name to
+`security.allowed_hosts` in `JARVIS_CONFIG.json` or the app answers 403.
+
 ## WebSocket — `/ws`
 
 The browser UI's transport. Send:
@@ -79,6 +85,7 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | --- | --- |
 | `GET /api/files?dir=rw|ro` | List files in a shared folder (recursive; sizes + mtimes). |
 | `GET /api/files/raw?dir=…&path=…[&download=1]` | Open/preview or download a file (symlink-safe). |
+| `GET /view?dir=…&path=…` | Open a Markdown/text file **rendered** in a browser tab (`#anchor` scrolls to a section); other types fall through to the raw file API. |
 | `DELETE /api/files?dir=rw&path=…` | Delete a file (read-write folder only). |
 | `POST /api/upload` | Upload a file: `{name, dataUrl}` (base64). Lands in `/LLM_READ_WRITE_FILES/uploads/`. |
 
@@ -101,8 +108,10 @@ See [Autopilot & the Planner](autopilot.md).
 | --- | --- |
 | `GET /api/plan` · `DELETE /api/plan` | The active task ledger / clear it. |
 | `GET /api/autopilot` | Current Autopilot status (`active`, `paused`, `ended`, `resumable`, cycles, budget, tokens). |
+| `POST /api/autopilot/clarify` | Pre-flight: `{objective}` → the model's clarifying questions (`{ready, questions[]}`), or ready to launch as-is. |
 | `POST /api/autopilot/start` | `{objective, minutes, autonomy, verbose}`. |
 | `POST /api/autopilot/{pause,resume,wrapup,stop}` | Control an active run. |
+| `POST /api/autopilot/forcestop` | Forced stop: end the run **now**, abort the in-flight step, and kill any preview servers it started (9101–9150). |
 | `POST /api/autopilot/extend` · `.../modify` | `{minutes}` / `{objective}`. |
 | `POST /api/autopilot/{continue,dismiss}` | Resume an ended run on the same plan / clear the ended bar. |
 
@@ -112,7 +121,7 @@ See [Prompts & Context](prompts.md).
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/prompts` | List saved prompt-set names. |
+| `GET /api/prompts` | List saved prompt-set names + which one is currently **active** (content-matches the live `default_*` files). |
 | `GET · POST · DELETE /api/prompts/:name` | Read / write / delete a set's `<name>_master.prompt` + `<name>_system.prompt` (`default`/`stock` protected from delete). |
 | `POST /api/summarize` | Summarize a conversation (`{messages}`) for compaction. |
 

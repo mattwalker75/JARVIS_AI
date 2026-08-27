@@ -34,6 +34,9 @@ Each `*.json` file holds one case or an array of cases:
 | `files.json` | shared-file write/read + append_log |
 | `shell-and-code.json` | run_shell + write_workbench_file → run → verify output |
 | `internet-and-tasks.json` | fetch_url + list_tasks |
+| `vision.json` | screenshot → vision-model analysis |
+
+Full authoring guide: [`Docs/evals.md`](../../Docs/evals.md).
 
 ## Notes
 

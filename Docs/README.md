@@ -7,10 +7,10 @@ Detailed documentation for JARVIS, a personal local AI framework. Start with the
 
 | Doc | What's inside |
 | --- | --- |
-| [Architecture](architecture.md) | The four containers, how a message flows end to end, external LLM serving, volumes, ports, and the security model. |
+| [Architecture](architecture.md) | The five containers, how a message flows end to end, external LLM serving, volumes, ports, and the security model. |
 | [Configuration](configuration.md) | Complete `JARVIS_CONFIG.json` reference — every section and key, with examples for local / cloud / mixed setups. |
 | [Local models](local-llm.md) | Running models on your own machine — Ollama vs MLX compared, step-by-step setup, the gateway, and troubleshooting. |
-| [Tools](tools.md) | Every tool the model can call, grouped by family, with parameters and notes. |
+| [Tools](tools.md) | Every tool the model can call, grouped by family, with parameters and notes. **Auto-generated** from the code (`node app/scripts/gen-tools-md.js`). |
 | [Autopilot & Planner](autopilot.md) | The persistent task ledger and autonomous objective loops (pause/resume/modify/continue, autonomy modes, safeguards). |
 | [Prompts & Context](prompts.md) | The master/system prompt library (files in `Prompts/`), the built-in appended rules, and the context-window meter + Summarize & continue. |
 | [Web UI](web-ui.md) | The chat interface: plan/autopilot bars, context meter, the drawer tabs (Activity / Tasks / Memory / Files / Workbench / Config), header toggles, slash commands, drag-drop. |
@@ -19,6 +19,7 @@ Detailed documentation for JARVIS, a personal local AI framework. Start with the
 | [CLI](cli.md) | `JARVIS.sh` — every command, plus terminal/scripting usage. |
 | [API](api.md) | REST + WebSocket endpoints, including `POST /api/chat` for automation. |
 | [Extending](extending.md) | Add tools (custom + MCP), personas, models/providers, and skills — without editing core code. |
+| [Evals](evals.md) | The regression suite in `data/evals/` — running it, the case schema, and how to author new cases. |
 
 ## Conventions used in these docs
 

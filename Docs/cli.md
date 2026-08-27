@@ -46,7 +46,7 @@ In `--terminal` you can also manage saved conversations: `/sessions`, `/save [na
 
 | Command | What it does |
 | --- | --- |
-| `-e`, `--eval` | Replay `data/evals/*.json` through the live model + tool loop and report pass/fail. A regression check after changes. |
+| `-e`, `--eval` | Replay `data/evals/*.json` through the live model + tool loop and report pass/fail. A regression check after changes — see [Evals](evals.md). |
 | `--probe-context` | Measure the current model's usable context window (needle-in-a-haystack). Works for local and remote models. |
 
 ## Backup & restore
@@ -60,7 +60,12 @@ Backups are written to `backups/`. The semantic memory lives in a Docker volume 
 | `--backup-memory` | Tarball the Chroma vector store to `backups/`. |
 | `--backup-workspace` | Tarball the workbench `/LLM_WORKSPACE` to `backups/`. |
 | `--restore-memory --from <file>` | Restore memory from a backup (replaces current). |
+| `--restore-memory --fresh` | Reset to a **fresh, empty** memory (destroys all stored memories). |
 | `--restore-workspace --from <file>` | Restore `/LLM_WORKSPACE` from a backup. |
+| `--restore-workspace --fresh` | Reset `/LLM_WORKSPACE` to **empty**. |
+
+> The memory service itself is **internal-only** (no host port); these commands work
+> through `docker exec` and the Docker volume, so nothing needs to be exposed.
 
 ```bash
 ./JARVIS.sh --backup-memory

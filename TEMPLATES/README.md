@@ -8,9 +8,9 @@ and all sections included) — only the `llm` block differs between them.
 
 ```bash
 # from the repo root:
-cp TEMPLATES/JARVIS_CONFIG.single-openai.json   JARVIS_CONFIG.json
-cp TEMPLATES/JARVIS_SECRETS.empty.json          JARVIS_SECRETS.json
-# edit JARVIS_CONFIG.json -> fill in your api_key(s)
+cp TEMPLATES/JARVIS_CONFIG.single-openai.json   config/JARVIS_CONFIG.json
+cp TEMPLATES/JARVIS_SECRETS.empty.json          config/JARVIS_SECRETS.json
+# edit config/JARVIS_CONFIG.json -> fill in your api_key(s)
 ./JARVIS.sh --start        # or --reload if it's already running
 ```
 
@@ -45,28 +45,27 @@ uses them via `get_secret` and can add/update them via `set_secret`.
 - `"multi"`  → use the per-task `models` tiers (chat / cheap / vision / smart) with fallback.
 - omit it → auto-detect (multi if a `models` block is present, else single).
 
-In **multi** mode, every model name must exist in `litellm/config.yaml`, and provider
-keys (`api_key`, `anthropic_api_key`, `gemini_api_key`) are exported to the gateway by
-`JARVIS.sh` on start.
+In **multi** mode via the gateway, every model name must exist in `litellm/config.yaml`;
+provider keys (`api_key`, `anthropic_api_key`, `gemini_api_key`) are exported to the
+gateway by `JARVIS_LOCAL_LLM.sh` when it starts it.
 
 ## When is the LiteLLM gateway needed?
 
 - **Direct** configs (`single-openai`, `local-ollama`, `local-openai-compatible`) point
-  `base_url` straight at the provider — the `jarvis-litellm` container isn't required.
+  `base_url` straight at the provider — no gateway required.
 - **Gateway** configs (`openai-tiers`, `multi-model`, `anthropic-claude`) point `base_url`
-  at `http://jarvis-litellm:4000/v1` so one endpoint can route to many providers.
+  at the standalone LiteLLM gateway (`http://host.docker.internal:4000/v1`, started with
+  `./JARVIS_LOCAL_LLM.sh start --gateway`) so one endpoint can route to many providers.
 
-## ⚠️ Local / non-OpenAI setups and semantic memory
+## Semantic memory needs an embedder
 
-The semantic-memory service (**Mem0**, `jarvis-memory`) uses **OpenAI embeddings**, which
-read `llm.api_key`. So for local/Claude/Ollama configs:
-
-- Set `llm.api_key` to a (cheap) OpenAI key **just for embeddings**, and chat still runs on
-  your chosen local/Claude model — **or**
-- Edit `memory/server.py` to use a local embedder (Mem0 supports e.g. embedder provider
-  `ollama`, model `nomic-embed-text`) for a fully-local stack.
-
-Without one of these, `add_memory` / `search_memory` won't work (everything else will).
+The semantic-memory service (**Mem0**, `jarvis-memory`) embeds facts with a **separate
+embedding model**, configured under `mem0`. The templates default to a **local** embedder
+(`nomic-embed-text` via Ollama on your host — `ollama pull nomic-embed-text`;
+`./JARVIS.sh --start` prints the setup steps if it's missing). For a cloud embedder
+instead, drop `mem0.embed_base_url` and set `mem0.embed_model` to e.g.
+`text-embedding-3-small` (uses `llm.api_key`). Without a reachable embedder,
+`add_memory` / `search_memory` won't work (everything else will).
 
 ## Regenerating
 

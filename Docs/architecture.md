@@ -14,13 +14,13 @@ is a pure OpenAI-dialect client and talks to whatever URL is in `llm.base_url` (
 │ jarvis-app  (:8110)  Node.js orchestrator + static web UI         │
 │   • WebSocket chat + REST API                                     │
 │   • tool-calling loop (app/src/llm.js)                            │
-│   • 48 tools (app/src/tools.js)                                   │
+│   • 57 built-in tools (app/src/tools.js — see tools.md)           │
 │   • scheduler, sessions, chatlog                                  │
 └─┬────────────┬──────────────┬────────────────┬───────────────────┘
   │ docker exec │ http          │ http           │ OpenAI-dialect http
   ▼            ▼               ▼                ▼  (llm.base_url)
  jarvis-      jarvis-memory   jarvis-piper      LLM endpoint  (EXTERNAL)
- workbench    (:8120 Mem0)    (:5000 TTS)       • a cloud provider, OR
+ workbench    (internal Mem0) (:5000 TTS)       • a cloud provider, OR
  (:8111)      semantic mem    offline           • a local runtime started by
  root Linux   + Chroma store  neural voice        ./JARVIS_LOCAL_LLM.sh, reached
                                                   over host.docker.internal
@@ -43,11 +43,14 @@ mounting the raw `/var/run/docker.sock` — so an app compromise can't drive the
 Everything else goes over the internal Docker network. (Set `DOCKER_PROXY_HOST=""` and re-add
 the socket mount to fall back to the direct-socket behavior.)
 
-### jarvis-memory (`:8120`) — semantic memory
+### jarvis-memory (internal-only) — semantic memory
 A small FastAPI wrapper (`memory/server.py`) around [Mem0](https://github.com/mem0ai/mem0),
 storing embedded facts in a local **Chroma** vector store (`data/chroma`, a Docker
-volume). The app calls it over HTTP (`/add`, `/search`, `/all`, `/update`,
-`/delete`). See [Memory & Scheduling](memory-and-scheduling.md).
+volume). The app calls it over the internal Docker network at `http://jarvis-memory:8000`
+(`/add`, `/search`, `/all`, `/update`, `/delete`). **No host port is published** — the
+store has no auth, so exposing it would let any local process read or rewrite the
+memories; `JARVIS.sh` health-checks it via `docker exec` instead. See
+[Memory & Scheduling](memory-and-scheduling.md).
 
 ### jarvis-workbench (`:8111`) — the workspace
 An Ubuntu XFCE desktop (linuxserver **webtop**, noVNC) the LLM operates in as root.
@@ -108,7 +111,7 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 | `./config/JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
 | `./LLM_READ_ONLY_FILES` | `/LLM_READ_ONLY_FILES` (ro) | Files you share to JARVIS |
 | `./LLM_READ_WRITE_FILES` | `/LLM_READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
-| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state) |
+| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state), config/secrets backups (pruned to `backups.retain`, default 10) |
 | `./Prompts` | `/Prompts` | Active + saved master/system prompt files (see [Prompts](prompts.md)) |
 | `./Logs` | `/logs` | Debug logs (per-day, rotated by size + retention) |
 | `jarvis_memory_data` | `/data/chroma` | Vector store (Docker volume) |
@@ -127,14 +130,20 @@ them while the `/LLM_WORKSPACE` bind mount (a host folder) and the home **volume
 
 ## Security model
 
-- **Localhost only.** Every port binds to `127.0.0.1`, including the 9101–9150 preview
-  range.
-- **Root is in a container**, not on your host — but the app mounts the Docker socket
-  to drive the workbench, which is effectively host-root-equivalent. This is accepted
-  for a single-user local tool; don't expose it to a network.
+- **Localhost only.** Every published port binds to `127.0.0.1`, including the 9101–9150
+  preview range (memory and piper aren't published at all).
+- **Cross-site request guard.** The REST API and the WebSocket both validate the
+  `Host` and `Origin` headers against localhost names, so a malicious website can't
+  fire requests at `127.0.0.1:8110` (CSRF) or reach it via DNS rebinding. Fronting
+  JARVIS with a proxy/tunnel under another hostname? Add it to
+  `security.allowed_hosts` in `JARVIS_CONFIG.json`.
+- **Root is in a container**, not on your host — and the app reaches the Docker daemon
+  only through the filtered `jarvis-docker-proxy` (containers + exec), never the raw
+  socket. Still: this is a single-user local tool; don't expose it to a network.
 - **Untrusted content.** The system prompt instructs the model to treat web pages,
   files, and screenshots as data, never instructions, and never to send secrets to
   external tools.
 - **Secrets** live in `JARVIS_SECRETS.json` and are exposed to the model only via the
-  vault tools. Config write access is limited to an allowlist (see
-  [Configuration](configuration.md)); secrets keys can't be written through it.
+  vault tools; every `get_secret` read is surfaced as a 🔑 notice in the chat
+  (`secret_access_notice`, default on). Config write access is limited to an allowlist
+  (see [Configuration](configuration.md)); secrets keys can't be written through it.

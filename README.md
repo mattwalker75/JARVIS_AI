@@ -20,12 +20,12 @@ bigger one for hard reasoning, a vision model for screenshots).
 
 ## The stack
 
-Four containers (`docker compose`, project `jarvis`, all bound to `127.0.0.1`):
+Five containers (`docker compose`, project `jarvis`, published ports bound to `127.0.0.1`):
 
 | Container | Role | Port |
 | --- | --- | --- |
 | `jarvis-app` | Node.js orchestrator + web UI (chat, tool-calling, voice) | 8110 |
-| `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | 8120 |
+| `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | internal |
 | `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
 | `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
 | `jarvis-docker-proxy` | Filtered Docker API (containers+exec only) the app uses to reach the workbench | internal |

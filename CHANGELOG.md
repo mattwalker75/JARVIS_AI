@@ -9,6 +9,26 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Security
+- 2026-08-26: **Cross-site request guard on the REST API.** The WS handshake was origin-checked but
+  the ~40 HTTP endpoints weren't: no-body POSTs (autopilot stop/pause, notifications clear) were
+  CSRF-able from any website, and **DNS rebinding** sidestepped CORS to read `GET /api/config/full`
+  (API key + vault). Every request now validates `Host` and `Origin` against a localhost allowlist
+  (403 otherwise); extra names for proxies/tunnels go in `security.allowed_hosts`. The WS check now
+  shares the same allowlist. (`app/server.js`)
+- 2026-08-26: **Config/secrets backups are pruned.** Every Config-tab save wrote a timestamped backup
+  to `data/` and never cleaned up — 74 key-bearing copies had accumulated. Backups are now pruned to
+  the newest N per file (`backups.retain`, default 10; 0 = unlimited); the existing pile was pruned
+  to 10+10. (`app/src/config.js`)
+- 2026-08-26: **jarvis-memory is internal-only.** The Mem0 store (no auth) was published at
+  `127.0.0.1:8120`, readable/writable by any local process. The host port is gone — the app reaches
+  it at `jarvis-memory:8000` over the compose network, and `JARVIS.sh` now health-checks it via
+  `docker exec` (`wait_mem`). Uncomment the ports mapping in `docker-compose.yml` to debug directly.
+  (`docker-compose.yml`, `JARVIS.sh`)
+- 2026-08-26: **Vault reads are surfaced in the chat.** Every `get_secret` call posts a
+  "🔑 Vault access" notice into the live conversation (in addition to the audit log), so the moment
+  a credential enters the model's context is always visible. Disable with
+  `secret_access_notice: false`. (`app/src/tools.js`)
+
 - 2026-08-04: **Security & quality hardening pass (multi-batch review).** Closed a **cross-site
   WebSocket hijack** (any website the user visited could open `ws://127.0.0.1/ws` and drive the full
   tool loop → RCE) via an Origin allowlist on `/ws`. Hardened `fetch_url` **SSRF**: IPv6/IPv4-mapped
@@ -24,6 +44,26 @@ infrastructure, security, documentation, or test-policy changes.
   mounted `:ro`; the workbench uses Docker's **default seccomp** profile (was `unconfined`).
   (`app/server.js`, `app/src/{tools,llm,scheduler,config,logger,autopilot}.js`, `docker-compose.yml`,
   `app/Dockerfile`, `app/package.json`)
+
+### Performance
+- 2026-08-26: **Screenshots are JPEG-compressed before the vision model.** The desktop look-step
+  sent ~1MB PNGs (~1.3MB as base64) into the vision prefill; captures are now re-encoded at JPEG
+  quality 82 (several times smaller) with automatic PNG fallback if the convert fails.
+  (`app/src/tools.js`)
+
+### Documentation
+- 2026-08-26: **`Docs/tools.md` is now auto-generated from the code** (`node
+  app/scripts/gen-tools-md.js`) — 57 built-in tools with exact signatures and the descriptions the
+  model sees; a new tool missing a family lands in a visible "Uncategorized" section instead of
+  silently vanishing. **Drift sweep** across the docs: five containers (not four), 57 tools (not
+  ~48), memory internal-only, the stale "app mounts the Docker socket" security bullet (it uses the
+  filtered proxy), missing API endpoints (`/api/autopilot/forcestop`, `/api/autopilot/clarify`,
+  `/view`), missing slash commands (`/guide`, `/ro`, `/rw`), 20 skills (not 18) + prompt-scoped
+  skills, `--restore-memory/--restore-workspace --fresh`, and `TEMPLATES/README.md`'s pre-refactor
+  copy paths/gateway/embedder guidance. New **`Docs/evals.md`** documents the regression suite
+  (schema, authoring, reading reports); config templates now carry the local-embedder `mem0`
+  defaults plus the new `backups` / `security` / `secret_access_notice` keys; `app/public/app.js`
+  gained a file-level section index.
 
 ### Added
 - 2026-08-04: **Survival Knowledge Base expansion + offline behavior.** Added DFW-metro and
