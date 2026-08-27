@@ -9,6 +9,32 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-08-27: **PWA install.** Web-app manifest + generated arc-reactor icons (192/512, pure-Python
+  PNG writer at `app/public/icon-*.png`) — JARVIS installs as a standalone app (own window, dock
+  icon). Deliberately no service worker (a localhost app gains nothing offline).
+  (`app/public/manifest.webmanifest`, `app/public/index.html`)
+- 2026-08-27: **Live chats auto-persist server-side.** Each chat tab debounce-syncs (per-chat
+  timers) into `data/sessions/` as a ● `live_*` session; a fresh browser pointed at the same JARVIS
+  restores all tabs automatically. Closing a tab removes its server copy. (`app/public/app.js`)
+- 2026-08-27: **Headless server smoke test** (`app/test/smoke-server.test.js`, part of
+  `npm test` — 20 assertions): boots the real server with the mock provider in scratch dirs and
+  verifies the HTTP surface, PWA assets, sessions CRUD, the WebSocket chat loop, and the
+  Host/Origin cross-site guard (403s + WS handshake rejection) end-to-end — no Docker, model, or
+  browser needed.
+
+### Security
+- 2026-08-27: **Dependency chain cleaned — npm audit now reports 0 vulnerabilities** (was 10, 5
+  high): non-breaking `npm audit fix` (body-parser, deepmerge-ts/html-to-text/mailparser chain,
+  ip-address, protobufjs), `@mozilla/readability` → 0.6 (extraction regression-tested),
+  `nodemailer` → 9.x (transport API verified), and an `overrides` pin for dockerode's `uuid`.
+  Server-side chat paths now also strip unknown client message fields (e.g. the UI's `ts`) before
+  anything reaches the model API. (`app/package.json`, `app/server.js`)
+
+### Fixed
+- 2026-08-27: `--probe-context` used `llm.model` directly, which is empty in multi-model
+  configs — now resolves through `modelFor("chat")`. `data/backups/` added to `.gitignore` so
+  auto-backup tarballs can't pollute git status. Per-chat sync debounce fixed to capture the
+  changed chat id (a tab switch could drop the outgoing chat's pending sync).
 - 2026-08-26: **Closed-browser alerts (ntfy bridge).** `notifications.ntfy_url` POSTs every
   notification to an ntfy topic (phone app / self-hosted) with mapped priorities;
   `min_level` filters what leaves the machine. (`app/src/scheduler.js`)

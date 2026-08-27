@@ -7,7 +7,9 @@ tabbed side panel showing what JARVIS is doing.
 
 - **Chat tabs (parallel conversations)** — a tab strip above the messages holds multiple
   live chats: **＋** opens another, click switches (each keeps its own history), double-click
-  renames, ✕ closes. Persisted locally, so all tabs survive a refresh.
+  renames, ✕ closes. Tabs persist locally **and auto-sync to the server** (they show as
+  ● entries in Sessions ▾) — a fresh browser pointed at the same JARVIS restores them
+  automatically.
 - **Timestamps** — hover any message bubble to see when it was sent.
 - **Search** — 🔍 in the header (or **Cmd/Ctrl-F**) opens in-chat search: match count,
   ↑/↓ (or Enter / Shift-Enter) to walk matches, Esc closes.
@@ -94,6 +96,13 @@ Type these in the message box:
 | **↑** (empty input) | Recall your last message to edit. |
 | **Cmd/Ctrl-K** | Focus the message box. |
 | **Esc** | Stop the in-flight response (and silence speech). |
+
+## Install as an app (PWA)
+
+JARVIS is installable as a standalone app: in Chrome/Edge use the **install icon in the
+address bar** (or menu → *Install JARVIS*), on iOS Safari *Share → Add to Home Screen*.
+You get an own window with the arc-reactor icon in the dock — no service worker is used
+(a localhost app gains nothing from offline caching), so updates always load fresh.
 
 > After updating the app's frontend, hard-refresh the browser (Cmd-Shift-R) so it
 > reloads the JS/CSS.

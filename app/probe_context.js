@@ -4,14 +4,14 @@
 // still recalls a fact placed at the very start. Reports the effective window (which
 // is what matters: with Ollama's /v1 auto-sizing, this reflects the model's real max
 // or any server cap). Run:  ./JARVIS.sh --probe-context
-const { config } = require("./src/config");
+const { config, modelFor } = require("./src/config");
 
 const llm = config.llm || {};
 const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
 const url = base + "/chat/completions";
 const headers = { "Content-Type": "application/json" };
 if (llm.api_key && (llm.provider || "").toLowerCase() !== "ollama") headers["Authorization"] = "Bearer " + llm.api_key;
-const model = llm.model;
+const model = modelFor("chat");   // resolves tiers/object-form entries; llm.model alone is empty in multi mode
 
 const NEEDLE = "The secret passphrase is ZEBRA-ONederful-42.";
 const SENT = "The weather in the quiet valley was calm and unremarkable that long afternoon. ";

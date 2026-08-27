@@ -73,8 +73,11 @@ gate a commit or run in a script.
 
 ## Relationship to the unit tests
 
-`node app/test/run.js` (no model needed) covers the deterministic pieces — planner,
-tool-loop guardrail logic, edit tools. Evals cover what unit tests can't: whether the
-**live model, prompts, and guardrails together** still produce correct end-to-end
-behavior. Run the unit tests on every change; run evals when prompts, guardrails, or
-models change.
+`node app/test/run.js` (no model, no Docker needed) covers the deterministic pieces —
+planner, tool-loop guardrail logic, edit tools — **plus** `smoke-server.test.js`, which
+boots the real server with the `mock` provider in scratch dirs and exercises the HTTP
+surface, the WebSocket chat loop, the PWA assets, and the cross-site request guard
+end-to-end. Evals cover what those can't: whether the **live model, prompts, and
+guardrails together** still produce correct behavior. Run the unit suite on every
+change; run evals when prompts, guardrails, or models change. (`app/test/smoke.sh`
+additionally spot-checks a **running** stack after `--start`.)
