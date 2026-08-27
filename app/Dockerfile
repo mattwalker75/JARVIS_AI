@@ -4,8 +4,10 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /usr/src/app
 
-COPY package.json ./
-RUN npm install --omit=dev
+# npm ci against the committed lockfile = deterministic installs (npm install could
+# silently drift dependency versions between builds).
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY . .
 
