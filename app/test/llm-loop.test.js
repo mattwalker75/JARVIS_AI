@@ -97,6 +97,31 @@ function check(label, cond) { console.log((cond ? "  ✓ " : "  ✗ ") + label);
   check("4 repeat-guard: nudge injected", injected(/same tool call 3 times/i));
   check("4 repeat-guard: final answer accepted", /stopping/.test(reply));
 
+  // 5) model failover: the primary endpoint dies hard -> the turn continues on the
+  //    configured fallback (different endpoint, its OWN key — never the primary's).
+  reset([{ content: "Fallback answered.", finish: "stop" }], 0);
+  config.config.llm.failover = { enabled: true, model: "fb-model", base_url: "http://fallback:9999/v1", api_key: "fb-key" };
+  {
+    const prevFetch = global.fetch;
+    const seenUrls = [], seenModels = [], seenAuth = [], events = [];
+    let failFirst = true;
+    global.fetch = async (url, opts) => {
+      seenUrls.push(String(url));
+      try { seenModels.push(JSON.parse(opts.body).model); } catch (_) {}
+      seenAuth.push((opts.headers || {}).Authorization || "");
+      if (failFirst) { failFirst = false; const e = new Error("fetch failed"); e.name = "AbortError"; throw e; }   // AbortError name = no slow retry backoff
+      return prevFetch(url, opts);
+    };
+    reply = await llm.chat({ messages: [...sys, { role: "user", content: "hi" }], emit: (ev) => events.push(ev) });
+    check("5 failover: switched to the fallback model", seenModels.includes("fb-model"));
+    check("5 failover: fallback endpoint used", seenUrls.some((u) => u.startsWith("http://fallback:9999/v1")));
+    check("5 failover: fallback key sent, primary key NOT", seenAuth[1] === "Bearer fb-key");
+    check("5 failover: UI event emitted", events.some((ev) => ev.type === "failover" && ev.to === "fb-model"));
+    check("5 failover: reply accepted", /Fallback answered/.test(reply));
+    global.fetch = prevFetch;
+    delete config.config.llm.failover;
+  }
+
   console.log(failures ? `\nLLM-LOOP: ${failures} FAILURE(S)` : "\nLLM-LOOP: ALL PASSED");
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error("LLM-LOOP CRASH:", e); process.exit(1); });

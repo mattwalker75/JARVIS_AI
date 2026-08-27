@@ -238,7 +238,7 @@ async function loop() {
       if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
       // Always stream tool activity + usage (and media previews); in VERBOSE mode also
       // stream the model's live thinking + tokens to the chat so you can watch it work.
-      const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage" || ev.type === "tool_media";
+      const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage" || ev.type === "tool_media" || ev.type === "failover";
       const think = run.verbose && (ev.type === "reasoning" || ev.type === "token");
       if (base || think) { try { broadcast(ev); } catch (_) {} }
     };

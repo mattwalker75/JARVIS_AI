@@ -142,6 +142,28 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     headers["Authorization"] = "Bearer " + llm.api_key;
   }
 
+  // Optional model FAILOVER (llm.failover): when the primary endpoint/model fails hard
+  // (endpoint down, 5xx after retries, or a stalled stream), the REST OF THIS TURN runs
+  // on the configured fallback — a different model on the same endpoint, or a whole
+  // different endpoint (e.g. a cloud model while local Ollama is down). One switch per
+  // turn; the UI is told via a "failover" event, and the next turn tries primary again.
+  const fo = llm.failover || {};
+  const failoverReady = fo.enabled === true && typeof fo.model === "string" && fo.model.trim();
+  let usingFailover = false;
+  const FAILOVER_ERR_RE = /fetch failed|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|LLM 5\d\d|LLM 429|stream idle/i;
+  const iterEndpoint = () => {
+    if (!usingFailover) return { url, headers, model: modelFor(tier) };
+    const fbase = (fo.base_url ? String(fo.base_url) : base).replace(/\/+$/, "");
+    const h = { "Content-Type": "application/json" };
+    if (fo.base_url) {
+      // Different endpoint: ONLY its own key ever goes there (never leak the primary's).
+      if (fo.api_key) h["Authorization"] = "Bearer " + fo.api_key;
+    } else if (llm.api_key && !["ollama", "local"].includes((llm.provider || "").toLowerCase())) {
+      h["Authorization"] = "Bearer " + llm.api_key;   // same endpoint: mirror the primary auth
+    }
+    return { url: fbase + "/chat/completions", headers: h, model: String(fo.model).trim() };
+  };
+
   const convo = messages.slice();
   // Per-turn VOLATILE context — the current time (for scheduling), the shared-folder
   // paths, and an optional skill hint — is prepended to the LAST USER message, NOT
@@ -223,7 +245,8 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     if (signal && signal.aborted) return "⏹ Stopped.";
     // Vision routing happens inside the look-step (analyzeImage), not here — raw images
     // are never placed in `convo`, so the tier model always drives the tool loop.
-    lastModel = modelFor(tier);
+    const ep = iterEndpoint();
+    lastModel = ep.model;
     const body = {
       model: lastModel,
       messages: oneSystemAtFront(convo),
@@ -233,12 +256,20 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
       stream_options: { include_usage: true },
     };
     let activePrompt; if (i === 0) { try { activePrompt = require("./config").activePromptName(); } catch (_) {} }
-    log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}` + (i === 0 ? ` prompt=${activePrompt || "custom"}` : ""));
+    log.info("llm", `turn iter=${i} tier=${tier} model=${lastModel} msgs=${convo.length} tools=${toolset.length}` + (usingFailover ? " [failover]" : "") + (i === 0 ? ` prompt=${activePrompt || "custom"}` : ""));
     log.debug("llm", "request", { model: lastModel, tool_names: toolset.map((t) => t.function && t.function.name), messages: body.messages });
     let msg, turnUsage, finish;
     try {
-      ({ message: msg, usage: turnUsage, finish } = await streamChatCompletion(url, headers, body, emit, signal, watchdogOn));
+      ({ message: msg, usage: turnUsage, finish } = await streamChatCompletion(ep.url, ep.headers, body, emit, signal, watchdogOn));
     } catch (e) {
+      // Hard endpoint failure → switch to the configured fallback and redo THIS
+      // iteration (once per turn). A user Stop is never treated as a failure.
+      if (failoverReady && !usingFailover && !(signal && signal.aborted) && FAILOVER_ERR_RE.test(e.message || "")) {
+        usingFailover = true;
+        log.warn("llm", `primary model failed (${(e.message || "").slice(0, 150)}) — failing over to ${fo.model}${fo.base_url ? " @ " + fo.base_url : ""}`);
+        if (emit) emit({ type: "failover", from: modelFor(tier), to: String(fo.model).trim(), reason: (e.message || "").slice(0, 160) });
+        i--; continue;
+      }
       log.error("llm", `request failed: ${e.message}`, { model: lastModel });
       throw e;
     }
