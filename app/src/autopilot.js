@@ -10,8 +10,9 @@ const planner = require("./planner");
 
 // In "guarded" autonomy we also withhold the dedicated irreversible/external tools (belt +
 // braces on top of the safe-mode instruction). run_shell can't be withheld — Autopilot needs
-// it to build/test — so guarded mode is best-effort, backed by the instruction.
-const RISKY_TOOLS = ["send_email", "delete_memory", "set_secret", "delete_secret"];
+// it to build/test — so guarded mode is best-effort, backed by the instruction. The list is
+// shared with the scheduler via ./policy.
+const { RISKY_TOOLS } = require("./policy");
 // A cycle counts as "productive" (resets the anti-thrash counter) if it calls ANY tool other
 // than these read-only / bookkeeping ones — so research (web_search/fetch/browser), serving,
 // editing, etc. all count as progress, not just file writes.
