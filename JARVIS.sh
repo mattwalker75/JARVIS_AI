@@ -24,6 +24,8 @@
 #   -r, --reload       Restart the app to re-read config files (JARVIS_CONFIG.json +
 #                      JARVIS_SECRETS.json). Memory + workbench keep running. Run this after
 #                      saving from the Config tab. (Local LLM runtimes: see ./JARVIS_LOCAL_LLM.sh.)
+#       --update       Pull the latest JARVIS from git, show what changed, rebuild only the
+#                      images whose sources changed, and restart the stack.
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
 #   -p, --prompt <text>  Run one prompt and print the answer; supports piping stdin in.
 #   -e, --eval         Replay data/evals/*.json through the model and report pass/fail.
@@ -252,6 +254,42 @@ cmd_reload() {
   ok "Configuration reloaded."
 }
 
+# Pull the latest code, rebuild only what changed, restart. App source is bind-mounted,
+# so app-code-only updates need just a restart; an image rebuild happens only when that
+# image's build inputs (app/ deps, memory/, piper/, workbench/) actually changed.
+cmd_update() {
+  local old new
+  old="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null)" || { err "Not a git repository — --update needs a git checkout."; return 1; }
+  info "UPDATE: pulling the latest JARVIS..."
+  git -C "$SCRIPT_DIR" pull --ff-only || { err "git pull failed (local changes or a diverged branch?). Resolve in git, then re-run."; return 1; }
+  new="$(git -C "$SCRIPT_DIR" rev-parse HEAD)"
+  if [[ "$old" == "$new" ]]; then ok "Already up to date."; return 0; fi
+  info "Updated — $(git -C "$SCRIPT_DIR" rev-list --count "$old".."$new") commit(s):"
+  git -C "$SCRIPT_DIR" log --oneline "$old".."$new" | sed 's/^/    /'
+  require_daemon
+  local changed to_build=""
+  changed="$(git -C "$SCRIPT_DIR" diff --name-only "$old" "$new")"
+  echo "$changed" | grep -q '^app/'       && to_build="$to_build jarvis-app"
+  echo "$changed" | grep -q '^memory/'    && to_build="$to_build jarvis-memory"
+  echo "$changed" | grep -q '^piper/'     && to_build="$to_build jarvis-piper"
+  echo "$changed" | grep -q '^workbench/' && to_build="$to_build jarvis-workbench"
+  if [[ -n "$to_build" ]]; then
+    [[ "$to_build" == *workbench* ]] && warn "workbench/ changed — that rebuild is the big one (several minutes)."
+    WORKBENCH_BASE_IMAGE="$(read_cfg workbench.base_image "")"; export WORKBENCH_BASE_IMAGE
+    [[ -z "$WORKBENCH_BASE_IMAGE" ]] && unset WORKBENCH_BASE_IMAGE
+    info "Rebuilding:$to_build"
+    # shellcheck disable=SC2086
+    dc build $to_build || { err "Rebuild failed."; return 1; }
+  else
+    info "No image-affecting changes — the app's bind-mounted source just needs a restart."
+  fi
+  info "Restarting with the new version..."
+  dc up -d || { err "Restart failed."; return 1; }
+  dc restart jarvis-app >/dev/null 2>&1 || true   # bind-mounted app code loads on restart
+  wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
+  ok "Update complete. (Hard-refresh the browser — Cmd-Shift-R — to reload the frontend.)"
+}
+
 cmd_terminal() {
   require_daemon
   container_running "$APP_CONTAINER" || { err "JARVIS app is not running. Start it: ./JARVIS.sh --start"; return 1; }
@@ -437,6 +475,7 @@ main() {
       -b|--setup)   cmd_setup  || rc=$? ;;
       -u|--start)   cmd_start  || rc=$? ;;
       -r|--reload)  cmd_reload || rc=$? ;;
+      --update)     cmd_update || rc=$? ;;
       -t|--terminal) cmd_terminal || rc=$? ;;
       -e|--eval)    cmd_eval   || rc=$? ;;
       --probe-context) cmd_probe_context || rc=$? ;;
