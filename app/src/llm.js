@@ -51,10 +51,18 @@ function parseTextToolCalls(content, knownNames) {
 }
 
 // Rough USD per 1K tokens [prompt, completion]; used only for a cost estimate in the UI.
+// Rates as of 2026-08 — refresh occasionally; a stale table only skews the on-screen
+// estimate, nothing else. Matching is FIRST substring hit in insertion order, so keep
+// specific names (gpt-5-mini) ABOVE their prefixes (gpt-5). Unknown/local models get no
+// estimate ($0), which the UI hides.
 const PRICES = {
+  "gpt-5-nano": [0.00005, 0.0004], "gpt-5-mini": [0.00025, 0.002], "gpt-5": [0.00125, 0.01],
   "gpt-4o-mini": [0.00015, 0.0006], "gpt-4o": [0.0025, 0.01],
-  "gpt-4.1-mini": [0.0004, 0.0016], "gpt-4.1": [0.002, 0.008], "gpt-4.1-nano": [0.0001, 0.0004],
-  "o4-mini": [0.0011, 0.0044], "claude": [0.003, 0.015], "gemini": [0.0005, 0.0015],
+  "gpt-4.1-mini": [0.0004, 0.0016], "gpt-4.1-nano": [0.0001, 0.0004], "gpt-4.1": [0.002, 0.008],
+  "o4-mini": [0.0011, 0.0044], "o3": [0.002, 0.008],
+  "claude-opus": [0.015, 0.075], "claude-haiku": [0.001, 0.005], "claude": [0.003, 0.015],
+  "gemini-2.5-pro": [0.00125, 0.01], "gemini": [0.0003, 0.0025],
+  "deepseek": [0.00027, 0.0011],
 };
 function estimateCost(model, u) {
   const key = Object.keys(PRICES).find((k) => (model || "").includes(k));
