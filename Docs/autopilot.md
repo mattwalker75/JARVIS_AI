@@ -72,6 +72,7 @@ While running it shows `state · cycle N · countdown · tokens ~$cost`, plus co
 
 | Control | Effect |
 | --- | --- |
+| **📜 History** | Browse what every cycle reported so far (also `GET /api/autopilot/history`). |
 | **⏸ Pause / ▶ Resume** | Stop starting new cycles (the time budget freezes) and resume later. |
 | **+15m** | Extend the time budget (also rescues a run about to stop on the budget). |
 | **Modify** | Change the objective mid-run; the next cycle re-checks its plan against it. |

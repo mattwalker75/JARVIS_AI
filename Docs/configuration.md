@@ -47,7 +47,8 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `autopilot` | Autonomy mode, default time budget, cycle cap. |
 | `ui` | Front-end behavior (stall warning delay). |
 | `logging` | Debug log level, rotation, retention. |
-| `backups` | How many config/secrets backups to keep in `data/`. |
+| `backups` | Config-backup retention + scheduled memory/workspace backups. |
+| `notifications` | External alert bridge (ntfy) for closed-browser notifications. |
 | `security` | Extra allowed `Host`/`Origin` hostnames. |
 | `secret_access_notice` | Chat notice on every `get_secret` read. |
 | `memory_auto_recall` | Inject top memory hits into every chat turn (default off). |
@@ -322,12 +323,34 @@ Read live — change `level` from the Config tab and it applies immediately. Sec
 ## `backups` (optional)
 
 ```jsonc
-"backups": { "retain": 10 }   // newest N config/secrets backups kept in data/ (0 = keep everything)
+"backups": {
+  "retain": 10,                                        // newest N config/secrets backups in data/ (0 = keep everything)
+  "auto": { "enabled": false, "every_hours": 24, "keep": 7 }   // scheduled memory + workspace backups
+}
 ```
 Before every save from the Config tab, the previous `JARVIS_CONFIG.json` /
 `JARVIS_SECRETS.json` is copied to `data/<name>.backup.<timestamp>.json`. Each config
 backup contains the live `api_key`, so the pile is pruned to the newest `retain`
 per file on every new backup.
+
+**`auto`** additionally backs up the two things `--delete` would wipe — the semantic
+**memory volume** and **`/LLM_WORKSPACE`** — on a schedule, from inside the app (tar
+streamed out of the containers into `data/backups/`, which survives `--delete`). The
+newest `keep` tarballs are kept per kind, a notification reports each run, and
+**💾 Back up now** in Config → Diagnostics (or `POST /api/backup/run`) triggers the
+same pair on demand.
+
+## `notifications` (optional)
+
+```jsonc
+"notifications": { "ntfy_url": "", "min_level": "info" }
+```
+An external bridge so alerts reach you with the browser **closed**: point `ntfy_url` at
+an [ntfy](https://ntfy.sh) topic (public ntfy.sh with a hard-to-guess topic name, or
+self-hosted) and subscribe to it in the ntfy phone app — every `notify_user` /
+scheduled-task / Autopilot notification is POSTed there with a mapped priority.
+`min_level` filters what leaves the machine (`info` = everything, `warning`, `error`).
+Empty URL = off.
 
 ## `security` (optional)
 

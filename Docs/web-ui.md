@@ -5,6 +5,14 @@ tabbed side panel showing what JARVIS is doing.
 
 ## Chat
 
+- **Chat tabs (parallel conversations)** — a tab strip above the messages holds multiple
+  live chats: **＋** opens another, click switches (each keeps its own history), double-click
+  renames, ✕ closes. Persisted locally, so all tabs survive a refresh.
+- **Timestamps** — hover any message bubble to see when it was sent.
+- **Search** — 🔍 in the header (or **Cmd/Ctrl-F**) opens in-chat search: match count,
+  ↑/↓ (or Enter / Shift-Enter) to walk matches, Esc closes.
+- **Export** — Sessions ▾ → **⬇ .md** downloads the current conversation as Markdown
+  (with timestamps); the JSON export/import for re-loading lives there too.
 - **Rich markdown** — bold/italic/code, fenced **code blocks** (with a copy button),
   lists, and **clickable links** (bare URLs the model posts become links too).
 - **Thinking panel** — for reasoning models, a collapsible 💭 panel above each answer
@@ -33,6 +41,8 @@ tabbed side panel showing what JARVIS is doing.
 
 ## Header controls
 
+- **☀️/🌙 Theme** — toggle the light / dark theme (persists).
+- **🔍 Search** — search the current conversation (Cmd/Ctrl-F).
 - **＋ New chat** — start a fresh conversation (clears the plan too).
 - **🌌 Ambient** — full-screen hands-free "orb" mode that animates as JARVIS listens/thinks/speaks; tap the orb to talk, ✕ to exit. See [Voice](voice.md#ambient-orb-mode).
 - **Model switcher** — a dropdown of available models (from the gateway/Ollama);
@@ -51,10 +61,10 @@ width, click the handle to open/close, and it stays where you set it (persisted)
 
 | Tab | Contents |
 | --- | --- |
-| **Activity** | Every tool call streams here (name, input, result, timing) so you can watch JARVIS work — including Autopilot cycle markers. |
-| **Tasks** | Active scheduled tasks (cancel with a click), a quick-add form, and notification history (clear all or dismiss one). |
-| **Memory** | Everything JARVIS remembers, with a filter box and delete buttons. |
-| **Files** | Browse, open/preview, download, and delete files in the shared folder — JARVIS's deliverables and your uploads. |
+| **Activity** | Every tool call streams here (name, input, result, timing) so you can watch JARVIS work — including Autopilot cycle markers and sub-agent (`sub▸`) calls. A **filter box** narrows by tool name, hover an entry to **copy** its output, and long `run_shell` commands stream their output **live** (pulsing left edge) while they run. |
+| **Tasks** | Active scheduled tasks — **✏️ edit in place** (prompt/label/interval/stop-condition), **⏸/▶ pause & resume**, cancel (with confirmation) — plus a quick-add form and notification history. |
+| **Memory** | Everything JARVIS remembers, with a filter box, **✏️ edit-in-place**, delete buttons, and 🧹 Consolidate. |
+| **Files** | Browse, open/preview, and download either shared folder (**Read-write / Read-only** switch); upload into the read-write folder with **⤒ Upload** (or drag-drop onto the chat); delete (read-write only). |
 | **Workbench** | The live Linux desktop (noVNC) embedded — watch it use the browser and apps. |
 | **Config** | **Every scalar setting in `JARVIS_CONFIG.json` has a structured field here**, grouped into sections — Model & LLM (endpoint, keys, tier pickers), Prompts (editor + library), Behavior, Ollama tuning, Assistant & Voice, Memory (Mem0/embedder), Autopilot, Workbench & shared folders (incl. the pinnable base image), Security & housekeeping, and Diagnostics — all kept in sync with the raw JSON editors (only `personas` and `mcp.servers` are raw-JSON-only). **List models** fills real dropdowns grouped by tier (see [Configuration](configuration.md#tier-grouping-in-the-config-pickers)); **Model mode** reveals the single-model input or the tier grid. **Saving applies live** — no restart for ordinary settings. MLX models are managed from the CLI (`mlx-serve` — discovery-based, see [MLX backend](cli.md#mlx-backend-apple-silicon)), then appear in **List models** like any other endpoint. See [Configuration](configuration.md) and [Prompts](prompts.md). |
 

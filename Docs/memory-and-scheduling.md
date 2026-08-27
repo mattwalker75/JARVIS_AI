@@ -94,7 +94,9 @@ A task chooses its output:
 - `append_log`/`write_file` to `/LLM_READ_WRITE_FILES` — a persistent file.
 
 Notifications appear in-app (🔔), as a browser notification, spoken (if audio is on),
-and as a desktop toast on the workbench.
+and as a desktop toast on the workbench. With the **notification bridge** configured
+(`notifications.ntfy_url` — see [Configuration](configuration.md#notifications-optional)),
+they also reach your **phone/other devices with the browser closed** via an ntfy topic.
 
 ### Chat-awareness
 Scheduled tasks run stateless, but they can call `read_recent_chat({roles:["user"]})`

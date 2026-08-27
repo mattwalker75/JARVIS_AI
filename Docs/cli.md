@@ -12,6 +12,7 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | `-b`, `--setup` | Build the app / memory / workbench images. First workbench build is large (several minutes). The workbench's base image comes from `workbench.base_image` in the config (pin a digest there for reproducible rebuilds). |
 | `-u`, `--start` | Start the whole stack; prints the URLs. |
 | `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
+| `--update` | `git pull --ff-only`, show the incoming commits, **rebuild only the images whose sources changed** (app deps / memory / piper / workbench), and restart. App-code-only updates need just the restart (the source is bind-mounted). |
 | `-i`, `--status` | Show what's running + app health. |
 | `-x`, `--stop` | Stop the stack (keeps all data). |
 | `-d`, `--delete` | Remove containers, network, and the **data volumes** (semantic memory + workbench home). Bind mounts survive — including config, the shared folders, and **`LLM_WORKSPACE`** (the AI's working files persist on your Mac). If memory is online, it first **asks whether to back it up** before wiping. |

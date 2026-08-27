@@ -9,6 +9,28 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-08-26: **Closed-browser alerts (ntfy bridge).** `notifications.ntfy_url` POSTs every
+  notification to an ntfy topic (phone app / self-hosted) with mapped priorities;
+  `min_level` filters what leaves the machine. (`app/src/scheduler.js`)
+- 2026-08-26: **Automatic memory + workspace backups.** `backups.auto` tars the semantic-memory
+  volume and `/LLM_WORKSPACE` from inside the app into `data/backups/` on a schedule (default
+  daily, keep 7), with restart-safe last-run stamping, per-run notifications, and a **💾 Back up
+  now** button / `POST /api/backup/run`. (`app/src/autobackup.js`)
+- 2026-08-26: **Parallel chat tabs.** Multiple live conversations in a tab strip — ＋ opens,
+  click switches, double-click renames, ✕ closes; per-tab history persists locally (the legacy
+  single history migrates into tab 1). (`app/public/app.js`)
+- 2026-08-26: **`JARVIS.sh --update`** — pull, show incoming commits, rebuild only the images
+  whose sources changed, restart. (`JARVIS.sh`)
+- 2026-08-26: **Web-UI batch:** styled **modal system** replacing every native
+  prompt/confirm/alert; **light theme** (☀️/🌙 toggle, token-driven); in-chat **search**
+  (Cmd/Ctrl-F, match walker); **⬇ .md export** with timestamps; hover **timestamps** on
+  bubbles; Tasks panel **edit-in-place + pause/resume** (`POST /api/tasks/update`, new `paused`
+  state the tick loop skips); Memory **edit-in-place** (`PUT /api/memories/:id`); Files tab
+  **read-only folder view + ⤒ Upload**; Activity **filter box + per-entry copy** and **live
+  run_shell streaming** (700ms-throttled `tool_stream` events, pulsing live entry); Config →
+  Diagnostics **🩺 self-test panel** (green/red rows from `/api/selftest`); Autopilot **📜 cycle
+  history** (per-cycle summaries persisted with the run, `GET /api/autopilot/history`).
+  (`app/public/*`, `app/server.js`, `app/src/{scheduler,autopilot,tools}.js`, `app/public/style.css`)
 - 2026-08-26: **Six new tools** (63 built-ins now). `delegate` — hand a self-contained subtask to a
   **sub-agent** running in its own fresh context with the full toolset, returning only a final
   report (the main lever against context pressure; inherits the caller's tool exclusions so

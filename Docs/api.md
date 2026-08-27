@@ -80,7 +80,9 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/memories` | List stored memories. |
 | `POST /api/memories` | Add one: `{text}`. |
 | `DELETE /api/memories/:id` | Delete one. |
+| `PUT /api/memories/:id` | Edit one in place: `{text}` (keeps its id). |
 | `POST /api/memories/consolidate` | LLM-merge near-duplicates + resolve contradictions across the store (smart tier; unknown ids dropped, >50%-deletion plans refused). |
+| `POST /api/backup/run` | Back up the memory volume + `/LLM_WORKSPACE` to `data/backups/` now (the auto-backup engine). |
 
 ### Files
 
@@ -96,8 +98,9 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/tasks` | Active scheduled tasks. |
+| `GET /api/tasks` | Active scheduled tasks (including paused). |
 | `POST /api/tasks/add` | Schedule one: `{prompt, in_seconds?/at?/every_seconds?, until?, label?}`. |
+| `POST /api/tasks/update` | Edit in place (`{id, prompt?, label?, every_seconds?, until?, …}`) or pause/resume (`{id, paused: true\|false}`). |
 | `POST /api/tasks/cancel` | `{id}`. |
 | `GET /api/notifications` | Recent notifications. |
 | `POST /api/notifications/clear` | Clear all. |
@@ -111,6 +114,7 @@ See [Autopilot & the Planner](autopilot.md).
 | --- | --- |
 | `GET /api/plan` · `DELETE /api/plan` | The active task ledger / clear it. |
 | `GET /api/autopilot` | Current Autopilot status (`active`, `paused`, `ended`, `resumable`, cycles, budget, tokens). |
+| `GET /api/autopilot/history` | Per-cycle summaries of the current (or ended-but-undismissed) run — the bar's 📜 view. |
 | `POST /api/autopilot/clarify` | Pre-flight: `{objective}` → the model's clarifying questions (`{ready, questions[]}`), or ready to launch as-is. |
 | `POST /api/autopilot/start` | `{objective, minutes, autonomy, verbose}`. |
 | `POST /api/autopilot/{pause,resume,wrapup,stop}` | Control an active run. |
