@@ -151,6 +151,34 @@ RUN npm install -g --prefix /usr/local \
       pm2 concurrently npm-run-all \
    || true
 
+# --- Extra utilities: OCR, media/document tooling, and the DuckDB CLI ---------------
+# tesseract = exact OCR (complements the vision model, which paraphrases); exiftool =
+# media metadata; qpdf = PDF surgery (split/merge/decrypt); yt-dlp = media downloads.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tesseract-ocr libimage-exiftool-perl qpdf \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp \
+ || pip3 install --no-cache-dir yt-dlp
+
+# DuckDB CLI (the Python lib is installed above; the CLI is what run_shell one-liners
+# want, e.g. `duckdb /LLM_WORKSPACE/data.db "select ..."`). Arch-aware.
+RUN set -e; case "$(uname -m)" in aarch64|arm64) A=arm64;; *) A=amd64;; esac; \
+    curl -fsSL -o /tmp/duckdb.zip "https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-${A}.zip"; \
+    unzip -o /tmp/duckdb.zip -d /usr/local/bin; chmod +x /usr/local/bin/duckdb; rm /tmp/duckdb.zip
+
+# Speech-to-text: faster-whisper (CPU int8). The model itself (~75MB for "base")
+# downloads on first use into the workbench home volume, so it persists.
+RUN pip3 install --no-cache-dir --break-system-packages faster-whisper \
+ || pip3 install --no-cache-dir faster-whisper
+
+# Git identity so the model's commits inside the workbench work on first use; system-wide
+# (/etc/gitconfig) so it survives the /config home volume and applies to every user.
+# safe.directory '*': bind-mounted repos are often owned by another uid.
+RUN git config --system user.name "JARVIS Workbench" \
+ && git config --system user.email "jarvis@workbench.local" \
+ && git config --system init.defaultBranch main \
+ && git config --system --add safe.directory '*'
+
 # The LLM's working/build area — bind-mounted from ./LLM_WORKSPACE on the host
 # (see docker-compose.yml), so it's visible on your Mac and persists across rebuilds.
 # Set it as the container's default working directory.
@@ -160,5 +188,24 @@ WORKDIR /LLM_WORKSPACE
 # Friendly aliases for tools Ubuntu ships under different names.
 RUN ln -sf "$(command -v fdfind 2>/dev/null)" /usr/local/bin/fd 2>/dev/null || true; \
     ln -sf "$(command -v batcat 2>/dev/null)" /usr/local/bin/bat 2>/dev/null || true
+
+# --- FINAL VERIFICATION: fail the build loudly if anything critical is missing ------
+# Several install layers above use "|| ..." fallback chains (PEP-668 handling), which
+# could silently ship a degraded workbench (exactly what once broke Playwright). This
+# layer is the backstop: it checks every critical binary and Python module and FAILS
+# the build with the full list of what's missing.
+RUN set -e; missing=""; \
+    for c in python3 pip3 node npm go cargo rustc java gh uv git rg fd fzf jq sqlite3 \
+             ffmpeg convert pdftotext pandoc dot shellcheck tesseract exiftool qpdf \
+             duckdb yt-dlp tsc vite http-server pm2 yarn pnpm eslint prettier; do \
+      command -v "$c" >/dev/null 2>&1 || missing="$missing $c"; \
+    done; \
+    for m in flask fastapi django pandas numpy scipy sklearn duckdb matplotlib \
+             playwright docx openpyxl reportlab fpdf bs4 requests faster_whisper; do \
+      python3 -c "import $m" >/dev/null 2>&1 || missing="$missing py:$m"; \
+    done; \
+    ls -d /opt/ms-playwright/chromium-* >/dev/null 2>&1 || missing="$missing playwright-chromium"; \
+    if [ -n "$missing" ]; then echo "BUILD FAILED — missing critical workbench tools:$missing"; exit 1; fi; \
+    echo "OK: workbench toolchain verified"
 
 LABEL org.jarvis.role="workbench" org.jarvis.description="LLM Linux workbench: CLI toolchain + Python/Node/Go/Java/Rust runtimes + web frameworks (Flask/FastAPI/Django, TS/Vite) + browser automation + data/ML sandbox"
