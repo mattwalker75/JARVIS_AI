@@ -100,7 +100,13 @@
   },
   "_backups_note": "Config/secrets backups written to data/ before every save. retain: keep only the newest N backups per file (each CONFIG backup contains the live api_key, so don't let them pile up). 0 = keep everything.",
   "backups": {
-    "retain": 10
+    "retain": 10,
+    "_auto_note": "Scheduled automatic backups of the semantic memory volume AND /LLM_WORKSPACE, written to data/backups/ (tar streamed from the containers; survives --delete). keep: newest N tarballs per kind. Off by default.",
+    "auto": {
+      "enabled": false,
+      "every_hours": 24,
+      "keep": 7
+    }
   },
   "_security_note": "allowed_hosts: extra hostnames the app accepts in the Host/Origin headers, e.g. a Tailscale name if you front JARVIS with a proxy ([\"jarvis.tail1234.ts.net\"]). Localhost names are always allowed; everything else is rejected (blocks CSRF + DNS rebinding). secret_access_notice: post a notice into the chat whenever the model reads a vault secret with get_secret (default true).",
   "security": {
@@ -108,5 +114,10 @@
   },
   "secret_access_notice": true,
   "_memory_auto_recall_note": "When true, every chat turn silently searches long-term memory for the user's message and injects the top hits into the model's context \u2014 recall stops depending on the model choosing to call search_memory. Costs one embedding lookup per turn. Default false.",
-  "memory_auto_recall": false
+  "memory_auto_recall": false,
+  "_notifications_note": "External notification bridge so alerts reach you with the browser CLOSED. ntfy_url: an ntfy topic URL (e.g. https://ntfy.sh/your-secret-topic, or a self-hosted ntfy) \u2014 every notify_user/scheduled-task alert is POSTed there (get the ntfy phone app and subscribe to the topic). Empty = off. min_level: 'info' sends everything, 'warning' only warnings/errors, 'error' only errors.",
+  "notifications": {
+    "ntfy_url": "",
+    "min_level": "info"
+  }
 }
