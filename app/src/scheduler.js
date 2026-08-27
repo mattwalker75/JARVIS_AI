@@ -52,7 +52,7 @@ function schedule(args) {
 }
 
 function list() {
-  return state.tasks.filter((t) => t.status === "pending" || t.status === "running").map((t) => ({
+  return state.tasks.filter((t) => t.status === "pending" || t.status === "running" || t.status === "paused").map((t) => ({
     id: t.id, label: t.label, type: t.type, prompt: (t.prompt || "").slice(0, 140),
     next_run: new Date(t.run_at).toISOString(), every_seconds: t.every_seconds, until: t.until, status: t.status, runs: t.runs,
     last_run: t.last_run ? new Date(t.last_run).toISOString() : null,
@@ -81,9 +81,37 @@ function update(args) {
   // Optional re-timing of the next run; otherwise the existing schedule is kept.
   if (typeof args.in_seconds === "number") t.run_at = Date.now() + Math.max(0, args.in_seconds) * 1000;
   else if (args.at) { const tt = Date.parse(args.at); if (isNaN(tt)) throw new Error("could not parse 'at' time: " + args.at); t.run_at = tt; }
-  if (t.status !== "running") t.status = "pending"; // keep it active (don't disturb an in-flight run)
+  // Pause/resume (UI): a paused task keeps its schedule but the tick loop skips it.
+  // Resuming a task whose slot passed while paused runs it from "now", not a backlog.
+  if (typeof args.paused === "boolean" && t.status !== "running") {
+    if (args.paused) t.status = "paused";
+    else { t.status = "pending"; if (t.run_at < Date.now()) t.run_at = Date.now(); }
+  } else if (t.status !== "running" && t.status !== "paused") {
+    t.status = "pending"; // keep it active (don't disturb an in-flight run)
+  }
   save();
   return { id, updated: true, type: t.type, label: t.label, prompt: (t.prompt || "").slice(0, 140), every_seconds: t.every_seconds, until: t.until, next_run: new Date(t.run_at).toISOString() };
+}
+
+// Push a notification to the external BRIDGE (ntfy-style: plain POST, Title/Priority
+// headers) so alerts reach the user with the browser CLOSED — phones via the ntfy app,
+// or any self-hosted ntfy topic. Configured under notifications.ntfy_url; min_level
+// filters chatter ("warning" = only warnings/errors leave the machine). Fire-and-forget:
+// a dead bridge must never block or fail the in-app notification.
+const LEVEL_RANK = { info: 0, warning: 1, error: 2 };
+function pushToBridge(note) {
+  const cfg = (require("./config").config.notifications) || {};
+  const url = String(cfg.ntfy_url || "").trim();
+  if (!url || !/^https?:\/\//i.test(url)) return;
+  const min = LEVEL_RANK[cfg.min_level] ?? 0;
+  if ((LEVEL_RANK[note.level] ?? 0) < min) return;
+  const prio = note.level === "error" ? "urgent" : note.level === "warning" ? "high" : "default";
+  fetch(url, {
+    method: "POST",
+    headers: { "Title": `JARVIS${note.label ? " · " + note.label : ""}`, "Priority": prio, "Tags": "robot" },
+    body: String(note.message || "").slice(0, 4000),
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => {});
 }
 
 function pushNotification(n) {
@@ -92,6 +120,7 @@ function pushNotification(n) {
   if (state.notifications.length > 300) state.notifications = state.notifications.slice(-300);
   save();
   if (notifyCb) { try { notifyCb(note); } catch (_) {} }
+  try { pushToBridge(note); } catch (_) {}
   // Best-effort toast on the watchable workbench desktop (needs libnotify-bin).
   try {
     const safe = String(note.message || "").replace(/[\\$`"]/g, "").slice(0, 300);
