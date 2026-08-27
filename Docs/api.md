@@ -101,6 +101,7 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/tasks` | Active scheduled tasks (including paused). |
 | `POST /api/tasks/add` | Schedule one: `{prompt, in_seconds?/at?/every_seconds?, until?, label?}`. |
 | `POST /api/tasks/update` | Edit in place (`{id, prompt?, label?, every_seconds?, until?, …}`) or pause/resume (`{id, paused: true\|false}`). |
+| `GET /api/tasks/history?id=&limit=` | Recent runs (newest first) from the run-history log — the 📜 view. |
 | `POST /api/tasks/cancel` | `{id}`. |
 | `GET /api/notifications` | Recent notifications. |
 | `POST /api/notifications/clear` | Clear all. |
@@ -112,7 +113,7 @@ See [Autopilot & the Planner](autopilot.md).
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/plan` · `DELETE /api/plan` | The active task ledger / clear it. |
+| `GET /api/plan?key=` · `DELETE /api/plan?key=` | A conversation's task ledger / clear it (keys: `chat_<id>`, `autopilot`, `default`). |
 | `GET /api/autopilot` | Current Autopilot status (`active`, `paused`, `ended`, `resumable`, cycles, budget, tokens). |
 | `GET /api/autopilot/history` | Per-cycle summaries of the current (or ended-but-undismissed) run — the bar's 📜 view. |
 | `POST /api/autopilot/clarify` | Pre-flight: `{objective}` → the model's clarifying questions (`{ready, questions[]}`), or ready to launch as-is. |

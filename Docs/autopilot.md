@@ -19,8 +19,14 @@ via these tools:
 
 **Why it matters:** the active plan is re-injected at the **top of every turn**, so the
 model always knows the goal and its place and **resumes from the first incomplete step**
-after any interruption — a stall, a Stop, or even an app restart. The ledger lives in
-`/data/plan.json`, not the in-turn conversation, so it survives.
+after any interruption — a stall, a Stop, or even an app restart. Ledgers live on disk
+under `/data/plans/`, not in the in-turn conversation, so they survive.
+
+**Scoped per conversation:** each chat tab has its **own** ledger (`chat_<id>`),
+Autopilot has its own (`autopilot`), and REST/CLI callers share `default` — parallel
+chats no longer fight over one checklist, and starting an Autopilot run doesn't wipe a
+chat's plan. The banner shows the **active tab's** plan; while an Autopilot run is
+working, its plan takes precedence.
 
 Because the plan is shown every turn, the model does **not** need to call `plan_show`
 just to re-read it. The `plan_create`/`plan_update` guidance is baked into the system
@@ -32,7 +38,7 @@ as the model calls `plan_update`. Collapse or clear it from the banner. Starting
 chat** clears the plan, and starting an Autopilot run with a **new** objective clears any
 stale plan so it never inherits a previous task's checklist.
 
-API: `GET /api/plan` (current plan) · `DELETE /api/plan` (clear).
+API: `GET /api/plan?key=` (that conversation's plan) · `DELETE /api/plan?key=` (clear it).
 
 ## Autopilot
 

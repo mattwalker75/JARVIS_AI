@@ -127,6 +127,19 @@ Related: **`llm.smart_routing`** (default `true`) automatically routes judgment-
 turns to the `smart` tier — plan-mode chat turns, and Autopilot's planning + wrap-up
 cycles. A no-op when no smart tier is configured.
 
+### Context-size discipline
+
+```jsonc
+"llm": {
+  "history_token_budget": 16000,   // cap on the chat history sent per turn (~4 chars/token; 0 = 40-msg cap only)
+  "turn_compaction_chars": 60000   // once ONE turn's tool results exceed this, older results are elided (0 = off)
+}
+```
+Long tool chains and paste-heavy histories are the two ways a local model's prefill
+balloons; these keep both bounded. The UI adds **`ui.auto_compact_pct`** (default 85,
+0 = never): when the context meter reaches that %, Summarize-&-continue runs
+automatically instead of waiting for the 🗜 button.
+
 ### Tier grouping in the Config pickers
 In multi-model mode the Config tab's `chat` / `cheap` / `smart` / `vision` dropdowns are
 **grouped by capability**: models that fit the tier appear in a "★ *tier* — recommended"
@@ -306,7 +319,7 @@ See [Autopilot & the Planner](autopilot.md).
 ## `ui` (optional)
 
 ```jsonc
-"ui": { "stall_seconds": 25 }   // how long with no streamed progress before the "model is slow" warning
+"ui": { "stall_seconds": 25, "auto_compact_pct": 85 }   // stall warning delay · auto-compaction threshold (0 = never)
 ```
 
 ## `logging` (optional)

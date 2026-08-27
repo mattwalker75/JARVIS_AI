@@ -9,6 +9,32 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-08-27: **Per-conversation plan ledgers.** Plans are now scoped by key — each chat tab
+  (`chat_<id>`), Autopilot (`autopilot`), REST/CLI (`default`) — under `data/plans/` (the legacy
+  `plan.json` migrates automatically). Parallel chats no longer fight over one checklist and an
+  Autopilot start no longer wipes a chat's plan; the banner follows the active tab, with a working
+  Autopilot run taking precedence. Keys are threaded server-side (the model never sees them);
+  `GET/DELETE /api/plan?key=`. (`app/src/planner.js`, `llm.js`, `tools.js`, `autopilot.js`,
+  `server.js`, `app/public/app.js`)
+- 2026-08-27: **Context-size discipline.** `llm.turn_compaction_chars` (default 60000): once one
+  turn's tool results pass the budget, OLDER results are elided to a short head (newest 4 stay
+  full) so 20-step tool chains stop ballooning the prefill. `llm.history_token_budget` (default
+  16000): the chat history sent per turn is token-budgeted (~4 chars/token) instead of only
+  40-message-capped. `ui.auto_compact_pct` (default 85): the UI auto-runs Summarize-&-continue
+  when the context meter crosses the threshold. (`app/src/llm.js`, `app/server.js`,
+  `app/public/app.js`)
+- 2026-08-27: **Scheduled-task run history.** Every run is appended to `data/task_runs.jsonl`
+  (capped ring); the Tasks panel gains a per-task 📜 view and `GET /api/tasks/history`.
+  (`app/src/scheduler.js`, `app/server.js`, `app/public/app.js`)
+- 2026-08-27: **Media previews in the Activity panel.** screenshot / browser_screenshot /
+  analyze_image captures now show as 📷 thumbnails (click to zoom) — you see exactly what the
+  vision model saw. Skipped above 1.5MB; Autopilot runs stream them too. (`app/src/llm.js`,
+  `app/src/autopilot.js`, `app/public/app.js`)
+
+### Security
+- 2026-08-27: **Guards on the heavy auth-less endpoints.** `/api/stt` is single-flight (409 while
+  a transcription runs — no stacking whisper jobs in the workbench); `/api/upload` enforces an
+  uploads-folder budget (default 10GB, `UPLOADS_MAX_BYTES`). (`app/server.js`)
 - 2026-08-27: **PWA install.** Web-app manifest + generated arc-reactor icons (192/512, pure-Python
   PNG writer at `app/public/icon-*.png`) — JARVIS installs as a standalone app (own window, dock
   icon). Deliberately no service worker (a localhost app gains nothing offline).

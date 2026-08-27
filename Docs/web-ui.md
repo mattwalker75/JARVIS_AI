@@ -24,7 +24,9 @@ tabbed side panel showing what JARVIS is doing.
   progress it warns the model may be slow. A third cyan **Autopilot** state shows while an
   autonomous run is working server-side (a live chat request's amber **Working** takes priority).
 - **Plan banner** — when JARVIS is working a multi-step task, a live checklist above the chat
-  shows the objective and each step's status (done ✓ / active ▸ / pending ○ / blocked ✕). A
+  shows the objective and each step's status (done ✓ / active ▸ / pending ○ / blocked ✕).
+  Plans are **per chat tab** (Autopilot has its own; its plan takes over the banner while a
+  run is working). A
   full-width **drawer handle** along its bottom edge shows/hides the steps (click, or
   Enter/Space) — purely visual, it never touches the running plan. See [Autopilot & the
   Planner](autopilot.md).
@@ -63,7 +65,7 @@ width, click the handle to open/close, and it stays where you set it (persisted)
 
 | Tab | Contents |
 | --- | --- |
-| **Activity** | Every tool call streams here (name, input, result, timing) so you can watch JARVIS work — including Autopilot cycle markers and sub-agent (`sub▸`) calls. A **filter box** narrows by tool name, hover an entry to **copy** its output, and long `run_shell` commands stream their output **live** (pulsing left edge) while they run. |
+| **Activity** | Every tool call streams here (name, input, result, timing) so you can watch JARVIS work — including Autopilot cycle markers and sub-agent (`sub▸`) calls. A **filter box** narrows by tool name, hover an entry to **copy** its output, long `run_shell` commands stream their output **live** (pulsing left edge), and screenshots/captures show as **📷 thumbnails** (click to zoom) — you see exactly what JARVIS saw. |
 | **Tasks** | Active scheduled tasks — **✏️ edit in place** (prompt/label/interval/stop-condition), **⏸/▶ pause & resume**, cancel (with confirmation) — plus a quick-add form and notification history. |
 | **Memory** | Everything JARVIS remembers, with a filter box, **✏️ edit-in-place**, delete buttons, and 🧹 Consolidate. |
 | **Files** | Browse, open/preview, and download either shared folder (**Read-write / Read-only** switch); upload into the read-write folder with **⤒ Upload** (or drag-drop onto the chat); delete (read-write only). |

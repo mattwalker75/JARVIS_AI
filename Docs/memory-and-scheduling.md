@@ -84,8 +84,10 @@ downtime into a single catch-up, and recover cleanly if the app restarts mid-run
 
 ### Managing tasks
 - In chat: *"what's scheduled?"* (`list_tasks`), *"stop the log monitor"* (`cancel_task`).
-- In the **Tasks** tab: see active tasks, cancel with a click, review notifications,
-  and **quick-add** a task without chatting.
+- In the **Tasks** tab: see active tasks, **✏️ edit**, **⏸/▶ pause & resume**, cancel,
+  browse each task's **📜 recent runs** (the run-history log keeps past results — the
+  task itself only carries the latest), review notifications, and **quick-add** a task
+  without chatting.
 
 ### Where results go
 A task chooses its output:
