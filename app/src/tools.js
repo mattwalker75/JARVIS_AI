@@ -497,17 +497,25 @@ async function webSearch(query, limit = 8) {
 
 // --- desktop control (computer use) on the watchable XFCE desktop ---
 const SCREEN_PATH = "/LLM_READ_WRITE_FILES/.jarvis_screen.png"; // mounted in both app + workbench
+const SCREEN_JPG = "/LLM_READ_WRITE_FILES/.jarvis_screen.jpg";  // downscaled copy sent to the vision model
 const px = (n) => Math.round(Number(n)) || 0;
 const shq = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 
 async function screenshot() {
+  // Capture as PNG, then re-encode to JPEG for the vision model: a desktop PNG is ~1MB
+  // (~1.3MB as base64), while a quality-82 JPEG of the same screen is several times
+  // smaller — a much shorter vision prefill with no practical loss for element-finding.
+  // The JPG is deleted up front so a failed convert can't serve a stale frame; if the
+  // convert fails the PNG is sent as before.
   const r = await runShell(
-    `import -window root ${SCREEN_PATH} 2>/dev/null || (xwd -root -silent | convert xwd:- ${SCREEN_PATH}); xdotool getdisplaygeometry`
+    `rm -f ${SCREEN_JPG}; import -window root ${SCREEN_PATH} 2>/dev/null || (xwd -root -silent | convert xwd:- ${SCREEN_PATH}); ` +
+    `convert ${SCREEN_PATH} -quality 82 ${SCREEN_JPG} 2>/dev/null; xdotool getdisplaygeometry`
   );
   const geo = (r.output || "").trim().split(/\s+/);
   try {
-    const buf = fs.readFileSync(SCREEN_PATH);
-    return { __image__: "data:image/png;base64," + buf.toString("base64"), width: Number(geo[0]) || null, height: Number(geo[1]) || null, bytes: buf.length };
+    let buf, mime = "jpeg";
+    try { buf = fs.readFileSync(SCREEN_JPG); } catch (_) { buf = fs.readFileSync(SCREEN_PATH); mime = "png"; }
+    return { __image__: `data:image/${mime};base64,` + buf.toString("base64"), width: Number(geo[0]) || null, height: Number(geo[1]) || null, bytes: buf.length };
   } catch (e) {
     return { error: "screenshot read failed: " + e.message, shell: r };
   }
@@ -1062,7 +1070,16 @@ async function _execTool(name, args, signal) {
     case "press_key": return await pressKey(args.keys);
     case "scroll": return await scrollWheel(args.direction, args.amount);
     case "list_secrets": return listSecrets();
-    case "get_secret": return getSecret(args.name);
+    case "get_secret": {
+      const s = getSecret(args.name);
+      // Visibility: surface every credential read in the live chat (not only the audit
+      // log), so the moment a secret enters the model's context is always user-visible.
+      // Disable with secret_access_notice: false in JARVIS_CONFIG.json.
+      if (config.secret_access_notice !== false) {
+        try { require("./scheduler").postToChat(`🔑 Vault access: read secret "${args.name}".`); } catch (_) {}
+      }
+      return s;
+    }
     case "schedule_task": return require("./scheduler").schedule(args);
     case "list_tasks": return require("./scheduler").list();
     case "plan_create": return require("./planner").create(args);
