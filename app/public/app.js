@@ -1317,10 +1317,15 @@ init();
 let cfgObj = {}, secretsObj = { secrets: {} };
 
 // Declarative map of structured field -> config path -> type.
+// Types: str | num | bool | csv (comma-separated text ⇄ JSON array of strings).
+// EVERY scalar config key has a field here; only the structured blocks (personas,
+// mcp.servers) stay raw-JSON-only.
 const CFG_FIELDS = [
   ["cfg-provider", "llm.provider", "str"],
   ["cfg-base-url", "llm.base_url", "str"],
   ["cfg-api-key", "llm.api_key", "str"],
+  ["cfg-anthropic-key", "llm.anthropic_api_key", "str"],
+  ["cfg-gemini-key", "llm.gemini_api_key", "str"],
   ["cfg-model-mode", "llm.model_mode", "str"],
   ["cfg-model", "llm.model", "str"],
   ["cfg-tier-chat", "llm.models.chat", "str"],
@@ -1331,7 +1336,9 @@ const CFG_FIELDS = [
   ["cfg-max-tokens", "llm.max_tokens", "num"],
   ["cfg-context-window", "llm.context_window", "num"],
   ["cfg-completion-checks", "llm.completion_checks", "num"],
+  ["cfg-max-iter", "llm.max_tool_iterations", "num"],
   ["cfg-idle-timeout", "llm.idle_timeout_ms", "num"],
+  ["cfg-first-token-timeout", "llm.first_token_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
   ["cfg-stall-seconds", "ui.stall_seconds", "num"],
   ["cfg-ollama-manage", "ollama.manage", "bool"],
@@ -1342,9 +1349,39 @@ const CFG_FIELDS = [
   ["cfg-assistant-name", "assistant_name", "str"],
   ["cfg-tts-engine", "voice.tts_engine", "str"],
   ["cfg-mic-mode", "voice.mic_mode", "str"],
+  ["cfg-wake-word", "voice.wake_word", "str"],
+  ["cfg-stop-phrase", "voice.stop_phrase", "str"],
+  ["cfg-silence-timeout", "voice.silence_timeout_seconds", "num"],
+  ["cfg-followup-seconds", "voice.followup_seconds", "num"],
+  ["cfg-ambient-style", "voice.ambient_style", "str"],
+  ["cfg-tts-voice", "voice.tts_voice", "str"],
+  ["cfg-tts-rate", "voice.tts_rate", "num"],
+  ["cfg-tts-pitch", "voice.tts_pitch", "num"],
   ["cfg-voice-enabled", "voice.enabled", "bool"],
+  ["cfg-voice-tts", "voice.tts", "bool"],
+  ["cfg-voice-stt", "voice.stt", "bool"],
   ["cfg-skills-autohint", "skills_autohint", "bool"],
+  ["cfg-mem0-url", "mem0.url", "str"],
+  ["cfg-mem0-user", "mem0.user_id", "str"],
+  ["cfg-mem0-infer", "mem0.infer", "bool"],
+  ["cfg-mem0-embed-model", "mem0.embed_model", "str"],
+  ["cfg-mem0-embed-url", "mem0.embed_base_url", "str"],
+  ["cfg-ap-autonomy", "autopilot.autonomy", "str"],
+  ["cfg-ap-minutes", "autopilot.default_minutes", "num"],
+  ["cfg-ap-cycles", "autopilot.max_cycles", "num"],
+  ["cfg-ap-maxcost", "autopilot.max_cost_usd", "num"],
+  ["cfg-wb-container", "workbench.container", "str"],
+  ["cfg-wb-desktop", "workbench.desktop_url", "str"],
+  ["cfg-wb-base-image", "workbench.base_image", "str"],
+  ["cfg-shared-ro", "shared.read_only_dir", "str"],
+  ["cfg-shared-rw", "shared.read_write_dir", "str"],
+  ["cfg-sec-hosts", "security.allowed_hosts", "csv"],
+  ["cfg-backups-retain", "backups.retain", "num"],
+  ["cfg-secret-notice", "secret_access_notice", "bool"],
+  ["cfg-custom-tools-model", "custom_tools.allow_model_authored", "bool"],
   ["cfg-log-level", "logging.level", "num"],
+  ["cfg-log-maxmb", "logging.max_mb", "num"],
+  ["cfg-log-retain", "logging.retain_days", "num"],
 ];
 
 // The model fields are real <select> dropdowns (native <datalist> was unreliable). "List models"
@@ -1451,12 +1488,19 @@ function populateStructured() {
     const v = getPath(cfgObj, path);
     if (MODEL_SELECT_IDS.includes(id)) { renderModelSelect(el, v); continue; }   // <select> needs the option to exist
     if (type === "bool") el.checked = v !== false && v != null ? !!v : (v === true);
+    else if (type === "csv") el.value = Array.isArray(v) ? v.join(", ") : "";
     else el.value = v == null ? "" : v;
   }
-  // sensible default for the two booleans when the key is absent
+  // Defaults for keys that mean ON/true when absent from the file (so an untouched
+  // config shows its EFFECTIVE state, not an unchecked box).
   if (getPath(cfgObj, "voice.enabled") === undefined) $("cfg-voice-enabled").checked = true;
+  if (getPath(cfgObj, "voice.tts") === undefined) { const e = $("cfg-voice-tts"); if (e) e.checked = true; }
+  if (getPath(cfgObj, "voice.stt") === undefined) { const e = $("cfg-voice-stt"); if (e) e.checked = true; }
   if (getPath(cfgObj, "skills_autohint") === undefined) $("cfg-skills-autohint").checked = true;
   if (getPath(cfgObj, "ollama.manage") === undefined) $("cfg-ollama-manage").checked = true;
+  if (getPath(cfgObj, "secret_access_notice") === undefined) { const e = $("cfg-secret-notice"); if (e) e.checked = true; }
+  if (getPath(cfgObj, "autopilot.autonomy") === undefined) { const e = $("cfg-ap-autonomy"); if (e) e.value = "guarded"; }
+  if (getPath(cfgObj, "voice.ambient_style") === undefined) { const e = $("cfg-ambient-style"); if (e) e.value = "face"; }
 }
 
 function collectStructured() {
@@ -1465,6 +1509,10 @@ function collectStructured() {
     let val;
     if (type === "bool") val = el.checked;
     else if (type === "num") val = el.value === "" ? undefined : Number(el.value);
+    else if (type === "csv") {
+      const items = el.value.split(",").map((s) => s.trim()).filter(Boolean);
+      val = items.length ? items : undefined;   // empty list -> drop the key
+    }
     else if (el.value === "" || el.value === MODEL_CUSTOM) val = undefined;   // sentinel/blank -> unset
     else val = el.value;
     setPath(cfgObj, path, val);

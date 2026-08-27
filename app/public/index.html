@@ -238,6 +238,10 @@
               <label>Max tokens<input id="cfg-max-tokens" type="number" min="1"></label>
             </div>
             <label>Context window <span class="cfg-badge">meter</span><input id="cfg-context-window" type="number" min="0" step="1024" placeholder="auto — from Ollama num_ctx / the model"></label>
+            <div class="cfg-grid">
+              <label>Anthropic key <span class="cfg-hint-inline">gateway only</span><input id="cfg-anthropic-key" type="password" autocomplete="off" placeholder="sk-ant-… (optional)"></label>
+              <label>Gemini key <span class="cfg-hint-inline">gateway only</span><input id="cfg-gemini-key" type="password" autocomplete="off" placeholder="optional"></label>
+            </div>
             <div class="hint">Pick a provider to fill the endpoint URL, add its API key, then <b>List models</b> to populate the pickers. Each tier groups its best-fit models on top (vision models in the vision tier, etc.) — but you can pick <b>any</b> model in any tier, or <b>✎ Custom…</b> to type your own. “Generic” points at any OpenAI-compatible URL.</div>
             <div class="hint cfg-ref">📖 <b>Use <code>MODELS.md</code> (in the project root) as a reference when selecting a model</b> — it lists which models fit the chat / cheap / smart / vision tiers. Edit it (and <code>app/public/models.json</code>) to keep the list current.</div>
           </div>
@@ -266,6 +270,8 @@
             <div class="cfg-grid">
               <label>Completion checks<input id="cfg-completion-checks" type="number" min="0" max="6" title="How many times to re-verify 'is the job really done?' before accepting a final answer (0 = off)."></label>
               <label>Idle timeout (ms)<input id="cfg-idle-timeout" type="number" min="5000" step="1000" title="Watchdog: how long with NO streamed data before a turn is treated as a stalled/dead model."></label>
+              <label>Max tool steps / turn<input id="cfg-max-iter" type="number" min="1" max="100" title="Cap on tool-calling iterations within one turn (llm.max_tool_iterations)."></label>
+              <label>First-token timeout (ms)<input id="cfg-first-token-timeout" type="number" min="10000" step="10000" title="Watchdog: separate, larger budget for the FIRST token — a slow local prefill on a big context can take minutes."></label>
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog on by default (the 🐕 toggle overrides per message)</label>
             <label>“Model is slow” warning after (seconds)<input id="cfg-stall-seconds" type="number" min="5" step="5" title="How long the working indicator waits with no progress before showing the amber 'model is slow' stall warning."></label>
@@ -290,9 +296,63 @@
             <div class="cfg-grid">
               <label>TTS engine<select id="cfg-tts-engine"><option value="browser">browser</option><option value="piper">piper</option></select></label>
               <label>Mic mode<select id="cfg-mic-mode"><option value="off">off</option><option value="wake">wake</option><option value="open">open</option></select></label>
+              <label>Wake word<input id="cfg-wake-word" autocomplete="off" placeholder="defaults to the assistant name"></label>
+              <label>Stop phrase<input id="cfg-stop-phrase" autocomplete="off" placeholder="&lt;wake word&gt; stop listening"></label>
+              <label>Silence timeout (s)<input id="cfg-silence-timeout" type="number" min="1" title="Wake mode: go back to sleep after this much silence."></label>
+              <label>Follow-up window (s)<input id="cfg-followup-seconds" type="number" min="0" title="Wake mode: reply WITHOUT the wake word for this many seconds after it stops talking (0 = off)."></label>
+              <label>Ambient avatar<select id="cfg-ambient-style"><option value="face">face</option><option value="orb">orb</option></select></label>
+              <label>TTS voice<input id="cfg-tts-voice" autocomplete="off" placeholder="auto (pick in the 🎚 popover)"></label>
+              <label>TTS speed<input id="cfg-tts-rate" type="number" min="0.5" max="2" step="0.05"></label>
+              <label>TTS pitch <span class="cfg-hint-inline">browser engine</span><input id="cfg-tts-pitch" type="number" min="0.5" max="2" step="0.05"></label>
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-voice-enabled"> Voice enabled</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-voice-tts"> Spoken replies (text-to-speech)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-voice-stt"> Speech input (microphone)</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-skills-autohint"> Skill auto-hints</label>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Memory (Mem0) <span class="cfg-badge">needs --reload</span></h5>
+            <div class="cfg-grid">
+              <label>Service URL<input id="cfg-mem0-url" autocomplete="off" placeholder="http://jarvis-memory:8000"></label>
+              <label>User id<input id="cfg-mem0-user" autocomplete="off" placeholder="default"></label>
+              <label>Embed model<input id="cfg-mem0-embed-model" autocomplete="off" placeholder="nomic-embed-text"></label>
+              <label>Embed endpoint<input id="cfg-mem0-embed-url" autocomplete="off" placeholder="http://host.docker.internal:11434/v1"></label>
+            </div>
+            <label class="cfg-check"><input type="checkbox" id="cfg-mem0-infer"> Let Mem0's own LLM extract/dedupe facts (infer — off = store directly, works with any model)</label>
+            <div class="hint">The embedder is a <b>separate</b> model from chat: local = an Ollama embed model (<code>ollama pull nomic-embed-text</code>); cloud = clear the endpoint and set e.g. <code>text-embedding-3-small</code> (uses the API key). The memory container reads this at start — run <code>./JARVIS.sh --reload</code> after changing.</div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Autopilot</h5>
+            <div class="cfg-grid">
+              <label>Autonomy<select id="cfg-ap-autonomy"><option value="guarded">guarded — no irreversible external actions</option><option value="full">full — no restrictions</option></select></label>
+              <label>Default minutes<input id="cfg-ap-minutes" type="number" min="1" max="720"></label>
+              <label>Max cycles<input id="cfg-ap-cycles" type="number" min="1" title="Safety cap on build/test iterations regardless of time."></label>
+              <label>Max cost (USD)<input id="cfg-ap-maxcost" type="number" min="0" step="0.5" title="Stop when the run's estimated cost reaches this (0 = no cost ceiling)."></label>
+            </div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Workbench &amp; shared folders <span class="cfg-badge">container-level · --setup / restart</span></h5>
+            <div class="cfg-grid">
+              <label>Container name<input id="cfg-wb-container" autocomplete="off" placeholder="jarvis-workbench"></label>
+              <label>Desktop URL<input id="cfg-wb-desktop" autocomplete="off" placeholder="http://localhost:8111"></label>
+            </div>
+            <label>Workbench base image <span class="cfg-badge">applied by --setup</span><input id="cfg-wb-base-image" autocomplete="off" placeholder="empty = lscr.io/linuxserver/webtop:ubuntu-xfce (pin a @sha256:… digest for reproducible rebuilds)"></label>
+            <div class="cfg-grid">
+              <label>Read-only dir<input id="cfg-shared-ro" autocomplete="off" placeholder="/LLM_READ_ONLY_FILES"></label>
+              <label>Read-write dir<input id="cfg-shared-rw" autocomplete="off" placeholder="/LLM_READ_WRITE_FILES"></label>
+            </div>
+            <div class="hint">These are container paths/names wired in <code>docker-compose.yml</code> — change them only together with the compose file. The base image is read by <code>./JARVIS.sh --setup</code> when (re)building the workbench.</div>
+          </div>
+
+          <div class="cfg-section">
+            <h5>Security &amp; housekeeping</h5>
+            <label>Extra allowed hosts <span class="cfg-hint-inline">comma-separated</span><input id="cfg-sec-hosts" autocomplete="off" placeholder="e.g. jarvis.tail1234.ts.net — for a proxy/tunnel; localhost is always allowed"></label>
+            <label>Config backups to keep<input id="cfg-backups-retain" type="number" min="0" title="Newest N config/secrets backups kept in data/ (each config backup contains the live API key). 0 = keep everything."></label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-secret-notice"> Post a 🔑 chat notice whenever a vault secret is read (get_secret)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-custom-tools-model"> Load model-authored custom tools from the shared folder (⚠ arbitrary code in the app container)</label>
           </div>
 
           <div class="cfg-section">
@@ -306,11 +366,16 @@
                 <option value="4">4 — verbose (full tool args + results)</option>
                 <option value="5">5 — full debug (LLM requests + responses)</option>
               </select></label>
+            <div class="cfg-grid">
+              <label>Log rotate at (MB)<input id="cfg-log-maxmb" type="number" min="1" title="Roll the day's log file to jarvis-<day>.N.log past this size."></label>
+              <label>Log retention (days)<input id="cfg-log-retain" type="number" min="1" title="Delete log files older than this."></label>
+            </div>
             <div class="hint">Level 5 logs everything to <code>JARVIS_AI/Logs/</code> for debugging (secrets redacted). This setting applies <strong>immediately on save</strong> — no <code>--reload</code> needed.</div>
           </div>
 
           <details class="cfg-section cfg-raw">
             <summary>Advanced — full JARVIS_CONFIG.json</summary>
+            <div class="hint">The complete file — the friendly fields above stay in sync with it. The few <b>structured blocks</b> without fields (<code>personas</code>, <code>mcp.servers</code>) are edited here.</div>
             <textarea id="cfg-json" class="cfg-json" spellcheck="false" autocomplete="off"></textarea>
             <div id="cfg-json-err" class="cfg-err"></div>
           </details>
