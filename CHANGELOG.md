@@ -65,6 +65,37 @@ infrastructure, security, documentation, or test-policy changes.
   defaults plus the new `backups` / `security` / `secret_access_notice` keys; `app/public/app.js`
   gained a file-level section index.
 
+### Changed
+- 2026-08-26: **Every scalar config setting now has a field in the Config tab.** New sections —
+  Memory (Mem0/embedder), Autopilot, Workbench & shared folders, Security & housekeeping — plus the
+  missing fields in the existing ones (gateway keys, max tool steps, first-token timeout, full voice
+  block, log rotation/retention, backups retain, allowed hosts, secret-access notice, model-authored
+  custom tools). A new `csv` field type maps comma-separated text ⇄ JSON string arrays
+  (`security.allowed_hosts`); only `personas` and `mcp.servers` remain raw-JSON-only.
+  (`app/public/index.html`, `app/public/app.js`)
+- 2026-08-26: **Workbench base image is configurable and pinnable** (`workbench.base_image`, applied
+  by `--setup` via a build arg): empty = the floating `ubuntu-xfce` tag; set a `@sha256:` digest for
+  reproducible rebuilds. (`workbench/Dockerfile`, `docker-compose.yml`, `JARVIS.sh`)
+- 2026-08-26: **Deterministic app-image builds** — the Dockerfile now copies `package-lock.json` and
+  uses `npm ci` instead of `npm install`. (`app/Dockerfile`)
+- 2026-08-26: **Deduped shared logic.** Prompt-set file handling (naming, read/write/delete,
+  active-set matching) moved to a single `app/src/prompts.js` used by both config.js and the
+  `/api/prompts` routes; the unattended-run `RISKY_TOOLS` list moved to `app/src/policy.js`, shared
+  by Autopilot's guarded mode and the scheduler (previously two copies).
+- 2026-08-26: **Cost table refreshed** (rates as of 2026-08: GPT-5 family, o3, per-family Claude
+  opus/sonnet/haiku, Gemini 2.5, DeepSeek), with a note that matching is first-substring-wins so
+  specific names stay above their prefixes. Unknown/local models still show no estimate.
+  (`app/src/llm.js`)
+
+### Fixed
+- 2026-08-26: **Markdown viewer branding generalized** — `/view` showed "🧭 Survival Knowledge Base"
+  chrome (Start Here / Index links + title suffix) for EVERY file; KB chrome now appears only for
+  files inside the knowledge base, everything else gets a neutral document topbar. (`app/src/mdview.js`)
+- 2026-08-26: **Test-runner default config path** pointed at a nonexistent repo-root
+  `JARVIS_CONFIG.json`; it now defaults to the tracked placeholder template (deterministic, no real
+  keys). Note: the suspected mdview stash-marker collision (review item CLEAN-5) was a false
+  positive — the file already uses NUL sentinels; no change was needed. (`app/test/run.js`)
+
 ### Added
 - 2026-08-04: **Survival Knowledge Base expansion + offline behavior.** Added DFW-metro and
   Sherman→Red River **maps** (10 USGS US Topo quads + 3 TxDOT district maps + a `COVERAGE.md`), a

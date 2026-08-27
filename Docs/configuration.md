@@ -12,6 +12,11 @@ cp config/JARVIS_CONFIG_template.json config/JARVIS_CONFIG.json
 
 Keys beginning with `_` are documentation-only and ignored by the app.
 
+The **Config tab** has a structured field for **every scalar setting** in this file
+(grouped: Model & LLM, Prompts, Behavior, Ollama, Assistant & Voice, Memory, Autopilot,
+Workbench & shared folders, Security & housekeeping, Diagnostics), kept in sync with the
+raw JSON editor; only the structured blocks (`personas`, `mcp.servers`) are raw-JSON-only.
+
 **Applying changes:** saving from the **Config tab** applies them **live** — the app re-reads
 the config on your next message, no restart needed for ordinary settings (endpoint, model, tiers,
 temperature, max_tokens, completion_checks, prompts, log level, …). A restart (`./JARVIS.sh
@@ -212,8 +217,22 @@ and `infer: true` re-enables Mem0's LLM extraction/dedup stages.
 ## `workbench` and `shared`
 
 ```jsonc
-"workbench": { "container": "jarvis-workbench", "desktop_url": "http://localhost:8111/" },
+"workbench": {
+  "container": "jarvis-workbench",
+  "desktop_url": "http://localhost:8111/",
+  "base_image": ""            // workbench build base — "" = the floating default tag
+},
 "shared":    { "read_only_dir": "/LLM_READ_ONLY_FILES", "read_write_dir": "/LLM_READ_WRITE_FILES" }
+```
+
+`base_image` makes the workbench's base **configurable and pinnable**: it's read by
+`./JARVIS.sh --setup` and passed to the image build. Empty uses the floating
+`lscr.io/linuxserver/webtop:ubuntu-xfce` tag; for **reproducible rebuilds** pin the
+digest of an image you know works:
+
+```bash
+docker inspect --format '{{index .RepoDigests 0}}' lscr.io/linuxserver/webtop:ubuntu-xfce
+# → set "base_image": "lscr.io/linuxserver/webtop@sha256:<digest>"
 ```
 
 ## `personas` (optional)

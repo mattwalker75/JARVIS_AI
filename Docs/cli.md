@@ -9,7 +9,7 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | Command | What it does |
 | --- | --- |
 | `-c`, `--check` | Verify Docker is running and the config is valid. |
-| `-b`, `--setup` | Build the app / memory / workbench images. First workbench build is large (several minutes). |
+| `-b`, `--setup` | Build the app / memory / workbench images. First workbench build is large (several minutes). The workbench's base image comes from `workbench.base_image` in the config (pin a digest there for reproducible rebuilds). |
 | `-u`, `--start` | Start the whole stack; prints the URLs. |
 | `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
 | `-i`, `--status` | Show what's running + app health. |
