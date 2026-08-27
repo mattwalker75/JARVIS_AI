@@ -50,16 +50,16 @@ const CODING_RULE =
   "To CHANGE an existing file, use edit_workbench_file (a targeted find-and-replace of an exact snippet) instead of rewriting the whole file with write_workbench_file — whole-file rewrites are slow and tend to reintroduce bugs. Use write_workbench_file only to CREATE a file or replace a small one. " +
   "To DEBUG a web app that renders wrong/blank or misbehaves at RUNTIME: serve it, then browser_goto its URL and call browser_console to read the actual JavaScript error + console output (browser_goto also reports load-time errors). Do NOT try to diagnose a runtime rendering bug by only re-reading the static HTML/JS — you cannot see a runtime error that way. " +
   "After you CREATE or EDIT code, quickly syntax-check it before moving on (e.g. run_shell `node -c file.js`, `python3 -m py_compile file.py`, `bash -n script.sh`, or just run it) — this catches typos and undefined variables you introduced, instead of shipping a silently-broken file.";
-// The ACTIVE prompt lives in editable files: /Prompts/default_master.prompt + default_system.prompt.
-// Read fresh (small files) so edits apply on the next turn without a restart; fall back to the
-// config values (then a built-in default) if a file is absent.
-const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/Prompts";
-function readPromptFile(name) { try { return fs.readFileSync(path.join(PROMPTS_DIR, name), "utf8"); } catch (_) { return null; } }
+// The ACTIVE prompt lives in editable files: /Prompts/default_master.prompt + default_system.prompt
+// (all file access via ./prompts — shared with the /api/prompts routes). Read fresh (small files)
+// so edits apply on the next turn without a restart; fall back to the config values (then a
+// built-in default) if a file is absent.
+const promptFiles = require("./prompts");
 function systemPrompt(persona) {
   const llm = config.llm || {};
-  let sp = readPromptFile("default_system.prompt");
+  let sp = promptFiles.readPart("default", "system");
   if (sp == null) sp = llm.system_prompt || "You are {assistant_name}, a helpful AI assistant.";
-  let master = readPromptFile("default_master.prompt");
+  let master = promptFiles.readPart("default", "master");
   if (master == null) master = llm.master_prompt || "";
   master = master.trim();
   const p = persona && config.personas && config.personas[persona];
@@ -70,18 +70,9 @@ function systemPrompt(persona) {
   return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
 }
 
-// Which SAVED prompt set (if any) currently equals the active default_* content — i.e. the
-// name of the prompt in use. Returns null if the active default is a custom/hand-edited one.
-// Read live (small files), so it reflects the current prompt without a restart.
-function activePromptName() {
-  const norm = (s) => String(s || "").replace(/\r\n/g, "\n").trim();
-  const dm = norm(readPromptFile("default_master.prompt")), ds = norm(readPromptFile("default_system.prompt"));
-  let names;
-  try { names = [...new Set(fs.readdirSync(PROMPTS_DIR).map((f) => (f.match(/^(.+)_(?:master|system)\.prompt$/) || [])[1]).filter(Boolean))].filter((n) => n !== "default"); }
-  catch (_) { return null; }
-  for (const n of names) { if (norm(readPromptFile(n + "_master.prompt")) === dm && norm(readPromptFile(n + "_system.prompt")) === ds) return n; }
-  return null;
-}
+// Name of the prompt set in use (null = custom/hand-edited default) — see ./prompts.
+// Re-exported here because llm.js and skills.js already import it from config.
+const activePromptName = promptFiles.activePromptName;
 
 // "single" => every task tier uses llm.model (the models block is ignored).
 // "multi"  => use the per-task tiers (with fallback). If unset, infer: multi when a

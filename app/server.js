@@ -163,42 +163,28 @@ app.post("/api/summarize", async (req, res) => {
 // Prompt library — each set is TWO editable files in /Prompts: <name>_master.prompt and
 // <name>_system.prompt. The ACTIVE prompt is the "default" set (default_master/default_system);
 // saving it applies on the next turn (config.systemPrompt reads these files live). Other names
-// are the saved library you can load or export to.
-const PROMPTS_DIR = process.env.JARVIS_PROMPTS_DIR || "/Prompts";
-function safePromptName(n) { n = String(n || "").trim(); return /^[\w.\- ]{1,80}$/.test(n) ? n : null; }
-function readPart(name, part) { try { return fs.readFileSync(path.join(PROMPTS_DIR, `${name}_${part}.prompt`), "utf8"); } catch (_) { return ""; } }
-function writeSet(name, master, system) {
-  fs.mkdirSync(PROMPTS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_master.prompt`), String(master || ""));
-  fs.writeFileSync(path.join(PROMPTS_DIR, `${name}_system.prompt`), String(system || ""));
-}
+// are the saved library you can load or export to. File logic lives in src/prompts.js
+// (shared with config.js — one implementation of set naming + active-set matching).
+const prompts = require("./src/prompts");
 app.get("/api/prompts", (_req, res) => {   // saved set NAMES + which one (if any) is currently ACTIVE
   try {
-    fs.mkdirSync(PROMPTS_DIR, { recursive: true });
-    const names = [...new Set(fs.readdirSync(PROMPTS_DIR).map((f) => (f.match(/^(.+)_(?:master|system)\.prompt$/) || [])[1]).filter(Boolean))]
-      .filter((n) => n !== "default").sort();
-    // The live prompt lives in default_*; report which saved set (if any) has identical content
-    // so the UI can show which one is active. If none matches, the active default is a custom edit.
-    const norm = (s) => String(s || "").replace(/\r\n/g, "\n").trim();
-    const dm = norm(readPart("default", "master")), ds = norm(readPart("default", "system"));
-    let active = null;
-    for (const n of names) { if (norm(readPart(n, "master")) === dm && norm(readPart(n, "system")) === ds) { active = n; break; } }
-    res.json({ dir: PROMPTS_DIR, prompts: names, active });
-  } catch (e) { res.json({ dir: PROMPTS_DIR, prompts: [], error: e.message }); }
+    fs.mkdirSync(prompts.PROMPTS_DIR, { recursive: true });
+    res.json({ dir: prompts.PROMPTS_DIR, prompts: prompts.listSetNames(), active: prompts.activePromptName() });
+  } catch (e) { res.json({ dir: prompts.PROMPTS_DIR, prompts: [], error: e.message }); }
 });
 app.get("/api/prompts/:name", (req, res) => {
-  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
-  res.json({ name: n, master: readPart(n, "master"), system: readPart(n, "system") });
+  const n = prompts.safeName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  res.json({ name: n, master: prompts.readPart(n, "master") || "", system: prompts.readPart(n, "system") || "" });
 });
 app.post("/api/prompts/:name", (req, res) => {
-  const n = safePromptName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  const n = prompts.safeName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
   const b = req.body || {};
-  try { writeSet(n, b.master, b.system); res.json({ saved: n, files: [`${n}_master.prompt`, `${n}_system.prompt`] }); }
+  try { prompts.writeSet(n, b.master, b.system); res.json({ saved: n, files: [`${n}_master.prompt`, `${n}_system.prompt`] }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete("/api/prompts/:name", (req, res) => {
-  const n = safePromptName(req.params.name); if (!n || n === "default" || n === "stock") return res.status(400).json({ error: "the active 'default' and reference 'stock' sets can't be deleted" });
-  try { for (const part of ["master", "system"]) fs.rmSync(path.join(PROMPTS_DIR, `${n}_${part}.prompt`), { force: true }); res.json({ deleted: n }); }
+  const n = prompts.safeName(req.params.name); if (!n || n === "default" || n === "stock") return res.status(400).json({ error: "the active 'default' and reference 'stock' sets can't be deleted" });
+  try { prompts.deleteSet(n); res.json({ deleted: n }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
