@@ -156,6 +156,7 @@ app.post("/api/models/probe", async (req, res) => {
 app.post("/api/summarize", async (req, res) => {
   const all = Array.isArray((req.body || {}).messages)
     ? req.body.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+        .map(({ role, content }) => ({ role, content }))   // strip UI-only fields (ts) before the LLM sees them
     : [];
   if (all.length < 2) return res.json({ summary: "" });
   const messages = [
@@ -281,7 +282,8 @@ app.post("/api/chat", async (req, res) => {
   try {
     const b = req.body || {};
     const hist = (Array.isArray(b.messages) ? b.messages : [])
-      .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string");
+      .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+      .map(({ role, content }) => ({ role, content }));   // strip any extra client fields
     if (b.message) hist.push({ role: "user", content: String(b.message) });
     if (!hist.length || hist[hist.length - 1].role !== "user") return res.status(400).json({ error: "provide 'message' (string) and/or 'messages' ending with a user turn" });
     chatlog.record("user", hist[hist.length - 1].content);
@@ -541,6 +543,7 @@ wss.on("connection", (ws) => {
 
     const all = Array.isArray(data.messages)
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+          .map(({ role, content }) => ({ role, content }))   // strip any extra client fields (e.g. ts)
       : [];
     const history = all.slice(-40);   // cap the context sent to the model (unbounded history = cost + latency)
     const messages = [{ role: "system", content: systemPrompt(data.persona) }, ...history];   // read live so prompt switches apply on the next turn (no restart)
