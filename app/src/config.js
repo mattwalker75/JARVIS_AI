@@ -179,12 +179,30 @@ function readFullConfig() {
   return out;
 }
 
+// Keep only the newest N backups per file (backups.retain in JARVIS_CONFIG.json, default
+// 10; 0 = keep everything). Every CONFIG backup carries the live api_key, so an unbounded
+// pile of them is a steadily growing pool of key copies on disk — prune on each new backup.
+function _pruneBackups(base) {
+  const raw = Number(config.backups && config.backups.retain);
+  const retain = Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 10;
+  if (retain === 0) return;   // explicitly unlimited
+  const prefix = base + ".backup.";
+  const files = fs.readdirSync(CONFIG_BACKUP_DIR)
+    .filter((f) => f.startsWith(prefix) && f.endsWith(".json"))
+    .sort();   // names embed an ISO timestamp, so lexical order == chronological order
+  for (const f of files.slice(0, Math.max(0, files.length - retain))) {
+    fs.rmSync(path.join(CONFIG_BACKUP_DIR, f), { force: true });
+  }
+}
+
 function _backup(file) {
   try {
     if (!fs.existsSync(file)) return null;
+    const base = path.basename(file, ".json");
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const dest = path.join(CONFIG_BACKUP_DIR, path.basename(file, ".json") + ".backup." + ts + ".json");
+    const dest = path.join(CONFIG_BACKUP_DIR, base + ".backup." + ts + ".json");
     fs.copyFileSync(file, dest);
+    try { _pruneBackups(base); } catch (_) {}   // pruning must never block the backup itself
     return dest;
   } catch (_) { return null; }
 }
