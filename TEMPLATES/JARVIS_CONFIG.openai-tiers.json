@@ -47,6 +47,7 @@
     "num_parallel": 1,
     "max_loaded_models": 3
   },
+  "_mlx_note": "MLX (Apple Silicon) is managed by ./JARVIS_LOCAL_LLM.sh, NOT via this file. Bring models online with `mlx-serve <model>` (each runs its own mlx_lm.server; the script DISCOVERS running servers), then `start --backend mlx --gateway`. First run: `source ./ACTIVATE.sh`. Full guide: `./JARVIS_LOCAL_LLM.sh config --backend mlx`.",
   "voice": {
     "_comment": "Voice I/O. STT is browser-native (Web Speech API; Chrome/Safari). TTS has two engines (tts_engine): 'browser' = built-in OS/Chrome voices, or 'piper' = offline NEURAL voice from the jarvis-piper container (free, fully local, machine-independent). The wake word and stop phrase derive from assistant_name (say the assistant's name to start); override with wake_word / stop_phrase. followup_seconds (Wake mode) gives you that many seconds AFTER the AI stops talking to reply without repeating the wake word \u2014 0 disables it.",
     "enabled": true,
@@ -61,9 +62,12 @@
     "tts_pitch": 1.0
   },
   "mem0": {
-    "_comment": "Semantic long-term memory (Mem0 sidecar, jarvis-memory). The LLM stores/recalls facts by meaning via add_memory/search_memory; backed by a local Chroma vector store. user_id scopes whose memories (single user = 'default').",
+    "_comment": "Semantic long-term memory (Mem0 sidecar, jarvis-memory). The LLM stores/recalls facts by meaning via add_memory/search_memory; backed by a local Chroma vector store. user_id scopes whose memories (single user = 'default'). infer=false stores facts directly (fast, works with any model). The EMBEDDER is a separate model: the defaults below use a local Ollama ('ollama pull nomic-embed-text'); for a cloud embedder drop embed_base_url and set embed_model to e.g. text-embedding-3-small (uses llm.api_key).",
     "url": "http://jarvis-memory:8000",
-    "user_id": "default"
+    "user_id": "default",
+    "infer": false,
+    "embed_model": "nomic-embed-text",
+    "embed_base_url": "http://host.docker.internal:11434/v1"
   },
   "workbench": {
     "_comment": "Linux desktop container the LLM works in as root, and which you can watch.",
@@ -92,5 +96,14 @@
     "level": 0,
     "max_mb": 50,
     "retain_days": 14
-  }
+  },
+  "_backups_note": "Config/secrets backups written to data/ before every save. retain: keep only the newest N backups per file (each CONFIG backup contains the live api_key, so don't let them pile up). 0 = keep everything.",
+  "backups": {
+    "retain": 10
+  },
+  "_security_note": "allowed_hosts: extra hostnames the app accepts in the Host/Origin headers, e.g. a Tailscale name if you front JARVIS with a proxy ([\"jarvis.tail1234.ts.net\"]). Localhost names are always allowed; everything else is rejected (blocks CSRF + DNS rebinding). secret_access_notice: post a notice into the chat whenever the model reads a vault secret with get_secret (default true).",
+  "security": {
+    "allowed_hosts": []
+  },
+  "secret_access_notice": true
 }
