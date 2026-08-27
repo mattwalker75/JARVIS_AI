@@ -9,8 +9,33 @@
 // (debounced), so concurrent mutations (the tick loop vs. tool-driven
 // schedule/cancel/notify) never clobber each other via file read-modify-write races.
 const persist = require("./persist");
+const fs = require("fs");
 
 const FILE = process.env.JARVIS_TASKS_FILE || "/data/tasks.json";
+// Run-history log: one JSON line per completed run, so PAST runs of a recurring task
+// stay browsable (the task itself only carries last_result). Append-only, pruned to the
+// newest 500 lines once the file passes ~1MB.
+const RUNS_FILE = process.env.JARVIS_TASK_RUNS_FILE || "/data/task_runs.jsonl";
+function recordRun(entry) {
+  try {
+    fs.appendFileSync(RUNS_FILE, JSON.stringify(entry) + "\n");
+    if (fs.statSync(RUNS_FILE).size > 1024 * 1024) {
+      const lines = fs.readFileSync(RUNS_FILE, "utf8").trim().split("\n").slice(-500);
+      fs.writeFileSync(RUNS_FILE, lines.join("\n") + "\n");
+    }
+  } catch (_) {}
+}
+// Newest-first history, optionally for one task id.
+function runHistory(id, limit) {
+  try {
+    const lines = fs.readFileSync(RUNS_FILE, "utf8").trim().split("\n");
+    const out = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < (Number(limit) || 20); i--) {
+      try { const e = JSON.parse(lines[i]); if (!id || e.id === id) out.push(e); } catch (_) {}
+    }
+    return out;
+  } catch (_) { return []; }
+}
 const MAX_CONCURRENT = 3; // how many scheduled tasks may run at once
 let notifyCb = null, runCb = null, chatCb = null;
 
@@ -230,7 +255,9 @@ async function runTask(task) {
   } else if (!noEffect && t.warned_ineffective) {
     t.warned_ineffective = false; // recovered
   }
-  // Report every run (even when no notification fires) so it's visible.
+  // Report every run (even when no notification fires) so it's visible, and record it
+  // in the run-history log for the Tasks panel's 📜 view.
+  recordRun({ id: t.id, label: t.label, type: t.type, at: new Date(t.last_run).toISOString(), runs: t.runs, notified, flag: noEffect ? "no-effect" : null, result: (result || "").slice(0, 800) });
   if (runCb) { try { runCb({ id: t.id, label: t.label, type: t.type, ran_at: t.last_run, runs: t.runs, result: (result || "").slice(0, 1200), notified, flag: noEffect ? "no-effect" : null }); } catch (_) {} }
   if (!isRecurring) {
     t.status = "done";
@@ -278,4 +305,4 @@ function start() {
   if (h.unref) h.unref();
 }
 
-module.exports = { schedule, update, list, cancel, pushNotification, recentNotifications, clearNotifications, dismissNotification, postToChat, setNotifyCallback, setRunCallback, setChatCallback, setUiEventCallback, emitUiEvent, start };
+module.exports = { schedule, update, list, cancel, runHistory, pushNotification, recentNotifications, clearNotifications, dismissNotification, postToChat, setNotifyCallback, setRunCallback, setChatCallback, setUiEventCallback, emitUiEvent, start };

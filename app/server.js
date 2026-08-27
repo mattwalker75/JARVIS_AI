@@ -119,6 +119,8 @@ app.post("/api/tasks/update", (req, res) => {
   try { res.json(scheduler.update(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// Recent runs (newest first) — ?id= for one task, ?limit= (default 20). The 📜 view.
+app.get("/api/tasks/history", (req, res) => res.json(scheduler.runHistory(req.query.id, req.query.limit)));
 // List models from an ARBITRARY endpoint (base_url + optional key), so the Config tab can
 // show a provider's models before you save. Tries the OpenAI-compatible /models, then the
 // Ollama /api/tags fallback.
@@ -194,8 +196,10 @@ app.delete("/api/prompts/:name", (req, res) => {
   try { prompts.deleteSet(n); res.json({ deleted: n }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get("/api/plan", (_req, res) => res.json(require("./src/planner").get() || null));
-app.delete("/api/plan", (_req, res) => res.json(require("./src/planner").clear()));
+// Plans are scoped per conversation: ?key=chat_<id> (a chat tab), "autopilot", or
+// "default" (REST/CLI). See planner.js.
+app.get("/api/plan", (req, res) => res.json(require("./src/planner").get(req.query.key) || null));
+app.delete("/api/plan", (req, res) => res.json(require("./src/planner").clear(req.query.key)));
 const autopilot = require("./src/autopilot");
 app.get("/api/autopilot", (_req, res) => res.json(autopilot.status()));
 app.get("/api/autopilot/history", (_req, res) => res.json(autopilot.history()));
@@ -287,11 +291,30 @@ app.post("/api/chat", async (req, res) => {
     if (b.message) hist.push({ role: "user", content: String(b.message) });
     if (!hist.length || hist[hist.length - 1].role !== "user") return res.status(400).json({ error: "provide 'message' (string) and/or 'messages' ending with a user turn" });
     chatlog.record("user", hist[hist.length - 1].content);
-    const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt(b.persona) }, ...hist.slice(-40)], tier: b.tier });
+    const planKey = b.chatId ? "chat_" + require("./src/planner").safeKey(b.chatId) : "default";
+    const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt(b.persona) }, ...budgetHistory(hist)], tier: b.tier, planKey });
     chatlog.record("assistant", reply);
     res.json({ reply });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// Token-budgeted history: the fixed 40-message cap ignores SIZE — a few huge pastes can
+// still blow a local model's context. Walk from the newest message, keeping messages
+// until the estimated budget (llm.history_token_budget, default 16000 tokens at ~4
+// chars/token; 0 = size-blind) is spent; the 40-message cap remains the outer bound and
+// the newest message is always kept.
+function budgetHistory(msgs) {
+  const budget = Number((config.llm || {}).history_token_budget ?? 16000);
+  if (!(budget > 0)) return msgs.slice(-40);
+  const out = [];
+  let tokens = 0;
+  for (let i = msgs.length - 1; i >= 0 && out.length < 40; i--) {
+    const t = Math.ceil(((msgs[i] && msgs[i].content) || "").length / 4);
+    if (out.length && tokens + t > budget) break;
+    tokens += t; out.unshift(msgs[i]);
+  }
+  return out;
+}
 
 // Persist an allowlisted setting (voice, model, etc.) to JARVIS_CONFIG.json.
 app.post("/api/settings", (req, res) => {
@@ -349,12 +372,15 @@ app.post("/api/tts", async (req, res) => {
 // Local speech-to-text: the browser records an utterance (push-to-talk with the
 // "local" STT engine) and POSTs it here; it's transcribed by faster-whisper in the
 // workbench (fully local — no Google speech service). Needs the workbench running.
+let sttInFlight = false;   // one whisper job at a time — a runaway client must not stack workbench jobs
 app.post("/api/stt", async (req, res) => {
+  if (sttInFlight) return res.status(409).json({ error: "a transcription is already running — try again in a moment" });
   const { dataUrl, language } = req.body || {};
   const m = /^data:(audio|video)\/[\w.+-]+;base64,(.+)$/s.exec(String(dataUrl || ""));
   if (!m) return res.status(400).json({ error: "expected a base64 audio data URL" });
   const buf = Buffer.from(m[2], "base64");
   if (buf.length > 25 * 1024 * 1024) return res.status(413).json({ error: "audio too large (25MB max)" });
+  sttInFlight = true;
   const rw = (config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES";
   const tmp = path.join(rw, `.jarvis_stt_${Date.now()}.webm`);   // dotfile: hidden from the Files tab
   try {
@@ -362,7 +388,7 @@ app.post("/api/stt", async (req, res) => {
     const r = await tools.execTool("transcribe_audio", { path: tmp, language, model_size: "base" });
     res.json({ text: (r.text || "").replace(/\[\d\d:\d\d\]\s*/g, "").trim(), language: r.language, duration_s: r.duration_s });
   } catch (e) { res.status(500).json({ error: e.message }); }
-  finally { try { fs.rmSync(tmp, { force: true }); } catch (_) {} }
+  finally { sttInFlight = false; try { fs.rmSync(tmp, { force: true }); } catch (_) {} }
 });
 
 // Available models for the header switcher. Works against BOTH backends: an
@@ -470,6 +496,13 @@ app.post("/api/upload", (req, res) => {
     const rw = (config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES";
     const dir = path.join(rw, "uploads");
     fs.mkdirSync(dir, { recursive: true });
+    // Budget the auth-less endpoint: refuse once the uploads dir holds more than the cap
+    // (default 10GB, UPLOADS_MAX_BYTES env to change) so a misbehaving client can't fill
+    // the disk. Existing files are the user's to prune from the Files tab.
+    const cap = Number(process.env.UPLOADS_MAX_BYTES) || 10 * 1024 * 1024 * 1024;
+    let used = 0;
+    try { for (const f of fs.readdirSync(dir)) { try { used += fs.statSync(path.join(dir, f)).size; } catch (_) {} } } catch (_) {}
+    if (used + buf.length > cap) return res.status(413).json({ error: `uploads folder is over its ${Math.round(cap / 1073741824)}GB budget — delete some uploads in the Files tab first` });
     fs.writeFileSync(path.join(dir, safe), buf);
     res.json({ path: "/LLM_READ_WRITE_FILES/uploads/" + safe, bytes: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -513,7 +546,7 @@ scheduler.setNotifyCallback((note) => broadcast({ type: "notification", note }))
 scheduler.setRunCallback((run) => broadcast({ type: "task_run", run }));
 scheduler.setChatCallback((message) => broadcast({ type: "chat_post", message }));
 scheduler.setUiEventCallback((type, data) => broadcast({ type, ...data }));   // tools -> UI (e.g. open the Autopilot launcher)
-require("./src/planner").setOnChange((plan) => broadcast({ type: "plan", plan }));   // live plan ledger updates
+require("./src/planner").setOnChange((plan, key) => broadcast({ type: "plan", plan, key }));   // live keyed plan-ledger updates
 autopilot.setBroadcast(broadcast);   // stream Autopilot tool-activity + status to open clients
 autopilot.restore();                 // resume an Autopilot run that was in flight before a restart
 scheduler.start();
@@ -545,7 +578,7 @@ wss.on("connection", (ws) => {
       ? data.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
           .map(({ role, content }) => ({ role, content }))   // strip any extra client fields (e.g. ts)
       : [];
-    const history = all.slice(-40);   // cap the context sent to the model (unbounded history = cost + latency)
+    const history = budgetHistory(all);   // token-budgeted cap on the context sent to the model (see budgetHistory)
     const messages = [{ role: "system", content: systemPrompt(data.persona) }, ...history];   // read live so prompt switches apply on the next turn (no restart)
     const emit = (ev) => { try { ws.send(JSON.stringify(ev)); } catch (_) {} };
 
@@ -561,9 +594,11 @@ wss.on("connection", (ws) => {
     try {
       // Smart routing (llm.smart_routing, default on): a plan-mode turn is clarify →
       // plan → execute — judgment-heavy, so it runs on the smart tier when one is
-      // configured (modelFor falls back to chat otherwise).
+      // configured (modelFor falls back to chat otherwise). planKey scopes the plan
+      // ledger to THIS chat tab (chatId comes from the UI; absent = the default slot).
       const smartRouting = !(config.llm && config.llm.smart_routing === false);
-      const reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: data.watchdog, planMode: data.planMode, tier: data.planMode && smartRouting ? "smart" : undefined });
+      const planKey = data.chatId ? "chat_" + require("./src/planner").safeKey(data.chatId) : "default";
+      const reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: data.watchdog, planMode: data.planMode, planKey, tier: data.planMode && smartRouting ? "smart" : undefined });
       chatlog.record("assistant", reply);
       emit({ type: "reply", text: reply });
     } catch (e) {
