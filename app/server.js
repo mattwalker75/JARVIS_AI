@@ -14,6 +14,40 @@ const tts = require("./src/tts");
 const mdview = require("./src/mdview");
 
 const app = express();
+
+// ---- Cross-site request guard (REST) -------------------------------------------
+// The WS handshake already rejects foreign Origins (wsOriginAllowed below), but the REST
+// API had no equivalent: a malicious website could fire no-body POSTs at 127.0.0.1:8110
+// (CSRF — CORS blocks *reading* responses, not *sending* requests), and DNS rebinding (an
+// attacker hostname that resolves to 127.0.0.1) sidesteps CORS entirely, exposing e.g.
+// GET /api/config/full (which returns the API key + the whole vault). Validate BOTH:
+//   Host   — must be a localhost name (a rebound browser keeps the attacker hostname in
+//            Host, so this kills rebinding) or an explicitly allowed extra name.
+//   Origin — when present (browsers always send it cross-site), its host must be allowed
+//            too. Absent on same-origin GETs and non-browser clients (curl/scripts) —
+//            those are vouched for by the Host check.
+// Exposing JARVIS via a proxy/tunnel under another hostname? Add it to
+// security.allowed_hosts in JARVIS_CONFIG.json, e.g. ["jarvis.tail1234.ts.net"].
+function allowedHostname(h) {
+  if (!h) return false;
+  h = String(h).toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "host.docker.internal") return true;
+  const extra = (config.security && config.security.allowed_hosts) || [];
+  return extra.some((x) => String(x).toLowerCase() === h);
+}
+app.use((req, res, next) => {
+  let hostOk = false;
+  try { hostOk = allowedHostname(new URL("http://" + (req.headers.host || "")).hostname); } catch (_) {}
+  if (!hostOk) return res.status(403).json({ error: "forbidden: unrecognized Host header (add it to security.allowed_hosts in JARVIS_CONFIG.json if this is a host you trust)" });
+  const origin = req.headers.origin;
+  if (origin) {
+    let originOk = false;
+    try { originOk = allowedHostname(new URL(origin).hostname); } catch (_) {}
+    if (!originOk) return res.status(403).json({ error: "forbidden: cross-site requests are not allowed" });
+  }
+  next();
+});
+
 app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uploads
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -417,13 +451,11 @@ const server = http.createServer(app);
 // Reject cross-origin WebSocket handshakes. WS is exempt from CORS, so without this any website
 // the user visits could open ws://127.0.0.1/ws and drive the full tool-calling loop (read/exfil
 // files, secrets, shell) — a drive-by RCE. Browsers always send Origin; non-browser clients (CLI)
-// send none and are allowed. Same-host origins (localhost/127.0.0.1/[::1], any port) are allowed.
+// send none and are allowed. Shares allowedHostname with the REST guard above, so
+// security.allowed_hosts covers both transports.
 function wsOriginAllowed(origin) {
   if (!origin) return true;                       // non-browser client (no Origin header)
-  try {
-    const h = new URL(origin).hostname.replace(/^\[|\]$/g, "");
-    return h === "localhost" || h === "127.0.0.1" || h === "::1";
-  } catch { return false; }
+  try { return allowedHostname(new URL(origin).hostname); } catch { return false; }
 }
 const wss = new WebSocketServer({
   server, path: "/ws",
