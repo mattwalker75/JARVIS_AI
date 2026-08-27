@@ -103,10 +103,10 @@ async function postChat(url, headers, body, signal, extra = {}) {
   return resp;
 }
 
-async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode, noTools }) {
+async function chat({ messages, emit, tier, excludeTools, signal, watchdog, planMode, noTools, planKey }) {
   const llm = config.llm || {};
   if ((llm.provider || "").toLowerCase() === "mock") return mockChat(messages);
-  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal, watchdog, planMode, noTools);
+  return await openaiCompatibleChat(messages, emit, tier || "chat", excludeTools, signal, watchdog, planMode, noTools, planKey);
 }
 
 // Some chat templates (notably strict Qwen3 derivatives) raise
@@ -131,7 +131,7 @@ function oneSystemAtFront(msgs) {
   return [{ role: "system", content: sys.join("\n\n") }, ...rest];
 }
 
-async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode, noTools) {
+async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode, noTools, planKey) {
   const excluded = new Set(excludeTools || []);
   const toolset = noTools ? [] : (excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs);
   const llm = config.llm || {};
@@ -165,7 +165,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     // so the model always knows the objective + where it is and resumes from the first
     // incomplete step (survives stalls/restarts — it's on disk). This is the core fix for
     // "forgets what it was working on."
-    try { const pn = require("./planner").contextNote(); if (pn) notes.push("[" + pn + "]"); } catch (_) {}
+    try { const pn = require("./planner").contextNote(planKey); if (pn) notes.push("[" + pn + "]"); } catch (_) {}
     // Opt-in per-turn memory auto-recall (memory_auto_recall: true in config): silently
     // search the semantic store for the user's message and ride the top hits along in the
     // volatile note — so recall doesn't depend on a small model REMEMBERING to call
@@ -214,8 +214,9 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
 
   // Sub-tool execution context: tools that spawn their OWN LLM loop (delegate) must
   // inherit this loop's exclusions, or an unattended run could reach a withheld tool
-  // (e.g. send_email) through a sub-agent.
-  const toolCtx = { excludeTools: excludeTools || [] };
+  // (e.g. send_email) through a sub-agent. planKey scopes the plan_* tools to THIS
+  // conversation's ledger (see planner.js).
+  const toolCtx = { excludeTools: excludeTools || [], planKey };
   // Per-tier overrides (object form under llm.models) beat the global params.
   const tierParams = paramsFor(tier);
   for (let i = 0; i <= maxIter; i++) {
@@ -264,6 +265,10 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
           // into this conversation — the tool-driving model is text-only, and vision models
           // reject a `tools` payload, so the two can't be mixed in one call.
           const { __image__, ...rest } = result;
+          // Media preview: show the actual capture in the Activity panel (the model only
+          // ever sees the vision model's text). Skipped for very large images so a huge
+          // analyze_image upload doesn't flood every connected client.
+          if (emit && __image__.length < 1500000) emit({ type: "tool_media", tool: tc.function.name, image: __image__ });
           if (emit) emit({ type: "tool", tool: "vision:look", input: { model: modelFor("vision"), question: args.question || "(general)" } });
           let visual_analysis;
           try { visual_analysis = await analyzeImage(__image__, args.question, signal); }
@@ -285,6 +290,9 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
           : { error: s && s.reason ? String(s.reason) : "tool execution failed" };
         convo.push({ role: "tool", tool_call_id: tc.id, content: clip(summarized, 12000) });
       });
+
+      // Keep the growing turn lean for the next iteration's prefill (see compactToolResults).
+      compactToolResults(convo, llm);
 
       // No-progress guard: if the model repeats the same tool calls, nudge it.
       const fp = msg.tool_calls.map((tc) => tc.function.name + ":" + (tc.function.arguments || "")).sort().join("|");
@@ -366,6 +374,33 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   }
   emitUsage();
   return "(Stopped after the maximum number of tool steps.)";
+}
+
+// Mid-turn context compaction: a turn can run 20+ tool iterations with results up to
+// 12KB each, so the conversation REsent to the model every iteration balloons — and a
+// local model pays the prefill for all of it, every step. Once the turn's total content
+// passes llm.turn_compaction_chars (default 60000 ≈ 15k tokens; 0 = off), older tool
+// results are elided to a short head — the model has already ACTED on them, and the
+// marker says how to get the full output back if it truly needs it. The newest few stay
+// full (they're what the model is reasoning about right now).
+const COMPACT_MARK = "…[compacted — earlier tool result, ";
+function compactToolResults(convo, llm) {
+  const raw = Number(llm.turn_compaction_chars);
+  const budget = Number.isFinite(raw) ? raw : 60000;
+  if (budget <= 0) return;
+  let total = 0;
+  for (const m of convo) total += typeof m.content === "string" ? m.content.length : 0;
+  if (total <= budget) return;
+  const toolIdx = [];
+  convo.forEach((m, i) => { if (m.role === "tool") toolIdx.push(i); });
+  const KEEP_FULL = 4;
+  for (let k = 0; k < toolIdx.length - KEEP_FULL && total > budget; k++) {
+    const m = convo[toolIdx[k]];
+    if (typeof m.content !== "string" || m.content.length <= 700 || m.content.includes(COMPACT_MARK)) continue;
+    const orig = m.content.length;
+    m.content = m.content.slice(0, 400) + ` ${COMPACT_MARK}${orig - 400} chars elided; re-run the tool if you genuinely need the full output]`;
+    total -= orig - m.content.length;
+  }
 }
 
 // Execute a tool, retrying read-only/idempotent ones on transient errors. `ctx` carries

@@ -1285,11 +1285,11 @@ async function _execTool(name, args, signal, ctx) {
     }
     case "schedule_task": return require("./scheduler").schedule(args);
     case "list_tasks": return require("./scheduler").list();
-    case "plan_create": return require("./planner").create(args);
-    case "plan_update": return require("./planner").updateStep(args);
-    case "plan_add_step": return require("./planner").addStep(args);
-    case "plan_show": return require("./planner").get() || { note: "no active plan" };
-    case "plan_clear": return require("./planner").clear();
+    case "plan_create": return require("./planner").create(args, ctx && ctx.planKey);
+    case "plan_update": return require("./planner").updateStep(args, ctx && ctx.planKey);
+    case "plan_add_step": return require("./planner").addStep(args, ctx && ctx.planKey);
+    case "plan_show": return require("./planner").get(ctx && ctx.planKey) || { note: "no active plan" };
+    case "plan_clear": return require("./planner").clear(ctx && ctx.planKey);
     case "update_task": return require("./scheduler").update(args);
     case "cancel_task": return require("./scheduler").cancel(args.id);
     case "notify_user": return require("./scheduler").pushNotification({ message: args.message, level: args.level });

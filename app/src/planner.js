@@ -1,19 +1,57 @@
 "use strict";
-// Persistent task ledger: the current multi-step objective + its checklist. It survives
-// turn boundaries, stalls, and app restarts (written to /data/plan.json), so JARVIS never
-// "forgets what it was working on" — the ledger is re-injected into context every turn and
-// work resumes from the first incomplete step instead of restarting. One active plan at a
-// time (single-user assistant). The model drives it through the plan_* tools.
+// Persistent task ledgers: the current multi-step objective + its checklist. A ledger
+// survives turn boundaries, stalls, and app restarts, so JARVIS never "forgets what it
+// was working on" — it is re-injected into context every turn and work resumes from the
+// first incomplete step instead of restarting.
+//
+// Ledgers are SCOPED per conversation ("plan keys"): each chat tab gets its own plan
+// (key "chat_<id>"), Autopilot gets "autopilot", and everything else (REST/CLI/tasks)
+// shares "default" — so two parallel chats doing multi-step work no longer fight over
+// one checklist, and starting an Autopilot run no longer wipes a chat's plan. Files live
+// under /data/plans/<key>.json (the legacy single /data/plan.json migrates to the
+// default key on first use). The model drives its own ledger through the plan_* tools;
+// the key is threaded invisibly by the server (the model never sees it).
+const fs = require("fs");
+const path = require("path");
 const persist = require("./persist");
-const FILE = process.env.JARVIS_PLAN_FILE || "/data/plan.json";
+
+// Legacy single-plan file (kept as the "default" key's storage when the env var is set —
+// also what the unit tests point at). New keyed plans live in PLANS_DIR.
+const LEGACY_FILE = process.env.JARVIS_PLAN_FILE || "/data/plan.json";
+const PLANS_DIR = process.env.JARVIS_PLANS_DIR || "/data/plans";
 
 let onChange = null;
 function setOnChange(cb) { onChange = cb; }
 
-function load() { return persist.readJson(FILE, null); }
-function save(plan) {
-  persist.writeJsonAtomic(FILE, plan, true);
-  if (onChange) { try { onChange(plan); } catch (_) {} }
+// Keys come from server-side code (chat ids, "autopilot"), never from the model — but
+// sanitize anyway since chat ids originate in the browser.
+function safeKey(key) {
+  const k = String(key || "default").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 48);
+  return k || "default";
+}
+function fileFor(key) {
+  key = safeKey(key);
+  if (key === "default" && process.env.JARVIS_PLAN_FILE) return LEGACY_FILE;   // test/env override
+  return path.join(PLANS_DIR, key + ".json");
+}
+// One-time migration: the pre-keyed /data/plan.json becomes the default key's plan.
+(function migrate() {
+  try {
+    if (process.env.JARVIS_PLAN_FILE) return;
+    const dest = path.join(PLANS_DIR, "default.json");
+    if (fs.existsSync(LEGACY_FILE) && !fs.existsSync(dest)) {
+      fs.mkdirSync(PLANS_DIR, { recursive: true });
+      fs.renameSync(LEGACY_FILE, dest);
+    }
+  } catch (_) {}
+})();
+
+function load(key) { return persist.readJson(fileFor(key), null); }
+function save(plan, key) {
+  key = safeKey(key);
+  if (plan === null) { try { fs.rmSync(fileFor(key), { force: true }); } catch (_) {} }
+  else persist.writeJsonAtomic(fileFor(key), plan, true);
+  if (onChange) { try { onChange(plan, key); } catch (_) {} }
   return plan;
 }
 function now() { return new Date().toISOString(); }
@@ -43,16 +81,16 @@ function findStepIdx(plan, step) {
   return -1;
 }
 
-function create({ objective, steps }) {
+function create({ objective, steps }, key) {
   if (!objective || !String(objective).trim()) throw new Error("plan_create needs an 'objective'");
   const st = normSteps(steps);
   if (!st.length) throw new Error("plan_create needs a non-empty 'steps' array of short step descriptions");
   if (st[0].status === "pending") st[0].status = "active";   // start on step 1
-  return save({ id: genId(), objective: String(objective).trim(), steps: st, status: "active", created_at: now(), updated_at: now() });
+  return save({ id: genId(), objective: String(objective).trim(), steps: st, status: "active", created_at: now(), updated_at: now() }, key);
 }
 
-function updateStep({ step, status, note }) {
-  const plan = load();
+function updateStep({ step, status, note }, key) {
+  const plan = load(key);
   if (!plan) throw new Error("no active plan — call plan_create first");
   const idx = findStepIdx(plan, step);
   if (idx < 0) throw new Error(`no step ${step} in the plan (it has ${plan.steps.length} step(s))`);
@@ -67,11 +105,11 @@ function updateStep({ step, status, note }) {
   }
   plan.status = planStatus(plan.steps);
   plan.updated_at = now();
-  return save(plan);
+  return save(plan, key);
 }
 
-function addStep({ text, after }) {
-  const plan = load();
+function addStep({ text, after }, key) {
+  const plan = load(key);
   if (!plan) throw new Error("no active plan — call plan_create first");
   if (!text || !String(text).trim()) throw new Error("plan_add_step needs 'text'");
   const id = plan.steps.reduce((m, s) => Math.max(m, s.id), 0) + 1;
@@ -80,15 +118,15 @@ function addStep({ text, after }) {
   if (at >= 0) plan.steps.splice(at + 1, 0, entry); else plan.steps.push(entry);
   plan.status = planStatus(plan.steps);
   plan.updated_at = now();
-  return save(plan);
+  return save(plan, key);
 }
 
-function clear() { save(null); return { cleared: true }; }
-function get() { return load(); }
+function clear(key) { save(null, key); return { cleared: true }; }
+function get(key) { return load(key); }
 
 // Compact ledger string injected into context each turn — the anti-"forgetting" core.
-function contextNote() {
-  const plan = load();
+function contextNote(key) {
+  const plan = load(key);
   if (!plan || plan.status !== "active") return null;
   const icon = { done: "x", active: "→", pending: " ", blocked: "!" };
   const lines = plan.steps.map((s) => ` ${s.id}. [${icon[s.status] || " "}] ${s.text}${s.note ? "  — " + s.note : ""}`);
@@ -98,4 +136,4 @@ function contextNote() {
     "Keep this ledger current: call plan_update(step, status) as you finish each step (status: done | active | blocked). Do NOT redo completed steps, and do NOT call plan_show — this plan is already shown to you every turn. When every step is done, give your final summary.";
 }
 
-module.exports = { create, updateStep, addStep, clear, get, contextNote, setOnChange };
+module.exports = { create, updateStep, addStep, clear, get, contextNote, setOnChange, safeKey };

@@ -74,7 +74,7 @@ function start({ objective, minutes, autonomy, verbose }) {
   const mode = ((autonomy || ap.autonomy || "guarded") === "full") ? "full" : "guarded";
   const maxCycles = Math.max(1, Number(ap.max_cycles) || 100);
   const maxCost = Math.max(0, Number(ap.max_cost_usd) || 0);   // 0 = no cost ceiling (time/cycles still apply)
-  try { planner.clear(); } catch (_) {}   // a NEW objective starts fresh — never inherit a stale plan from a previous task
+  try { planner.clear("autopilot"); } catch (_) {}   // a NEW objective starts fresh — never inherit a stale plan from a previous task
   run = {
     id: "ap_" + nowMs().toString(36), objective, autonomy: mode, minutes: minutesN,
     deadline: nowMs() + minutesN * 60000, maxCycles, maxCost, cycles: 0, noProgress: 0, errors: 0,
@@ -197,7 +197,7 @@ async function loop() {
     if (run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // keep run alive
     if (!run.wrapUp && (nowMs() >= run.deadline || run.cycles >= run.maxCycles || (run.maxCost && run.cost >= run.maxCost))) { run.wrapUp = true; run.budgetHit = true; run.status = "stopping"; emitStatus(); }
 
-    const before = planner.get();
+    const before = planner.get("autopilot");
     const doneBefore = before ? before.steps.filter((s) => s.status === "done").length : 0;
     const guard = guardClause(run.autonomy);
     // Cross-cycle continuity (fixes the observed "re-read the same file every cycle" loop):
@@ -236,9 +236,9 @@ async function loop() {
         if (m) run.servedPort = m[1];
       }
       if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
-      // Always stream tool activity + usage; in VERBOSE mode also stream the model's live
-      // thinking + tokens to the chat so you can watch what it's doing.
-      const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage";
+      // Always stream tool activity + usage (and media previews); in VERBOSE mode also
+      // stream the model's live thinking + tokens to the chat so you can watch it work.
+      const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage" || ev.type === "tool_media";
       const think = run.verbose && (ev.type === "reasoning" || ev.type === "token");
       if (base || think) { try { broadcast(ev); } catch (_) {} }
     };
@@ -250,7 +250,7 @@ async function loop() {
     const tier = smartRouting && (!before || run.wrapUp) ? "smart" : "chat";
     let reply = "";
     try {
-      reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: false, tier,
+      reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: false, tier, planKey: "autopilot",
         excludeTools: run.autonomy === "guarded" ? RISKY_TOOLS : [] });
     } catch (e) {
       if (run && run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // paused mid-cycle
@@ -286,7 +286,7 @@ async function loop() {
     emitStatus();
 
     // Prefer reporting genuine completion even if the budget was also reached this cycle.
-    const after = planner.get();
+    const after = planner.get("autopilot");
     if (after && after.status === "complete") return finish("done", `objective complete after ${run.cycles} cycle(s).`, reply);
     if (run.wrapUp) return finish(run.budgetHit ? "budget" : "stopped",
       run.budgetHit ? `time budget reached after ${run.cycles} cycle(s).` : `wrapped up after ${run.cycles} cycle(s).`, reply);

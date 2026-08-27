@@ -3,12 +3,19 @@
 // wrap-up, pause/resume, stop-while-paused, extend, and modify (+ cross-cycle recap and the
 // anti-thrash push). The LLM + scheduler are stubbed; the real planner drives progress.
 process.env.JARVIS_PLAN_FILE = "/tmp/_jarvis_ap_test.json";
+process.env.JARVIS_PLANS_DIR = "/tmp/_jarvis_ap_plans";           // keyed ledgers land here, not /data
 process.env.JARVIS_AUTOPILOT_FILE = "/tmp/_jarvis_ap_run.json";   // don't touch /data during tests
 const path = require("path");
 const fs = require("fs");
 const SRC = path.join(__dirname, "..", "src");
 const abs = (m) => require.resolve(path.join(SRC, m));
-const planner = require(abs("planner"));
+// Autopilot works its own keyed ledger ("autopilot") — the stubbed model drives that key.
+const plannerRaw = require(abs("planner"));
+const planner = {
+  create: (a) => plannerRaw.create(a, "autopilot"),
+  updateStep: (a) => plannerRaw.updateStep(a, "autopilot"),
+  get: () => plannerRaw.get("autopilot"),
+};
 
 let notes = [];
 require.cache[abs("scheduler")] = { id: abs("scheduler"), loaded: true, exports: { pushNotification: (n) => notes.push(n), postToChat: () => {} } };
@@ -20,7 +27,7 @@ ap.setBroadcast(() => {});
 let fails = 0;
 const check = (l, c) => { console.log((c ? "  ✓ " : "  ✗ ") + l); if (!c) fails++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const reset = () => { try { ap.dismiss(); } catch (_) {} fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true }); fs.rmSync(process.env.JARVIS_AUTOPILOT_FILE, { force: true }); notes = []; require(abs("config")).config.autopilot = {}; };
+const reset = () => { try { ap.dismiss(); } catch (_) {} try { plannerRaw.clear("autopilot"); } catch (_) {} fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true }); fs.rmSync(process.env.JARVIS_AUTOPILOT_FILE, { force: true }); notes = []; require(abs("config")).config.autopilot = {}; };
 const waitDone = async (ms = 12000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (notes.length) return notes[notes.length - 1].message; await sleep(40); } throw new Error("timeout"); };
 const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planner.create({ objective: "o", steps: ["a", "b", "c"] }); const t = setTimeout(() => res("chunk"), 400); o.signal.addEventListener("abort", () => { clearTimeout(t); const e = new Error("ab"); e.name = "AbortError"; rej(e); }); });
 
@@ -135,6 +142,7 @@ const slow = () => (o) => new Promise((res, rej) => { if (!planner.get()) planne
 
   fs.rmSync(process.env.JARVIS_AUTOPILOT_FILE, { force: true });
   fs.rmSync(process.env.JARVIS_PLAN_FILE, { force: true });
+  fs.rmSync(process.env.JARVIS_PLANS_DIR, { recursive: true, force: true });
   console.log(fails ? `\nAUTOPILOT: ${fails} FAILURE(S)` : "\nAUTOPILOT: ALL PASSED");
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error("AUTOPILOT CRASH:", e); process.exit(1); });
