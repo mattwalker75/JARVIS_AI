@@ -282,6 +282,44 @@ function stripHtml(html) {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// Readability-grade article extraction for fetch_url. The old stripHtml collapses a page
+// into whitespace soup — headings, lists, and tables all vanish, which measurably hurts
+// research quality. This runs Mozilla Readability over the page (jsdom in outside-only
+// mode: no page scripts execute) and converts the article HTML to a light Markdown-ish
+// text that PRESERVES structure. Returns null when the page has no extractable article
+// (dashboards, search results) — callers then fall back to stripHtml.
+function htmlToStructuredText(html) {
+  return String(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<h([1-6])[^>]*>/gi, (m, n) => "\n\n" + "#".repeat(+n) + " ")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "\n- ").replace(/<\/(p|div|section|article|blockquote|ul|ol|table)>/gi, "\n")
+    .replace(/<(br|hr)\s*\/?>/gi, "\n")
+    .replace(/<\/t[dh]>\s*<t[dh][^>]*>/gi, " | ").replace(/<\/tr>/gi, "\n")
+    .replace(/<a [^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (m, href, txt) => {
+      const t = txt.replace(/<[^>]+>/g, "").trim();
+      return t && t !== href ? `[${t}](${href})` : href;
+    })
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+function extractReadable(html, url) {
+  if (!html || html.length > 5 * 1024 * 1024) return null;   // don't feed jsdom a monster page
+  try {
+    const { JSDOM } = require("jsdom");
+    const { Readability } = require("@mozilla/readability");
+    const dom = new JSDOM(html, { url });                    // no runScripts → untrusted JS never executes
+    const art = new Readability(dom.window.document).parse();
+    if (!art || !art.textContent || art.textContent.trim().length < 200) return null;   // no real article here
+    const head = [art.title ? "# " + art.title.trim() : "", art.byline ? "by " + art.byline.trim() : ""].filter(Boolean).join("\n");
+    const body = htmlToStructuredText(art.content || "");
+    return (head ? head + "\n\n" : "") + body;
+  } catch (_) { return null; }
+}
 function decodeDuck(href) {
   try { const u = new URL(href, "https://duckduckgo.com"); const t = u.searchParams.get("uddg"); return t ? decodeURIComponent(t) : href; }
   catch { return href; }
@@ -458,10 +496,18 @@ async function fetchUrl(url, opts = {}) {
     return { url: current, status: resp.status, content_type: ct, note: "binary content (" + buf.length + " bytes) — re-call with save_to:'downloads/<name>' to save it to the shared folder, then use analyze_image or read_document on it" };
   }
   let text = (await readCapped(resp, FETCH_MAX_BYTES)).toString("utf8");
-  if (/html/i.test(ct)) text = stripHtml(text);
+  let extracted = null;
+  if (/html/i.test(ct) && !opts.raw) {
+    // Prefer structure-preserving article extraction (headings/lists/links survive);
+    // fall back to the flat tag-strip for pages with no extractable article.
+    const readable = extractReadable(text, current);
+    if (readable) { text = readable; extracted = "readability"; }
+    else text = stripHtml(text);
+  }
   const off = Math.max(0, Number(opts.offset) || 0);
   const slice = text.slice(off, off + 15000);
   const out = { url: current, status: resp.status, content_type: ct, content: slice };
+  if (extracted) out.extraction = "article (structure-preserving) — pass raw:true for the unprocessed page";
   if (text.length > off + 15000) out.note = `truncated: showing chars ${off}-${off + 15000} of ${text.length} — re-call with offset:${off + 15000} for more`;
   return out;
 }
@@ -657,8 +703,84 @@ async function browserCmd(op, params = {}) {
     const r = await fetch(BROWSERD_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, ...params }), signal: AbortSignal.timeout(60000) });
     return await r.json();
   };
-  try { return await call(); }
-  catch (_) { await ensureBrowserd(); return await call(); }   // daemon down → start it once
+  let out;
+  try { out = await call(); }
+  catch (_) { await ensureBrowserd(); out = await call(); }   // daemon down → start it once
+  // Self-heal a STALE daemon: after a browserd.py update, a still-running old daemon
+  // doesn't know newly added ops. Kill it by port and restart with the current script.
+  if (out && typeof out.error === "string" && /unknown op/.test(out.error)) {
+    log.warn("browser", `daemon doesn't know op '${op}' (stale version) — restarting it with the current script`);
+    await runShell("fuser -k 9251/tcp 2>/dev/null; true");
+    await tsleep(500);
+    await ensureBrowserd();
+    out = await call();
+  }
+  return out;
+}
+
+// --- audio transcription (faster-whisper in the workbench, fully local) ---
+const TRANSCRIBE_PY = `
+import sys, json
+from faster_whisper import WhisperModel
+path = sys.argv[1]
+model_size = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else "base"
+lang = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
+model = WhisperModel(model_size, device="cpu", compute_type="int8")
+segments, info = model.transcribe(path, language=lang)
+out = [{"start": round(s.start, 1), "end": round(s.end, 1), "text": s.text.strip()} for s in segments]
+print("@@JSON@@" + json.dumps({"language": info.language, "duration": round(info.duration, 1), "segments": out}))
+`;
+async function transcribeAudio(p, language, modelSize) {
+  const abs = resolveShared(p, false);
+  if (!fs.existsSync(abs)) throw new Error(`no such file: ${abs}`);
+  const size = ["tiny", "base", "small", "medium"].includes(modelSize) ? modelSize : "base";
+  const lang = language ? String(language).replace(/[^a-z-]/gi, "").slice(0, 8) : "";
+  await writeWorkbenchFile("/opt/jarvis/transcribe.py", TRANSCRIBE_PY);   // idempotent; keeps the script current
+  // Generous timeout: the first run downloads the model (~75MB for "base"), and CPU
+  // transcription runs ~real-time-ish for long recordings.
+  const r = await runShell(`python3 /opt/jarvis/transcribe.py ${shq(abs)} ${shq(size)} ${shq(lang)}`, 600, undefined);
+  const m = /@@JSON@@(\{[\s\S]*\})/.exec(r.output || "");
+  if (r.exit_code || !m) throw new Error("transcription failed: " + (r.output || "").slice(-400));
+  const d = JSON.parse(m[1]);
+  // Short clips read better as plain prose; long ones keep [mm:ss] segment timestamps.
+  const stamp = (s) => `[${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}]`;
+  const long = (d.duration || 0) > 90;
+  const text = (d.segments || []).map((s) => (long ? stamp(s.start) + " " : "") + s.text).join(long ? "\n" : " ").trim();
+  const out = { file: path.basename(abs), language: d.language, duration_s: d.duration, model: size, text: clipOutput(text, 16000, 4000) };
+  if (!text) out.note = "no speech detected";
+  return out;
+}
+
+// --- sub-agent delegation ---
+// Run ONE self-contained subtask in a FRESH tool-calling loop with its own context and
+// return only the final report. This is the main lever against context pressure: the
+// parent conversation receives a digest instead of every intermediate tool result.
+// The sub-agent inherits the caller's tool exclusions (ctx) so an unattended run can't
+// reach a withheld tool through delegation, and can't itself delegate (depth 1) or
+// touch the parent's plan ledger / UI.
+const DELEGATE_EXCLUDED = ["delegate", "open_autopilot", "post_to_chat", "plan_create", "plan_update", "plan_add_step", "plan_show", "plan_clear"];
+async function delegate(args, signal, ctx) {
+  const task = String((args && args.task) || "").trim();
+  if (!task) throw new Error("task is required — a self-contained brief for the sub-agent");
+  const tier = ["chat", "cheap", "smart"].includes(args.tier) ? args.tier : "chat";
+  const cfg = require("./config");
+  const sys = cfg.systemPrompt() +
+    "\n\n[SUB-AGENT] You are a sub-agent executing ONE delegated subtask for the main assistant. You cannot see the main conversation and cannot ask questions — make reasonable assumptions and note them. Work the task with your tools, then END with a clear, complete FINAL REPORT of your findings/results (paths of any files you created, key facts, what failed) — the report is ALL the main assistant receives.";
+  // Stream the sub-agent's tool activity to the UI with a "sub▸" prefix so delegated
+  // work is visible in the Activity panel (it doesn't touch the chat itself).
+  const sched = require("./scheduler");
+  const emit = (ev) => {
+    if (ev && (ev.type === "tool" || ev.type === "tool_result")) {
+      try { sched.emitUiEvent(ev.type, { ...ev, tool: "sub▸ " + ev.tool }); } catch (_) {}
+    }
+  };
+  const excludeTools = [...new Set([...DELEGATE_EXCLUDED, ...((ctx && ctx.excludeTools) || [])])];
+  const llm = require("./llm");
+  const report = await llm.chat({
+    messages: [{ role: "system", content: sys }, { role: "user", content: (args.context ? String(args.context) + "\n\n" : "") + task }],
+    emit, tier, signal, excludeTools,
+  });
+  return { report };
 }
 
 // --- credential vault (the user's OWN accounts) ---
@@ -705,6 +827,36 @@ async function deleteMemory(id) {
 async function updateMemory(id, text) {
   if (!id || !text) throw new Error("id and text are both required");
   return await mem0Fetch("/update", { method: "POST", body: { memory_id: id, text } });
+}
+
+// Consolidate the memory store: with mem0.infer=false (the reliable mode for local
+// models) nothing ever dedupes, so near-duplicate and contradicting facts accumulate and
+// pollute recall. This asks the smart tier for a merge plan over the FULL list and
+// applies it — guarded so a hallucinated plan can't wipe the store (unknown ids are
+// dropped; a plan deleting more than half the memories is refused).
+async function consolidateMemories() {
+  const all = (await listMemories()).results || [];
+  if (all.length < 3) return { note: "nothing to consolidate", memories: all.length, updated: 0, deleted: 0 };
+  const listing = all.map((m) => `${m.id}: ${String(m.memory || "").replace(/\s+/g, " ").slice(0, 300)}`).join("\n");
+  const messages = [
+    { role: "system", content: "You maintain a personal long-term memory store. Below is EVERY stored memory (id: text). Find NEAR-DUPLICATES (merge them into one clear fact) and CONTRADICTIONS (keep the more recent/specific fact). Reply with ONLY a JSON object, no prose:\n{\"update\": [{\"id\": \"<id to keep, rewritten>\", \"text\": \"<merged/corrected fact>\"}], \"delete\": [\"<id of each memory made redundant>\"]}\nRules: ids MUST come from the list; a fact that is fine as-is appears in NEITHER array; never merge unrelated facts; when in doubt, leave both untouched. If nothing needs consolidating, reply {\"update\": [], \"delete\": []}." },
+    { role: "user", content: listing },
+  ];
+  const llm = require("./llm");
+  const out = await llm.chat({ messages, tier: "smart", noTools: true });
+  let plan;
+  try { plan = JSON.parse((String(out).match(/\{[\s\S]*\}/) || ["{}"])[0]); }
+  catch (e) { throw new Error("consolidation model returned unparseable JSON: " + String(out).slice(0, 200)); }
+  const known = new Set(all.map((m) => m.id));
+  const updates = (Array.isArray(plan.update) ? plan.update : []).filter((u) => u && known.has(u.id) && u.text && String(u.text).trim());
+  const deletes = [...new Set((Array.isArray(plan.delete) ? plan.delete : []).filter((id) => known.has(id)))]
+    .filter((id) => !updates.some((u) => u.id === id));   // an id can't be both kept-rewritten and deleted
+  if (deletes.length > all.length / 2) {
+    throw new Error(`refusing a plan that deletes ${deletes.length} of ${all.length} memories (more than half) — likely a bad model response; nothing was changed`);
+  }
+  for (const u of updates) await updateMemory(u.id, String(u.text).trim());
+  for (const id of deletes) await deleteMemory(id);
+  return { memories: all.length, updated: updates.length, deleted: deletes.length, remaining: all.length - deletes.length };
 }
 
 // --- web app preview: run a server in the workbench on a host-reachable port ---
@@ -766,6 +918,9 @@ const toolDefs = [
   { type: "function", function: { name: "delete_memory",
     description: "Delete a long-term memory by its id (from search_memory/list_memories).",
     parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
+  { type: "function", function: { name: "consolidate_memories",
+    description: "MAINTENANCE: clean up the long-term memory store — merge near-duplicate facts and resolve contradictions (keeping the newer/more specific fact) across ALL stored memories, then delete the redundant ones. Use ONLY when the user asks to clean up / consolidate / dedupe your memory, or clearly complains about duplicate memories. Reports how many were updated/deleted.",
+    parameters: { type: "object", properties: {}, required: [] } } },
   { type: "function", function: { name: "run_shell",
     description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
     parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer", description: "Max seconds before the command is killed (default 120, max 600)." } }, required: ["command"] } } },
@@ -812,7 +967,7 @@ const toolDefs = [
       fields: { type: "object", description: "Optional structured key/values appended as k=v, e.g. {price: 59841.91, signal: 'up'}." },
     }, required: ["path", "message"] } } },
   { type: "function", function: { name: "fetch_url",
-    description: "HTTP request to any internet URL (GET/POST/PUT/DELETE...). Returns status + text content (HTML stripped to text). Supports custom headers (e.g. Authorization with a token from get_secret), a request body or json payload, a timeout, paging long responses via offset, and saving binary responses (PDF/image/zip) into the shared folder via save_to for analyze_image/read_document.",
+    description: "HTTP request to any internet URL (GET/POST/PUT/DELETE...). HTML pages come back as clean ARTICLE TEXT with structure preserved (headings/lists/links as markdown) when extractable, else stripped text — pass raw:true for the unprocessed body (e.g. to scrape attributes/markup). Supports custom headers (e.g. Authorization with a token from get_secret), a request body or json payload, a timeout, paging long responses via offset, and saving binary responses (PDF/image/zip) into the shared folder via save_to for analyze_image/read_document.",
     parameters: { type: "object", properties: {
       url: { type: "string" },
       method: { type: "string", description: "HTTP method (default GET)." },
@@ -822,6 +977,7 @@ const toolDefs = [
       timeout_s: { type: "integer", description: "Max seconds to wait (default 30)." },
       offset: { type: "integer", description: "Character offset for paging a long text response (a truncated response tells you the next offset)." },
       save_to: { type: "string", description: "For binary downloads: a path in the read-write shared folder to save the response to, e.g. 'downloads/report.pdf'." },
+      raw: { type: "boolean", description: "Return the unprocessed body — skip article extraction AND html stripping (for scraping markup)." },
     }, required: ["url"] } } },
   { type: "function", function: { name: "web_search",
     description: "Search the web (DuckDuckGo) and get result titles, URLs, and snippets. Follow up with fetch_url to read a result. If it reports being rate-limited/blocked, that is NOT an empty result — wait and retry or go directly to a known site.",
@@ -845,6 +1001,13 @@ const toolDefs = [
   { type: "function", function: { name: "send_email",
     description: "Send a plain-text email FROM the user's own account (the 'email' secret). Confirm with the user before sending anything they haven't explicitly asked you to send.",
     parameters: { type: "object", properties: { to: { type: "string" }, subject: { type: "string" }, body: { type: "string" } }, required: ["to", "subject", "body"] } } },
+  { type: "function", function: { name: "transcribe_audio",
+    description: "Transcribe SPEECH from an audio or video file to text (fully local — faster-whisper on the workbench CPU; ffmpeg handles most formats: mp3, m4a, wav, ogg, webm, mp4, mov…). Point it at a file in the shared folders (user uploads land in /LLM_READ_WRITE_FILES/uploads/) or /LLM_WORKSPACE. Long recordings return [mm:ss]-stamped lines. First use downloads the model (~75MB); expect roughly real-time speed on CPU.",
+    parameters: { type: "object", properties: {
+      path: { type: "string", description: "Audio/video file path, e.g. /LLM_READ_WRITE_FILES/uploads/memo.m4a" },
+      language: { type: "string", description: "Optional ISO language hint, e.g. 'en' (default: auto-detect)." },
+      model_size: { type: "string", enum: ["tiny", "base", "small", "medium"], description: "Whisper model size (default base; small/medium = better but slower)." },
+    }, required: ["path"] } } },
   { type: "function", function: { name: "read_document",
     description: "Extract the TEXT of a PDF, DOCX, ODT, RTF, EPUB, or HTML document from the shared folders (e.g. a file the user uploaded to /LLM_READ_WRITE_FILES/uploads/ or one you downloaded with fetch_url save_to). Paged: a truncated response tells you the offset to continue from.",
     parameters: { type: "object", properties: { path: { type: "string", description: "Document path, e.g. /LLM_READ_WRITE_FILES/uploads/report.pdf" }, offset: { type: "integer" }, max_chars: { type: "integer", description: "Default 15000." } }, required: ["path"] } } },
@@ -866,6 +1029,15 @@ const toolDefs = [
   { type: "function", function: { name: "browser_console",
     description: "Get the browser's JavaScript CONSOLE output + uncaught runtime errors for the page currently open in the agent browser. THE way to debug a running web app that renders wrong or blank (e.g. a black canvas): browser_goto the app, then call this to see the exact error (e.g. 'Uncaught TypeError: … at render()') instead of guessing from the static HTML. browser_goto also auto-includes load-time errors in its result. Returns recent messages + the error/pageerror entries.",
     parameters: { type: "object", properties: { limit: { type: "integer", description: "Max recent messages to return (default 100)." }, clear: { type: "boolean", description: "Clear the buffer after reading." } }, required: [] } } },
+  { type: "function", function: { name: "browser_press",
+    description: "Press a keyboard key in the agent browser (sent to the current page's focused element) — e.g. 'Enter', 'Escape', 'Tab', 'ArrowDown', 'PageDown', 'Control+a'. Use after browser_click/browser_fill for keyboard-driven UI (menus, dialogs, infinite scroll).",
+    parameters: { type: "object", properties: { key: { type: "string", description: "Playwright key name or chord, e.g. 'Enter', 'Escape', 'Control+a'." } }, required: ["key"] } } },
+  { type: "function", function: { name: "browser_back",
+    description: "Go BACK one page in the agent browser's history (like the browser Back button). Returns the resulting URL/title.",
+    parameters: { type: "object", properties: {}, required: [] } } },
+  { type: "function", function: { name: "browser_screenshot",
+    description: "SEE the page currently open in the agent browser: captures a screenshot of the page viewport and runs it through the vision model, returning a text description (layout, visible elements, rendering problems). Use for VISUAL questions the DOM can't answer — does the layout look right, is the canvas blank, what does the chart show. For reading exact text use browser_extract, and for element refs use browser_snapshot (both are cheaper and exact). Optionally pass 'question' to focus the analysis.",
+    parameters: { type: "object", properties: { question: { type: "string", description: "Optional: what to look for in the page screenshot." } }, required: [] } } },
   { type: "function", function: { name: "ui_actions",
     description: "Perform a SEQUENCE of desktop UI actions in ONE call — far fewer round-trips than separate click/type/key calls. After a screenshot gives you element coordinates, use this to run the whole plan at once, e.g. click a field → type text → press Enter. A short settle delay runs between steps; the sequence STOPS at the first failing step and reports it. Screen is 1024x768; screenshot again afterward to verify. Each step is one of: {action:'click'|'double_click'|'right_click'|'move', x, y} , {action:'type', text} , {action:'key', keys:'Return'} , {action:'scroll', direction:'up'|'down', amount} , {action:'sleep', ms}. NOTE: for actions INSIDE a web page, prefer the browser_* tools (deterministic selectors) over pixel clicking.",
     parameters: { type: "object", properties: { actions: { type: "array", items: { type: "object" }, description: "Ordered list of action steps to perform in sequence." } }, required: ["actions"] } } },
@@ -984,6 +1156,13 @@ const toolDefs = [
       limit: { type: "number", description: "Max messages to return (default 30)." }
     }, required: [] } } },
 
+  { type: "function", function: { name: "delegate",
+    description: "Hand ONE self-contained SUBTASK to a sub-agent that runs in its own FRESH context with the full toolset and returns only its final report — keeping THIS conversation's context small. Use for research sweeps, long document reads, or multi-step side quests whose intermediate output you don't need in your own context. The sub-agent CANNOT see this conversation: write the task like a brief to a colleague — the goal, exact inputs (paths/URLs/ids), constraints, and what the report must contain. Its tool activity streams to the Activity panel prefixed 'sub▸'. NOT for trivial one-tool actions (just call the tool), and a sub-agent cannot delegate further.",
+    parameters: { type: "object", properties: {
+      task: { type: "string", description: "Self-contained brief: goal, inputs (paths/URLs), constraints, and the expected report content." },
+      context: { type: "string", description: "Optional extra background the sub-agent needs (it can't see this conversation)." },
+      tier: { type: "string", enum: ["chat", "cheap", "smart"], description: "Model tier for the sub-agent (default chat; cheap for mechanical sweeps, smart for hard analysis)." },
+    }, required: ["task"] } } },
   { type: "function", function: { name: "list_skills",
     description: "List your available skill playbooks (name + category + summary). Skills are detailed how-to guides for your capabilities and common workflows.",
     parameters: { type: "object", properties: {}, required: [] } } },
@@ -1011,12 +1190,12 @@ function audit(name, args, status, ms) {
   } catch (_) {}
 }
 
-async function execTool(name, args, signal) {
+async function execTool(name, args, signal, ctx) {
   const started = Date.now();
   log.info("tool", `call ${name}`);
   log.verbose("tool", `call ${name}`, { args });
   try {
-    const result = await _execTool(name, args, signal);
+    const result = await _execTool(name, args, signal, ctx);
     const ms = Date.now() - started;
     audit(name, args, "ok", ms);
     log.verbose("tool", `ok ${name} (${ms}ms)`, { result });
@@ -1029,13 +1208,15 @@ async function execTool(name, args, signal) {
   }
 }
 
-async function _execTool(name, args, signal) {
+async function _execTool(name, args, signal, ctx) {
   switch (name) {
+    case "delegate": return await delegate(args, signal, ctx);
     case "add_memory": return await addMemory(args.text, args.metadata);
     case "search_memory": return await searchMemory(args.query, args.limit);
     case "list_memories": return await listMemories();
     case "delete_memory": return await deleteMemory(args.id);
     case "update_memory": return await updateMemory(args.id, args.text);
+    case "consolidate_memories": return await consolidateMemories();
     case "run_shell": return await runShell(args.command, args.timeout_s, signal);
     case "write_workbench_file": return await writeWorkbenchFile(args.path, args.content);
     case "edit_workbench_file": return await editWorkbenchFile(args.path, args.old_string, args.new_string, args.replace_all);
@@ -1043,13 +1224,14 @@ async function _execTool(name, args, signal) {
     case "list_dir": return await listDir(args.path);
     case "read_file": return await readFile(args.path, args.offset, args.max_chars);
     case "read_document": return await readDocument(args.path, args.offset, args.max_chars);
+    case "transcribe_audio": return await transcribeAudio(args.path, args.language, args.model_size);
     case "check_email": return await require("./email").checkEmail(args);
     case "read_email": return await require("./email").readEmail(args);
     case "send_email": return await require("./email").sendEmail(args);
     case "write_file": return await writeFile(args.path, args.content, args.append);
     case "edit_file": return await editFile(args.path, args.old_string, args.new_string, args.replace_all);
     case "append_log": return await appendLog(args.path, args.message, args.fields);
-    case "fetch_url": return await fetchUrl(args.url, { method: args.method, headers: args.headers, body: args.body, json: args.json, timeout_s: args.timeout_s, offset: args.offset, save_to: args.save_to });
+    case "fetch_url": return await fetchUrl(args.url, { method: args.method, headers: args.headers, body: args.body, json: args.json, timeout_s: args.timeout_s, offset: args.offset, save_to: args.save_to, raw: args.raw });
     case "web_search": return await webSearch(args.query, args.limit);
     case "screenshot": return await screenshot();
     case "analyze_image": return await analyzeImageFile(args.path);
@@ -1060,6 +1242,14 @@ async function _execTool(name, args, signal) {
     case "browser_fill": return await browserCmd("fill", { target: args.target, text: args.text, press_enter: args.press_enter });
     case "browser_extract": return await browserCmd("extract", { selector: args.selector, offset: args.offset });
     case "browser_console": return await browserCmd("console", { limit: args.limit, clear: args.clear });
+    case "browser_press": return await browserCmd("press", { key: args.key });
+    case "browser_back": return await browserCmd("back");
+    case "browser_screenshot": {
+      const r = await browserCmd("screenshot");
+      // Wrap as an inline image so llm.js's vision look-step analyzes it (args.question rides along).
+      if (r && r.image_b64) { const { image_b64, ...rest } = r; return { __image__: "data:image/jpeg;base64," + image_b64, ...rest }; }
+      return r;
+    }
     case "open_url": return await openUrl(args.url);
     case "open_app": return await openApp(args.command);
     case "click": return await clickAt(args.x, args.y, 1);
@@ -1135,7 +1325,9 @@ function loadCustomTools() {
     try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".js")); } catch (_) { continue; }
     for (const f of files) {
       try {
-        const mod = require(path.join(dir, f));
+        const fp = path.join(dir, f);
+        delete require.cache[require.resolve(fp)];   // hot-reload: pick up edits to the tool file
+        const mod = require(fp);
         if (!mod || !mod.name || typeof mod.handler !== "function") { console.log(`custom tool skipped (${f}): must export {name, handler}`); continue; }
         customRegistry[mod.name] = mod;
         toolDefs.push({ type: "function", function: { name: mod.name, description: mod.description || ("Custom tool " + mod.name), parameters: mod.parameters || { type: "object", properties: {} } } });
@@ -1144,6 +1336,25 @@ function loadCustomTools() {
     }
   }
 }
+
+// Snapshot of the built-in defs BEFORE custom/MCP tools are appended, so a reload can
+// reset to a clean baseline instead of accumulating duplicates.
+const BUILTIN_DEFS = toolDefs.slice();
+
+// Hot-reload the runtime-added tools (custom + MCP) without an app restart: re-scan the
+// custom_tools dirs (require cache busted above) and re-handshake the MCP servers from
+// the CURRENT config. Called on config save and via POST /api/tools/reload.
+async function reloadExtraTools() {
+  toolDefs.length = 0;
+  toolDefs.push(...BUILTIN_DEFS);
+  for (const k of Object.keys(customRegistry)) delete customRegistry[k];
+  loadCustomTools();
+  let mcpDefs = [];
+  try { mcpDefs = await require("./mcp").reload(); } catch (_) {}
+  for (const d of mcpDefs) toolDefs.push(d);
+  return { builtin: BUILTIN_DEFS.length, custom: Object.keys(customRegistry).length, mcp: mcpDefs.length, total: toolDefs.length };
+}
+
 loadCustomTools();
 
 // Register external MCP tools (async — they join toolDefs once the handshake finishes).
@@ -1161,4 +1372,4 @@ function isRetryable(name) {
 }
 
 // Only what's imported elsewhere is exported; everything else is reached via execTool.
-module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs };
+module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs, reloadExtraTools };

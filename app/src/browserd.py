@@ -172,6 +172,12 @@ def handle(d):
         p.keyboard.press(d.get("key", "Enter"))
         settle(p)
         return {"pressed": d.get("key", "Enter"), **state(p)}
+    if op == "screenshot":
+        # Page-level capture (viewport only) — JPEG keeps the payload small for the
+        # vision model. The app wraps this as an __image__ for the vision look-step.
+        import base64
+        b = p.screenshot(type="jpeg", quality=80)
+        return {"image_b64": base64.b64encode(b).decode(), **state(p)}
     if op == "extract":
         sel = d.get("selector") or "body"
         text = p.inner_text(sel, timeout=8000)

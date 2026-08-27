@@ -8,6 +8,6 @@
 // prompt-injected page or email must not be able to exfiltrate (send_email) or destroy
 // (delete_memory / delete_secret) on its own. run_shell can't be withheld (building and
 // testing need it), so this list is belt-and-braces on top of the safe-mode instruction.
-const RISKY_TOOLS = ["send_email", "delete_memory", "set_secret", "delete_secret"];
+const RISKY_TOOLS = ["send_email", "delete_memory", "consolidate_memories", "set_secret", "delete_secret"];
 
 module.exports = { RISKY_TOOLS };
