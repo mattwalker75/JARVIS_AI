@@ -36,6 +36,11 @@
           <div class="vd-row"><label for="tts-voice">Voice</label><select id="tts-voice"></select></div>
           <div class="vd-row"><label for="tts-rate">Speed</label><input id="tts-rate" type="range" min="0.6" max="1.6" step="0.05"></div>
           <div class="vd-row"><label for="tts-pitch">Pitch</label><input id="tts-pitch" type="range" min="0.6" max="1.4" step="0.05"></div>
+          <div class="vd-title">Speech input</div>
+          <div class="vd-row"><label for="stt-engine" title="Browser = Chrome's streaming recognition (needed for Wake/Open modes). Local = whisper on the workbench — fully local push-to-talk: tap 🎤 to record, tap again to transcribe.">Engine</label><select id="stt-engine">
+            <option value="browser">Browser (streaming)</option>
+            <option value="local">Local (whisper · push-to-talk)</option>
+          </select></div>
           <button id="tts-test" class="ghost">▶ Test voice</button>
         </div>
       </div>
@@ -178,7 +183,11 @@
       <div class="panel" id="panel-memory">
         <div class="tasks-pane">
           <div class="tasks-head">
-            <h4>Long-term memory</h4><button id="mem-refresh" class="ghost">↻</button>
+            <h4>Long-term memory</h4>
+            <span>
+              <button id="mem-consolidate" class="ghost" title="Merge near-duplicate memories and resolve contradictions (uses the smart model tier)">🧹 Consolidate</button>
+              <button id="mem-refresh" class="ghost">↻</button>
+            </span>
           </div>
           <input id="mem-search" class="mem-search" placeholder="Filter memories…" autocomplete="off">
           <div id="mem-list"><div class="hint">Semantic memories JARVIS has saved about you.</div></div>
@@ -274,6 +283,7 @@
               <label>First-token timeout (ms)<input id="cfg-first-token-timeout" type="number" min="10000" step="10000" title="Watchdog: separate, larger budget for the FIRST token — a slow local prefill on a big context can take minutes."></label>
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog on by default (the 🐕 toggle overrides per message)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-smart-routing" title="Route judgment-heavy turns (plan-mode chat, Autopilot planning + wrap-up cycles) to the smart model tier. No-op when no smart tier is configured."> Smart-tier auto-routing (plan mode + Autopilot planning/wrap-up)</label>
             <label>“Model is slow” warning after (seconds)<input id="cfg-stall-seconds" type="number" min="5" step="5" title="How long the working indicator waits with no progress before showing the amber 'model is slow' stall warning."></label>
             <div class="hint">Turn the watchdog OFF (🐕 in the header) for long coding tasks so slow local generations aren’t killed. Plan mode (🗺) makes JARVIS clarify + plan before executing.</div>
           </div>
@@ -295,6 +305,7 @@
             <label>Assistant name<input id="cfg-assistant-name" autocomplete="off"></label>
             <div class="cfg-grid">
               <label>TTS engine<select id="cfg-tts-engine"><option value="browser">browser</option><option value="piper">piper</option></select></label>
+              <label>STT engine<select id="cfg-stt-engine-field" title="browser = Chrome streaming recognition (needed for Wake/Open). local = whisper on the workbench, fully local push-to-talk."><option value="browser">browser</option><option value="local">local (whisper)</option></select></label>
               <label>Mic mode<select id="cfg-mic-mode"><option value="off">off</option><option value="wake">wake</option><option value="open">open</option></select></label>
               <label>Wake word<input id="cfg-wake-word" autocomplete="off" placeholder="defaults to the assistant name"></label>
               <label>Stop phrase<input id="cfg-stop-phrase" autocomplete="off" placeholder="&lt;wake word&gt; stop listening"></label>
@@ -320,6 +331,7 @@
               <label>Embed endpoint<input id="cfg-mem0-embed-url" autocomplete="off" placeholder="http://host.docker.internal:11434/v1"></label>
             </div>
             <label class="cfg-check"><input type="checkbox" id="cfg-mem0-infer"> Let Mem0's own LLM extract/dedupe facts (infer — off = store directly, works with any model)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-memory-autorecall" title="Every chat turn silently searches memory for the user's message and injects the top hits — recall stops depending on the model calling search_memory. One embedding lookup per turn."> Auto-recall memories every turn (inject top hits into context)</label>
             <div class="hint">The embedder is a <b>separate</b> model from chat: local = an Ollama embed model (<code>ollama pull nomic-embed-text</code>); cloud = clear the endpoint and set e.g. <code>text-embedding-3-small</code> (uses the API key). The memory container reads this at start — run <code>./JARVIS.sh --reload</code> after changing.</div>
           </div>
 

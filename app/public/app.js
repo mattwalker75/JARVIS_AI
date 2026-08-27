@@ -471,6 +471,19 @@ function renderMemories(filter) {
 }
 const memRefresh = $("mem-refresh");
 if (memRefresh) memRefresh.addEventListener("click", refreshMemories);
+// Consolidate: LLM-merged dedupe of the whole store (guarded server-side).
+const memConsolidate = $("mem-consolidate");
+if (memConsolidate) memConsolidate.addEventListener("click", async () => {
+  if (!confirm("Consolidate memories? Near-duplicates are merged and redundant entries deleted (the smart model reviews the whole store).")) return;
+  memConsolidate.disabled = true; const lbl = memConsolidate.textContent; memConsolidate.textContent = "…consolidating";
+  try {
+    const d = await (await fetch("/api/memories/consolidate", { method: "POST" })).json();
+    if (d.error) addMessage("assistant", "Consolidate failed: " + d.error, "error");
+    else addMessage("assistant", `🧹 Memory consolidated: ${d.updated || 0} merged/updated, ${d.deleted || 0} deleted` + (d.note ? ` (${d.note})` : "") + ".", "notice");
+    refreshMemories();
+  } catch (e) { addMessage("assistant", "Consolidate failed: " + e.message, "error"); }
+  finally { memConsolidate.disabled = false; memConsolidate.textContent = lbl; }
+});
 const memSearch = $("mem-search");
 if (memSearch) memSearch.addEventListener("input", () => renderMemories(memSearch.value));
 
@@ -1220,6 +1233,16 @@ if (ttsVoiceSel) ttsVoiceSel.addEventListener("change", () => {
 if (ttsRate) ttsRate.addEventListener("change", () => { if (window.JarvisVoice) JarvisVoice.setRate(ttsRate.value); if (cfg && cfg.voice) cfg.voice.tts_rate = Number(ttsRate.value); persistSetting("voice.tts_rate", Number(ttsRate.value)); });
 if (ttsPitch) ttsPitch.addEventListener("change", () => { if (window.JarvisVoice) JarvisVoice.setPitch(ttsPitch.value); if (cfg && cfg.voice) cfg.voice.tts_pitch = Number(ttsPitch.value); persistSetting("voice.tts_pitch", Number(ttsPitch.value)); });
 if (ttsTest) ttsTest.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.test(); });
+// Speech-input engine: browser (streaming, needed for Wake/Open) or local whisper
+// (fully local push-to-talk via /api/stt — tap 🎤 to record, tap again to transcribe).
+const sttEngineSel = $("stt-engine");
+if (sttEngineSel) sttEngineSel.addEventListener("change", () => {
+  const e = sttEngineSel.value === "local" ? "local" : "browser";
+  if (cfg && cfg.voice) cfg.voice.stt_engine = e;
+  if (window.JarvisVoice) JarvisVoice.setSttEngine(e);
+  persistSetting("voice.stt_engine", e);
+  if (e === "local") addMessage("assistant", "🎤 Local speech input: tap **🎤 Talk** to record, tap again to stop — whisper on the workbench transcribes it (nothing leaves your machine). Wake/Open modes still use the browser engine.", "notice");
+});
 
 // Ambient mode: full-screen hands-free view (expressive face or pulsating orb). Tapping
 // the avatar talks / interrupts; the in-overlay button switches face <-> orb and persists.
@@ -1293,6 +1316,7 @@ async function init() {
     updateVoiceBtn();   // reflect the saved TTS state on the Voice button
     if (window.JarvisAmbient) JarvisAmbient.setStyle(cfg.voice.ambient_style || "face");   // avatar style (face | orb)
     if (ttsEngineSel) ttsEngineSel.value = curEngine();
+    if (sttEngineSel) sttEngineSel.value = cfg.voice.stt_engine === "local" ? "local" : "browser";
     if (ttsRate) ttsRate.value = cfg.voice.tts_rate || 1.0;
     if (ttsPitch) ttsPitch.value = cfg.voice.tts_pitch || 1.0;
     updatePitchState();
@@ -1340,6 +1364,7 @@ const CFG_FIELDS = [
   ["cfg-idle-timeout", "llm.idle_timeout_ms", "num"],
   ["cfg-first-token-timeout", "llm.first_token_timeout_ms", "num"],
   ["cfg-idle-watchdog", "llm.idle_watchdog", "bool"],
+  ["cfg-smart-routing", "llm.smart_routing", "bool"],
   ["cfg-stall-seconds", "ui.stall_seconds", "num"],
   ["cfg-ollama-manage", "ollama.manage", "bool"],
   ["cfg-ollama-ctx", "ollama.context_length", "num"],
@@ -1348,6 +1373,7 @@ const CFG_FIELDS = [
   ["cfg-ollama-maxl", "ollama.max_loaded_models", "num"],
   ["cfg-assistant-name", "assistant_name", "str"],
   ["cfg-tts-engine", "voice.tts_engine", "str"],
+  ["cfg-stt-engine-field", "voice.stt_engine", "str"],
   ["cfg-mic-mode", "voice.mic_mode", "str"],
   ["cfg-wake-word", "voice.wake_word", "str"],
   ["cfg-stop-phrase", "voice.stop_phrase", "str"],
@@ -1361,6 +1387,7 @@ const CFG_FIELDS = [
   ["cfg-voice-tts", "voice.tts", "bool"],
   ["cfg-voice-stt", "voice.stt", "bool"],
   ["cfg-skills-autohint", "skills_autohint", "bool"],
+  ["cfg-memory-autorecall", "memory_auto_recall", "bool"],
   ["cfg-mem0-url", "mem0.url", "str"],
   ["cfg-mem0-user", "mem0.user_id", "str"],
   ["cfg-mem0-infer", "mem0.infer", "bool"],
@@ -1486,7 +1513,9 @@ function populateStructured() {
   for (const [id, path, type] of CFG_FIELDS) {
     const el = $(id); if (!el) continue;
     const v = getPath(cfgObj, path);
-    if (MODEL_SELECT_IDS.includes(id)) { renderModelSelect(el, v); continue; }   // <select> needs the option to exist
+    // A tier may use the object form {model, temperature?, max_tokens?} — the picker
+    // shows/edits just the model name (params are preserved on save, see collect).
+    if (MODEL_SELECT_IDS.includes(id)) { renderModelSelect(el, v && typeof v === "object" ? v.model : v); continue; }
     if (type === "bool") el.checked = v !== false && v != null ? !!v : (v === true);
     else if (type === "csv") el.value = Array.isArray(v) ? v.join(", ") : "";
     else el.value = v == null ? "" : v;
@@ -1499,6 +1528,8 @@ function populateStructured() {
   if (getPath(cfgObj, "skills_autohint") === undefined) $("cfg-skills-autohint").checked = true;
   if (getPath(cfgObj, "ollama.manage") === undefined) $("cfg-ollama-manage").checked = true;
   if (getPath(cfgObj, "secret_access_notice") === undefined) { const e = $("cfg-secret-notice"); if (e) e.checked = true; }
+  if (getPath(cfgObj, "llm.smart_routing") === undefined) { const e = $("cfg-smart-routing"); if (e) e.checked = true; }
+  if (getPath(cfgObj, "voice.stt_engine") === undefined) { const e = $("cfg-stt-engine-field"); if (e) e.value = "browser"; }
   if (getPath(cfgObj, "autopilot.autonomy") === undefined) { const e = $("cfg-ap-autonomy"); if (e) e.value = "guarded"; }
   if (getPath(cfgObj, "voice.ambient_style") === undefined) { const e = $("cfg-ambient-style"); if (e) e.value = "face"; }
 }
@@ -1515,6 +1546,11 @@ function collectStructured() {
     }
     else if (el.value === "" || el.value === MODEL_CUSTOM) val = undefined;   // sentinel/blank -> unset
     else val = el.value;
+    // Object-form tier entries keep their per-tier params when only the model changes.
+    if (val !== undefined && MODEL_SELECT_IDS.includes(id)) {
+      const cur = getPath(cfgObj, path);
+      if (cur && typeof cur === "object") val = { ...cur, model: val };
+    }
     setPath(cfgObj, path, val);
   }
 }

@@ -165,10 +165,48 @@
     return true;
   }
 
+  // --- Local STT (push-to-talk via MediaRecorder → POST /api/stt → whisper) ---------
+  // Fully local speech input: no Chrome/Google speech service. First tap records, second
+  // tap (or 30s) stops and transcribes. Continuous Wake/Open modes still need the
+  // browser engine (they rely on streaming interim results).
+  let mediaRec = null, recStream = null;
+  async function listenOnceLocal() {
+    if (mediaRec) { try { mediaRec.stop(); } catch (_) {} return; }   // second tap = stop + transcribe
+    if (!window.MediaRecorder) { reportError("This browser has no MediaRecorder — switch the STT engine back to Browser."); return; }
+    if (!(await ensureMicPermission())) return;
+    try { recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { reportError("Microphone error: " + e.name); return; }
+    const chunks = [];
+    mediaRec = new MediaRecorder(recStream, MediaRecorder.isTypeSupported("audio/webm") ? { mimeType: "audio/webm" } : undefined);
+    const cleanup = () => {
+      if (recStream) { try { recStream.getTracks().forEach((t) => t.stop()); } catch (_) {} recStream = null; }
+      mediaRec = null;
+      setState(listenMode === "off" ? "off" : listenMode === "open" ? "open" : (waking === "listening" ? "listening" : "asleep"));
+    };
+    mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    mediaRec.onstop = async () => {
+      const blob = new Blob(chunks, { type: mediaRec && mediaRec.mimeType || "audio/webm" });
+      cleanup();
+      if (blob.size < 1000) return;   // a tap-tap with no speech
+      setState("listening");          // "…transcribing" state (reuses the listening pill)
+      try {
+        const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+        const d = await (await fetch("/api/stt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl }) })).json();
+        if (d.error) reportError("Local transcription failed: " + d.error);
+        else if (d.text) handlers.onUtterance && handlers.onUtterance(d.text);
+      } catch (e) { reportError("Local transcription failed: " + e.message); }
+      setState(listenMode === "off" ? "off" : listenMode === "open" ? "open" : (waking === "listening" ? "listening" : "asleep"));
+    };
+    mediaRec.start();
+    setState("listening");
+    setTimeout(() => { if (mediaRec) { try { mediaRec.stop(); } catch (_) {} } }, 30000);   // safety stop
+  }
+
   async function listenOnce() {
+    stopSpeaking();   // tapping the mic while JARVIS is talking interrupts it (barge-in)
+    if (cfg.stt_engine === "local") return listenOnceLocal();   // whisper path — no Web Speech needed
     const s = supportInfo();
     if (!s.ok) { reportError(s.msg); setState("unsupported"); return; }
-    stopSpeaking();   // tapping the mic while JARVIS is talking interrupts it (barge-in)
     if (oneShot) { try { oneShot.stop(); } catch (_) {} return; }
     if (!(await ensureMicPermission())) return;
     const resume = wantRunning;
@@ -361,6 +399,8 @@
   window.JarvisVoice = {
     init(c, h) { cfg = Object.assign(cfg, c || {}); handlers = h || {}; return supportInfo().ok; },
     setMode, listenOnce, speak, stopSpeaking, setTts, setEngine, setVoice, setRate, setPitch, listVoices, test,
+    setSttEngine: (e) => { cfg.stt_engine = e === "local" ? "local" : "browser"; },
+    sttEngine: () => (cfg.stt_engine === "local" ? "local" : "browser"),
     supported: () => supportInfo().ok,
     supportMessage: () => supportInfo().msg || "",
     mode: () => listenMode,
