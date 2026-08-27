@@ -42,6 +42,21 @@ migrated automatically. The active collection is printed in the memory container
 The **Memory** tab lists everything JARVIS remembers, with a filter box and delete
 buttons. Or use `/remember <fact>` in chat to save one directly.
 
+### Consolidation (dedupe & merge)
+With `infer: false` nothing ever dedupes, so near-duplicate and contradicting facts
+accumulate over time. The **🧹 Consolidate** button in the Memory tab (or
+`POST /api/memories/consolidate`, or asking JARVIS to "clean up your memory" — the
+`consolidate_memories` tool) has the smart tier review the whole store, merge
+near-duplicates, resolve contradictions, and delete the redundant entries. Guarded:
+ids the model invents are dropped, and a plan that would delete more than half the
+store is refused outright.
+
+### Auto-recall (optional)
+Recall normally depends on the model choosing to call `search_memory`. Set
+`memory_auto_recall: true` and every chat turn silently searches the store for the
+user's message and injects the top hits into context — dependable recall on small
+models, at the cost of one embedding lookup per turn.
+
 ### Backup / restore
 The store is a Docker volume (wiped by `--delete`). Back it up:
 ```bash

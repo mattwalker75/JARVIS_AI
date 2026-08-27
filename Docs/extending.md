@@ -5,9 +5,11 @@ first.
 
 ## Custom tools
 
-Drop a JS module in **`data/custom_tools/`** and restart the app — the tool appears in
-the model's toolset automatically. No core edits, no image rebuild. A template ships
-at `data/custom_tools/EXAMPLE.js.template`.
+Drop a JS module in **`data/custom_tools/`** — the tool appears in the model's toolset
+automatically. No core edits, no image rebuild, **no restart**: save the config from the
+Config tab (or `POST /api/tools/reload`) and the dirs are re-scanned with the require
+cache busted, so edits to a tool file apply too. A template ships at
+`data/custom_tools/EXAMPLE.js.template`.
 
 ```js
 // data/custom_tools/dice.js
@@ -28,8 +30,8 @@ module.exports = {
 };
 ```
 
-Then `./JARVIS.sh --reload`. The handler runs **in the app container** (Node.js) and
-can `require` anything the app has.
+The handler runs **in the app container** (Node.js) and can `require` anything the
+app has.
 
 ### Model-authored tools
 Set `custom_tools.allow_model_authored: true` in config to **also** load
@@ -53,7 +55,8 @@ Streamable-HTTP transport). Add to config:
 
 On start, the app handshakes each server and registers its tools as
 `mcp_<server>_<tool>`. A dead server is logged and skipped (never blocks startup).
-Restart to pick up config changes. Implementation: `app/src/mcp.js`.
+Config changes apply **without a restart** — saving from the Config tab re-handshakes
+the server list (or hit `POST /api/tools/reload`). Implementation: `app/src/mcp.js`.
 
 ## Prompts
 

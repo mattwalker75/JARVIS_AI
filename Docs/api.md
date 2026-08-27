@@ -68,6 +68,8 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `POST /api/settings` | Persist an allowlisted setting: `{path, value}` (see [Configuration](configuration.md#settings-the-ui-can-change)). |
 | `GET /api/tts/voices` | Neural (Piper) voices available: `{voices:[{id,label,lang}], default}`. |
 | `POST /api/tts` | Synthesize speech (Piper): body `{text, voice?, rate?}` → `audio/wav`. Proxied to `jarvis-piper`. |
+| `POST /api/stt` | Local speech-to-text: `{dataUrl}` (base64 audio) → `{text, language, duration_s}` — transcribed by whisper in the workbench (used by the "local" STT engine). |
+| `POST /api/tools/reload` | Hot-reload custom tools + MCP servers (also runs automatically on config save). Returns `{builtin, custom, mcp, total}`. |
 | `GET /api/selftest` | Exercise memory/shell/files/internet/desktop/vault without the model. |
 | `GET /healthz` | Liveness. |
 
@@ -78,6 +80,7 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `GET /api/memories` | List stored memories. |
 | `POST /api/memories` | Add one: `{text}`. |
 | `DELETE /api/memories/:id` | Delete one. |
+| `POST /api/memories/consolidate` | LLM-merge near-duplicates + resolve contradictions across the store (smart tier; unknown ids dropped, >50%-deletion plans refused). |
 
 ### Files
 

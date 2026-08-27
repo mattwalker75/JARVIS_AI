@@ -1,7 +1,19 @@
 # Voice
 
-Hands-free voice conversation. **Speech-to-text** is browser-native (Web Speech API —
-best in **Chrome**, also Safari). **Text-to-speech** has two selectable engines:
+Hands-free voice conversation. **Speech-to-text** has two selectable engines (in the
+🎚️ voice-settings popover, or `voice.stt_engine`):
+
+- **Browser** — the Web Speech API (best in **Chrome**, also Safari). Streaming, so it
+  powers the continuous **Wake**/**Open** mic modes — but the audio goes through the
+  browser vendor's speech service.
+- **Local (whisper)** — fully local **push-to-talk**: tap **🎤 Talk** to record, tap
+  again (or pause 30s) to stop; the clip is transcribed by faster-whisper in the
+  workbench (`POST /api/stt`) and nothing leaves your machine. Works in any browser
+  with MediaRecorder; the continuous Wake/Open modes still need the Browser engine
+  (they rely on streaming interim results). First use downloads the whisper model
+  (~75MB) into the workbench home.
+
+**Text-to-speech** has two selectable engines:
 
 - **Browser** — the OS/Chrome built-in voices (Web Speech API). Zero setup, but the
   available voices depend on the machine (macOS ships good premium neural voices).

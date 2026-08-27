@@ -8,7 +8,7 @@ parameters) is sent to the model each turn; for deeper guidance the model consul
 (plus `app/src/email.js`, `app/src/mcp.js`, and the browser daemon
 `app/src/browserd.py`).
 
-There are **57 built-in tools**, grouped by family below. The descriptions are
+There are **63 built-in tools**, grouped by family below. The descriptions are
 the exact text the model sees. [Custom tools](extending.md#custom-tools) and
 [MCP servers](extending.md#mcp-servers) add more at runtime (MCP tools appear as
 `mcp_<server>_<tool>`).
@@ -45,6 +45,10 @@ List all stored long-term memories for the user (ids + text). Use to review or b
 Delete a long-term memory by its id (from search_memory/list_memories).
 
 - `id` (string, required)
+
+### `consolidate_memories()`
+
+MAINTENANCE: clean up the long-term memory store — merge near-duplicate facts and resolve contradictions (keeping the newer/more specific fact) across ALL stored memories, then delete the redundant ones. Use ONLY when the user asks to clean up / consolidate / dedupe your memory, or clearly complains about duplicate memories. Reports how many were updated/deleted.
 
 ## Workbench (root Linux shell)
 
@@ -130,9 +134,9 @@ Append ONE consistently-formatted line to a log file in the read-write shared fo
 
 ## Internet
 
-### `fetch_url(url, method?, headers?, body?, json?, timeout_s?, offset?, save_to?)`
+### `fetch_url(url, method?, headers?, body?, json?, timeout_s?, offset?, save_to?, raw?)`
 
-HTTP request to any internet URL (GET/POST/PUT/DELETE...). Returns status + text content (HTML stripped to text). Supports custom headers (e.g. Authorization with a token from get_secret), a request body or json payload, a timeout, paging long responses via offset, and saving binary responses (PDF/image/zip) into the shared folder via save_to for analyze_image/read_document.
+HTTP request to any internet URL (GET/POST/PUT/DELETE...). HTML pages come back as clean ARTICLE TEXT with structure preserved (headings/lists/links as markdown) when extractable, else stripped text — pass raw:true for the unprocessed body (e.g. to scrape attributes/markup). Supports custom headers (e.g. Authorization with a token from get_secret), a request body or json payload, a timeout, paging long responses via offset, and saving binary responses (PDF/image/zip) into the shared folder via save_to for analyze_image/read_document.
 
 - `url` (string, required)
 - `method` (string) — HTTP method (default GET).
@@ -142,6 +146,7 @@ HTTP request to any internet URL (GET/POST/PUT/DELETE...). Returns status + text
 - `timeout_s` (integer) — Max seconds to wait (default 30).
 - `offset` (integer) — Character offset for paging a long text response (a truncated response tells you the next offset).
 - `save_to` (string) — For binary downloads: a path in the read-write shared folder to save the response to, e.g. 'downloads/report.pdf'.
+- `raw` (boolean) — Return the unprocessed body — skip article extraction AND html stripping (for scraping markup).
 
 ### `web_search(query, limit?)`
 
@@ -176,6 +181,16 @@ Type into an input/textarea in the agent browser by ref or CSS selector (clears 
 - `text` (string, required)
 - `press_enter` (boolean) — Press Enter after filling (submit).
 
+### `browser_press(key)`
+
+Press a keyboard key in the agent browser (sent to the current page's focused element) — e.g. 'Enter', 'Escape', 'Tab', 'ArrowDown', 'PageDown', 'Control+a'. Use after browser_click/browser_fill for keyboard-driven UI (menus, dialogs, infinite scroll).
+
+- `key` (string, required) — Playwright key name or chord, e.g. 'Enter', 'Escape', 'Control+a'.
+
+### `browser_back()`
+
+Go BACK one page in the agent browser's history (like the browser Back button). Returns the resulting URL/title.
+
 ### `browser_extract(selector?, offset?)`
 
 Extract the visible TEXT of the current page in the agent browser (or of one element via a CSS selector). Long text is paged via offset. Use this to READ page content — it is exact, unlike the vision screenshot.
@@ -189,6 +204,12 @@ Get the browser's JavaScript CONSOLE output + uncaught runtime errors for the pa
 
 - `limit` (integer) — Max recent messages to return (default 100).
 - `clear` (boolean) — Clear the buffer after reading.
+
+### `browser_screenshot(question?)`
+
+SEE the page currently open in the agent browser: captures a screenshot of the page viewport and runs it through the vision model, returning a text description (layout, visible elements, rendering problems). Use for VISUAL questions the DOM can't answer — does the layout look right, is the canvas blank, what does the chart show. For reading exact text use browser_extract, and for element refs use browser_snapshot (both are cheaper and exact). Optionally pass 'question' to focus the analysis.
+
+- `question` (string) — Optional: what to look for in the page screenshot.
 
 ## Planning (task ledger) & Autopilot
 
@@ -230,7 +251,17 @@ Hand a SUBSTANTIAL multi-step task off to AUTOPILOT — an autonomous build→te
 - `minutes` (number) — Suggested time budget in minutes (the user can change it). Default 30.
 - `autonomy` (string) — Suggested autonomy: 'guarded' (won't take irreversible external actions on its own) or 'full'. Default guarded.
 
-## Vision & desktop (computer use)
+## Sub-agent delegation
+
+### `delegate(task, context?, tier?)`
+
+Hand ONE self-contained SUBTASK to a sub-agent that runs in its own FRESH context with the full toolset and returns only its final report — keeping THIS conversation's context small. Use for research sweeps, long document reads, or multi-step side quests whose intermediate output you don't need in your own context. The sub-agent CANNOT see this conversation: write the task like a brief to a colleague — the goal, exact inputs (paths/URLs/ids), constraints, and what the report must contain. Its tool activity streams to the Activity panel prefixed 'sub▸'. NOT for trivial one-tool actions (just call the tool), and a sub-agent cannot delegate further.
+
+- `task` (string, required) — Self-contained brief: goal, inputs (paths/URLs), constraints, and the expected report content.
+- `context` (string) — Optional extra background the sub-agent needs (it can't see this conversation).
+- `tier` (string) — Model tier for the sub-agent (default chat; cheap for mechanical sweeps, smart for hard analysis).
+
+## Vision, audio & desktop (computer use)
 
 ### `screenshot(question?)`
 
@@ -244,6 +275,14 @@ Look at / analyze an image FILE with the vision model — describe it, read text
 
 - `path` (string, required) — Path to the image, e.g. /LLM_READ_WRITE_FILES/uploads/photo.jpg
 - `question` (string) — Optional: what to focus on or ask about the image.
+
+### `transcribe_audio(path, language?, model_size?)`
+
+Transcribe SPEECH from an audio or video file to text (fully local — faster-whisper on the workbench CPU; ffmpeg handles most formats: mp3, m4a, wav, ogg, webm, mp4, mov…). Point it at a file in the shared folders (user uploads land in /LLM_READ_WRITE_FILES/uploads/) or /LLM_WORKSPACE. Long recordings return [mm:ss]-stamped lines. First use downloads the model (~75MB); expect roughly real-time speed on CPU.
+
+- `path` (string, required) — Audio/video file path, e.g. /LLM_READ_WRITE_FILES/uploads/memo.m4a
+- `language` (string) — Optional ISO language hint, e.g. 'en' (default: auto-detect).
+- `model_size` (string) — Whisper model size (default base; small/medium = better but slower).
 
 ### `ui_actions(actions)`
 

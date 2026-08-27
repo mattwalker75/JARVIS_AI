@@ -14,7 +14,7 @@ is a pure OpenAI-dialect client and talks to whatever URL is in `llm.base_url` (
 │ jarvis-app  (:8110)  Node.js orchestrator + static web UI         │
 │   • WebSocket chat + REST API                                     │
 │   • tool-calling loop (app/src/llm.js)                            │
-│   • 57 built-in tools (app/src/tools.js — see tools.md)           │
+│   • 63 built-in tools (app/src/tools.js — see tools.md)           │
 │   • scheduler, sessions, chatlog                                  │
 └─┬────────────┬──────────────┬────────────────┬───────────────────┘
   │ docker exec │ http          │ http           │ OpenAI-dialect http

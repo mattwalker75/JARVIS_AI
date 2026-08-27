@@ -8,6 +8,43 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-08-26: **Six new tools** (63 built-ins now). `delegate` — hand a self-contained subtask to a
+  **sub-agent** running in its own fresh context with the full toolset, returning only a final
+  report (the main lever against context pressure; inherits the caller's tool exclusions so
+  unattended runs can't reach withheld tools through it; activity streams as `sub▸` in the panel).
+  `browser_press` / `browser_back` — expose browserd's existing keyboard + history ops.
+  `browser_screenshot` — page-level JPEG capture through the vision look-step (with daemon
+  self-healing when a stale browserd doesn't know new ops). `transcribe_audio` — fully local
+  speech-to-text via faster-whisper in the workbench (mp3/m4a/wav/mp4/…, [mm:ss] stamps on long
+  recordings). `consolidate_memories` — smart-tier merge of near-duplicate/contradicting memories
+  (guarded: unknown ids dropped, >50%-deletion plans refused; also a 🧹 button in the Memory tab +
+  `POST /api/memories/consolidate`). (`app/src/tools.js`, `app/src/browserd.py`)
+- 2026-08-26: **Readability-grade `fetch_url`.** HTML pages now come back as structure-preserving
+  article text (headings/lists/links as markdown) via Mozilla Readability + jsdom (no page scripts
+  execute), falling back to the old tag-strip when no article is extractable; `raw:true` returns
+  the unprocessed body. (`app/src/tools.js`, deps: `@mozilla/readability`, `jsdom`)
+- 2026-08-26: **Local speech input.** New STT engine "local" (🎚️ popover or `voice.stt_engine`):
+  push-to-talk records in the browser and `POST /api/stt` transcribes with whisper in the workbench —
+  no Google speech service, works beyond Chrome. Wake/Open modes still use the browser engine.
+  (`app/public/voice.js`, `app/server.js`)
+- 2026-08-26: **Hot-reload for custom tools + MCP servers** — a config save (or
+  `POST /api/tools/reload`) re-scans `custom_tools/` (require cache busted) and re-handshakes the
+  MCP server list; no app restart. (`app/src/tools.js`, `app/src/mcp.js`, `app/server.js`)
+- 2026-08-26: **Per-tier generation params + smart routing.** A `llm.models` tier may be an object
+  (`{"model", "temperature"?, "max_tokens"?}`) whose params override the globals for that tier (the
+  Config-tab pickers preserve them); `llm.smart_routing` (default on) routes plan-mode turns and
+  Autopilot's planning/wrap-up cycles to the smart tier. (`app/src/config.js`, `app/src/llm.js`,
+  `app/src/autopilot.js`, `app/server.js`)
+- 2026-08-26: **Optional per-turn memory auto-recall** (`memory_auto_recall`, default off): each chat
+  turn silently searches the store and injects the top hits into the volatile note — recall stops
+  depending on the model calling `search_memory`. 3s-capped, never blocks a turn. (`app/src/llm.js`)
+- 2026-08-26: **Workbench image: verified + expanded.** A final build layer now FAILS the build with
+  the list of anything critical missing (backstop for the `||` fallback install chains). Added:
+  `tesseract-ocr` (exact OCR), `exiftool`, `qpdf`, `yt-dlp`, the **DuckDB CLI** (arch-aware), and
+  **faster-whisper**; plus a system-wide git identity (`JARVIS Workbench <jarvis@workbench.local>`,
+  `safe.directory *`) so in-workbench commits work on first use. (`workbench/Dockerfile`)
+
 ### Security
 - 2026-08-26: **Cross-site request guard on the REST API.** The WS handshake was origin-checked but
   the ~40 HTTP endpoints weren't: no-body POSTs (autopilot stop/pause, notifications clear) were

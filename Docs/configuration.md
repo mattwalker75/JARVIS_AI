@@ -50,6 +50,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `backups` | How many config/secrets backups to keep in `data/`. |
 | `security` | Extra allowed `Host`/`Origin` hostnames. |
 | `secret_access_notice` | Chat notice on every `get_secret` read. |
+| `memory_auto_recall` | Inject top memory hits into every chat turn (default off). |
 
 ## `llm`
 
@@ -109,6 +110,21 @@ app picks a tier per task:
 
 An omitted tier falls back to `chat`, then to `model`. In **single** mode, every tier
 uses `model`.
+
+A tier may also be an **object** carrying per-tier generation overrides:
+
+```jsonc
+"models": {
+  "chat":  "qwen3.6:35b",
+  "smart": { "model": "qwen3:32b", "temperature": 0.2, "max_tokens": 8000 }
+}
+```
+`temperature` / `max_tokens` in the object beat the global `llm.*` values for that tier
+only. The Config-tab pickers edit the `model` and preserve the params.
+
+Related: **`llm.smart_routing`** (default `true`) automatically routes judgment-heavy
+turns to the `smart` tier — plan-mode chat turns, and Autopilot's planning + wrap-up
+cycles. A no-op when no smart tier is configured.
 
 ### Tier grouping in the Config pickers
 In multi-model mode the Config tab's `chat` / `cheap` / `smart` / `vision` dropdowns are
@@ -181,6 +197,7 @@ several stay hot at once), then `start --backend mlx --gateway`. See
   "tts": true,                      // speak replies
   "stt": true,                      // accept speech input
   "mic_mode": "off",                // "off" | "wake" | "open" (persisted from the UI)
+  "stt_engine": "browser",          // speech input: "browser" (streaming; needed for wake/open) | "local" (whisper push-to-talk)
   "silence_timeout_seconds": 12,    // wake mode: sleep after this much silence
   "followup_seconds": 0,            // wake mode: reply without the wake word for N s AFTER it stops talking (0 = off)
   "wake_word": "jarvis",            // optional; defaults to assistant_name
