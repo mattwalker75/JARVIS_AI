@@ -6,7 +6,7 @@
 # Expands on the ByOwnerOS RUN_LOCAL_DEV.sh pattern with memory backup/restore.
 #
 #   jarvis-app        Node.js backend + JS frontend (orchestrator)            :8110
-#   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
+#   jarvis-memory     Mem0 semantic long-term memory (vector store)           internal-only
 #   jarvis-workbench  Linux desktop (noVNC) the LLM works in as root          :8111
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only    :5000
 #
@@ -104,7 +104,7 @@ WB_CONTAINER="jarvis-workbench"
 MEM_CONTAINER="jarvis-memory"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
 # (LLM_WORKSPACE is a host bind mount now — ./LLM_WORKSPACE — not a Docker volume)
-APP_PORT="8110"; WB_PORT="8111"; MEM_PORT="8120"
+APP_PORT="8110"; WB_PORT="8111"   # (memory is internal-only — no host port; see wait_mem)
 FORCE=0   # set by -f/--force; when 1, --delete skips its "back up memory first?" prompt
 
 # LLM hosting/management lives OUTSIDE this script now — see ./JARVIS_LOCAL_LLM.sh (local runtimes
@@ -154,6 +154,18 @@ wait_http() { # $1 port  $2 path  $3 label
     sleep 2
   done
   warn "$3 not responding yet on http://localhost:$1$2 (may still be starting)."; return 1
+}
+
+# The memory service is INTERNAL-ONLY (no host port — an auth-less store shouldn't be
+# reachable by every local process), so probe /healthz from inside its container.
+# python3 is guaranteed there (the image runs a Python app); curl is not installed.
+wait_mem() {
+  for _ in $(seq 1 40); do
+    docker exec "$MEM_CONTAINER" python3 -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("http://localhost:8000/healthz", timeout=2).status == 200 else 1)' >/dev/null 2>&1 \
+      && { ok "Memory service responding."; return 0; }
+    sleep 2
+  done
+  warn "Memory service not responding yet (may still be starting)."; return 1
 }
 
 # The memory service (Mem0) embeds text with a model served by a LOCAL Ollama on the host
@@ -212,13 +224,13 @@ cmd_start() {
   clear_autopilot_state
   info "START: bringing up app + memory + workbench + voice..."
   dc up -d || { err "Failed to start the stack."; return 1; }
-  wait_http "$MEM_PORT" "/healthz" "Memory service" || true
+  wait_mem || true
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   echo
   ok "JARVIS is up."
   echo -e "${C_BOLD}  Chat UI:${C_RESET}            http://localhost:${APP_PORT}/"
   echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in)"
-  echo -e "${C_BOLD}  Semantic memory:${C_RESET}    http://localhost:${MEM_PORT}/"
+  echo -e "${C_BOLD}  Semantic memory:${C_RESET}    internal-only (the app reaches it at jarvis-memory:8000)"
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
   echo -e "  ${C_BOLD}Model:${C_RESET} set an endpoint in the Config tab. Cloud → paste the provider URL; local → run  ${C_BOLD}./JARVIS_LOCAL_LLM.sh start${C_RESET}  and paste the URL it prints."
   check_memory_embedder
@@ -335,7 +347,7 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
     dc stop "$MEM_CONTAINER" >/dev/null 2>&1 || true
     if docker run --rm -i -v "${MEM_VOLUME}:/data" alpine sh -c 'rm -rf /data/* /data/..?* 2>/dev/null; tar xzf - -C /data' < "$from"; then
       dc up -d "$MEM_CONTAINER" >/dev/null 2>&1 || return 1
-      wait_http "$MEM_PORT" "/healthz" "Memory service" || true
+      wait_mem || true
       ok "Semantic memory restored from ${from}."
     else
       err "Restore failed."; dc up -d "$MEM_CONTAINER" >/dev/null 2>&1 || true; return 1
@@ -345,7 +357,7 @@ cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memor
     dc rm -sf "$MEM_CONTAINER" >/dev/null 2>&1 || true
     docker volume rm "$MEM_VOLUME" >/dev/null 2>&1 || true
     dc up -d "$MEM_CONTAINER" || return 1
-    wait_http "$MEM_PORT" "/healthz" "Memory service" || true
+    wait_mem || true
     ok "Fresh, empty semantic memory deployed."
   fi
 }

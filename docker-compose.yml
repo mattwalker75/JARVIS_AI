@@ -3,7 +3,7 @@ name: jarvis
 # JARVIS multi-container stack. Everything binds to 127.0.0.1 (localhost only).
 #
 #   jarvis-app        Node.js backend + JS frontend (the orchestrator)        :8110
-#   jarvis-memory     Mem0 semantic long-term memory (vector store)           :8120
+#   jarvis-memory     Mem0 semantic long-term memory (vector store)           internal-only
 #   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only     :5000
 #
@@ -54,8 +54,14 @@ services:
     environment:
       JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
       MEM0_CHROMA_PATH: /data/chroma
-    ports:
-      - "127.0.0.1:${MEMORY_PORT:-8120}:8000"
+    # Internal-only: the app reaches it at http://jarvis-memory:8000 over the compose
+    # network, and JARVIS.sh health-checks it via docker exec. No host port — the store
+    # has no auth, so publishing it would let ANY local process read/rewrite the memories.
+    # Uncomment below to poke it directly for debugging.
+    # ports:
+    #   - "127.0.0.1:${MEMORY_PORT:-8120}:8000"
+    expose:
+      - "8000"
     volumes:
       - ./memory/server.py:/app/server.py:ro
       - ./config/JARVIS_CONFIG.json:/cfg/JARVIS_CONFIG.json:ro
