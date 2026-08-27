@@ -150,7 +150,7 @@ HTTP request to any internet URL (GET/POST/PUT/DELETE...). HTML pages come back 
 
 ### `web_search(query, limit?)`
 
-Search the web (DuckDuckGo) and get result titles, URLs, and snippets. Follow up with fetch_url to read a result. If it reports being rate-limited/blocked, that is NOT an empty result — wait and retry or go directly to a known site.
+Search the web and get result titles, URLs, and snippets (via the self-hosted SearXNG sidecar when configured, else DuckDuckGo). Follow up with fetch_url to read a result. If it reports being rate-limited/blocked, that is NOT an empty result — wait and retry or go directly to a known site.
 
 - `query` (string, required)
 - `limit` (integer) — Max results (default 8, max 20).

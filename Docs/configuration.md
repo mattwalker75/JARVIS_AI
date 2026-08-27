@@ -49,6 +49,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `logging` | Debug log level, rotation, retention. |
 | `backups` | Config-backup retention + scheduled memory/workspace backups. |
 | `notifications` | External alert bridge (ntfy) for closed-browser notifications. |
+| `search` | Web-search backend: DuckDuckGo scrape or the SearXNG sidecar. |
 | `security` | Extra allowed `Host`/`Origin` hostnames. |
 | `secret_access_notice` | Chat notice on every `get_secret` read. |
 | `memory_auto_recall` | Inject top memory hits into every chat turn (default off). |
@@ -126,6 +127,24 @@ only. The Config-tab pickers edit the `model` and preserve the params.
 Related: **`llm.smart_routing`** (default `true`) automatically routes judgment-heavy
 turns to the `smart` tier — plan-mode chat turns, and Autopilot's planning + wrap-up
 cycles. A no-op when no smart tier is configured.
+
+### Model failover (optional)
+
+```jsonc
+"llm": {
+  "failover": {
+    "enabled": false,
+    "model": "",       // required to enable — e.g. "qwen3:8b" or "gpt-4o-mini"
+    "base_url": "",    // empty = same endpoint; or a different one (e.g. OpenAI while Ollama is down)
+    "api_key": ""      // only used with a different base_url
+  }
+}
+```
+When the primary fails **hard** — endpoint down, repeated 5xx after retries, or a
+stalled stream — the **rest of that turn** runs on the fallback, the chat shows an
+⚡ notice, and the next turn tries the primary again. Key hygiene: with a different
+`base_url`, only `failover.api_key` is ever sent there — the primary key never leaves
+its own endpoint (regression-tested).
 
 ### Context-size discipline
 
@@ -383,6 +402,19 @@ under a different hostname, list that hostname here.
 When the model reads a credential with `get_secret`, a 🔑 notice is posted into the
 live chat so vault access is always visible in the moment (the audit log records it
 regardless). Set `false` to silence the notices.
+
+## `search` (optional)
+
+```jsonc
+"search": { "provider": "duckduckgo", "searxng_url": "http://jarvis-searxng:8080" }
+```
+The `web_search` tool's backend. **`duckduckgo`** (default) scrapes DuckDuckGo's HTML —
+zero setup, but rate-limit-prone and parser-fragile. **`searxng`** uses the optional
+self-hosted [SearXNG](https://docs.searxng.org/) sidecar: a real JSON metasearch API
+across many engines. `./JARVIS.sh --start` brings the container up automatically when
+selected (compose profile `search`; settings in `searxng/settings.yml`), and
+`web_search` **falls back to DuckDuckGo** if the sidecar is unreachable. Switching
+providers needs one stack restart to start/stop the container; afterwards it applies live.
 
 ## `custom_tools` (optional)
 

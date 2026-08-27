@@ -29,6 +29,7 @@ Five containers (`docker compose`, project `jarvis`, published ports bound to `1
 | `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
 | `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
 | `jarvis-docker-proxy` | Filtered Docker API (containers+exec only) the app uses to reach the workbench | internal |
+| `jarvis-searxng` *(optional)* | Self-hosted metasearch for `web_search` ([SearXNG](https://docs.searxng.org/); started when `search.provider = "searxng"`) | internal |
 
 The **LLM is not in the stack** — the app talks OpenAI-dialect to whatever `llm.base_url`
 points at (a cloud provider, or a local runtime you start with `./JARVIS_LOCAL_LLM.sh`,
@@ -101,7 +102,7 @@ JARVIS is built to grow without editing core code:
   tab, paste a key, and **List models** to choose one — or add a line to
   `litellm/config.yaml` and use it by name. The tier pickers group models by capability
   from a curated, editable `models.json` (see `MODELS.md` for the reference).
-- **Custom tools** — drop a JS file in `data/custom_tools/` and restart.
+- **Custom tools** — drop a JS file in `data/custom_tools/`; a config save (or `POST /api/tools/reload`) picks it up live.
 - **MCP servers** — add external tool servers in config; they register automatically.
 - **Skills** — on-demand how-to playbooks the model reads before hard tasks.
 - **REST API** — `POST /api/chat` for scripts, cron, and other machines.

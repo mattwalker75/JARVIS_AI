@@ -9,6 +9,20 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-08-27: **Optional SearXNG search sidecar.** `search.provider: "searxng"` switches the
+  `web_search` tool from the rate-limit-prone DuckDuckGo HTML scrape to a self-hosted
+  [SearXNG](https://docs.searxng.org/) metasearch JSON API. The container rides the compose
+  `search` profile — `./JARVIS.sh --start` brings it up automatically when selected (stop/delete
+  always include the profile), settings ship in `searxng/settings.yml` (json format + limiter off),
+  it stays internal-only, and `web_search` falls back to DuckDuckGo if it's unreachable.
+  (`docker-compose.yml`, `searxng/settings.yml`, `JARVIS.sh`, `app/src/tools.js`)
+- 2026-08-27: **Configurable model failover** (`llm.failover` + Config-tab fields): when the
+  primary endpoint/model fails hard (down, repeated 5xx after retries, stalled stream), the rest
+  of the turn runs on the configured fallback — a different model on the same endpoint, or a
+  different endpoint entirely — with an ⚡ notice in the chat and Activity panel; the next turn
+  tries the primary again. Key hygiene: a different endpoint only ever receives
+  `failover.api_key`, never the primary key (covered by 5 new llm-loop test assertions).
+  (`app/src/llm.js`, `app/public/*`)
 - 2026-08-27: **Per-conversation plan ledgers.** Plans are now scoped by key — each chat tab
   (`chat_<id>`), Autopilot (`autopilot`), REST/CLI (`default`) — under `data/plans/` (the legacy
   `plan.json` migrates automatically). Parallel chats no longer fight over one checklist and an
