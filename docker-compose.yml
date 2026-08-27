@@ -20,6 +20,10 @@ services:
     build:
       context: ./workbench
       dockerfile: Dockerfile
+      args:
+        # Set from workbench.base_image in JARVIS_CONFIG.json by ./JARVIS.sh --setup;
+        # pin a digest there for reproducible rebuilds (see workbench/Dockerfile).
+        BASE_IMAGE: ${WORKBENCH_BASE_IMAGE:-lscr.io/linuxserver/webtop:ubuntu-xfce}
     image: jarvis-workbench:local
     container_name: jarvis-workbench
     restart: unless-stopped

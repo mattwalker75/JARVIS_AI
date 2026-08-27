@@ -213,6 +213,12 @@ cmd_check() {
 cmd_setup() {
   require_daemon
   clear_autopilot_state
+  # Workbench base image is configurable (workbench.base_image) — pin a digest there for
+  # reproducible rebuilds; empty = the floating default tag (see workbench/Dockerfile).
+  WORKBENCH_BASE_IMAGE="$(read_cfg workbench.base_image "")"
+  export WORKBENCH_BASE_IMAGE
+  [[ -n "$WORKBENCH_BASE_IMAGE" ]] && info "Workbench base image (from config): ${WORKBENCH_BASE_IMAGE}"
+  [[ -z "$WORKBENCH_BASE_IMAGE" ]] && unset WORKBENCH_BASE_IMAGE   # let the compose default apply
   info "SETUP: building the app + workbench + memory + voice (piper) images..."
   warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
   dc build jarvis-app jarvis-workbench jarvis-memory jarvis-piper || { err "Image build failed."; return 1; }

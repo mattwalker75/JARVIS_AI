@@ -74,7 +74,9 @@
   "workbench": {
     "_comment": "Linux desktop container the LLM works in as root, and which you can watch.",
     "container": "jarvis-workbench",
-    "desktop_url": "http://localhost:8111"
+    "desktop_url": "http://localhost:8111",
+    "_base_image_note": "Base image for the workbench build (applied by ./JARVIS.sh --setup). Empty = the floating default (lscr.io/linuxserver/webtop:ubuntu-xfce). For reproducible rebuilds pin the digest of an image you know works, e.g. lscr.io/linuxserver/webtop@sha256:<digest> (find yours: docker inspect --format '{{index .RepoDigests 0}}' lscr.io/linuxserver/webtop:ubuntu-xfce).",
+    "base_image": ""
   },
   "shared": {
     "_comment": "Two folders shared between you and the LLM. read_only is read-only to the LLM; read_write is full read/write. Paths are inside the container.",

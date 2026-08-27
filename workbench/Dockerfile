@@ -8,7 +8,15 @@
 #
 # NOTE: the base image already ships Node.js (NodeSource) — do NOT apt-install
 # nodejs/npm here or it conflicts. Node + npm are already available.
-FROM lscr.io/linuxserver/webtop:ubuntu-xfce
+#
+# BASE_IMAGE is configurable (workbench.base_image in JARVIS_CONFIG.json → exported by
+# ./JARVIS.sh --setup). The default floats on the latest ubuntu-xfce; for reproducible
+# rebuilds PIN it to a digest of the image you know works, e.g.
+#   "base_image": "lscr.io/linuxserver/webtop@sha256:<digest>"
+# (get the digest of your current image with:
+#   docker inspect --format '{{index .RepoDigests 0}}' lscr.io/linuxserver/webtop:ubuntu-xfce )
+ARG BASE_IMAGE=lscr.io/linuxserver/webtop:ubuntu-xfce
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
