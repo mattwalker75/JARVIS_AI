@@ -1,0 +1,18 @@
+# SearXNG settings for the OPTIONAL jarvis-searxng sidecar (search.provider = "searxng"
+# in JARVIS_CONFIG.json; started by ./JARVIS.sh --start via the compose "search" profile).
+#
+# Deltas from the defaults, all required for JARVIS:
+#   - formats includes json     -> the app queries /search?format=json (off by default)
+#   - limiter false             -> the rate limiter blocks non-browser clients like the app
+#   - secret_key                -> internal-only sidecar on the compose network, so a
+#                                  static local value is fine (it only signs its own UI
+#                                  cookies/CSRF; nothing is exposed to any network)
+use_default_settings: true
+server:
+  secret_key: "jarvis-local-internal-only-not-a-real-secret"
+  limiter: false
+  image_proxy: false
+search:
+  formats:
+    - html
+    - json

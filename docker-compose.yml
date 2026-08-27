@@ -97,6 +97,23 @@ services:
     expose:
       - "2375"
 
+  # OPTIONAL self-hosted metasearch for the web_search tool (search.provider = "searxng"
+  # in JARVIS_CONFIG.json). Under the "search" profile, so a plain `docker compose up`
+  # never starts it — ./JARVIS.sh --start adds the profile automatically when the config
+  # selects searxng. Internal-only: the app queries http://jarvis-searxng:8080/search
+  # (uncomment the ports mapping to browse its UI for debugging).
+  jarvis-searxng:
+    image: searxng/searxng:latest
+    container_name: jarvis-searxng
+    restart: unless-stopped
+    profiles: ["search"]
+    volumes:
+      - ./searxng:/etc/searxng
+    expose:
+      - "8080"
+    # ports:
+    #   - "127.0.0.1:8181:8080"
+
   jarvis-piper:
     build:
       context: ./piper

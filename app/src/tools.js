@@ -525,7 +525,34 @@ async function fetchUrl(url, opts = {}) {
   return out;
 }
 
+// Search via the OPTIONAL self-hosted SearXNG sidecar (search.provider = "searxng"):
+// a real metasearch JSON API instead of scraping DuckDuckGo's HTML — no rate-limit
+// roulette, no parser breakage when the page changes. Throws on failure so webSearch
+// can fall back to the DDG scrape (resilience beats purity here).
+async function searxngSearch(query, limit) {
+  const base = ((config.search && config.search.searxng_url) || "http://jarvis-searxng:8080").replace(/\/+$/, "");
+  const r = await fetch(base + "/search?q=" + encodeURIComponent(query) + "&format=json", {
+    headers: { "User-Agent": "JARVIS/1.0" },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!r.ok) throw new Error("searxng " + r.status);
+  const d = await r.json();
+  const results = (d.results || []).slice(0, Math.min(20, Math.max(1, limit || 8))).map((x) => {
+    const e = { title: x.title || "", url: x.url || "" };
+    if (x.content) e.snippet = String(x.content).slice(0, 300);
+    return e;
+  }).filter((x) => x.url);
+  if (!results.length) return { query, results: [], note: "no results from searxng — the query may have no matches" };
+  return { query, results, engine: "searxng" };
+}
+
 async function webSearch(query, limit = 8) {
+  // Prefer the SearXNG sidecar when configured; fall back to the DDG scrape if it's
+  // down (e.g. the stack was started without the search profile).
+  if (((config.search || {}).provider || "").toLowerCase() === "searxng") {
+    try { return await searxngSearch(query, limit); }
+    catch (e) { log.warn("search", `searxng unavailable (${e.message}) — falling back to duckduckgo`); }
+  }
   const resp = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
     headers: { "User-Agent": "Mozilla/5.0 JARVIS/1.0" },
     signal: AbortSignal.timeout(20000),
@@ -993,7 +1020,7 @@ const toolDefs = [
       raw: { type: "boolean", description: "Return the unprocessed body — skip article extraction AND html stripping (for scraping markup)." },
     }, required: ["url"] } } },
   { type: "function", function: { name: "web_search",
-    description: "Search the web (DuckDuckGo) and get result titles, URLs, and snippets. Follow up with fetch_url to read a result. If it reports being rate-limited/blocked, that is NOT an empty result — wait and retry or go directly to a known site.",
+    description: "Search the web and get result titles, URLs, and snippets (via the self-hosted SearXNG sidecar when configured, else DuckDuckGo). Follow up with fetch_url to read a result. If it reports being rate-limited/blocked, that is NOT an empty result — wait and retry or go directly to a known site.",
     parameters: { type: "object", properties: { query: { type: "string" }, limit: { type: "integer", description: "Max results (default 8, max 20)." } }, required: ["query"] } } },
 
   { type: "function", function: { name: "screenshot",

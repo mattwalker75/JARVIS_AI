@@ -49,3 +49,7 @@ litellm/config.yaml
 # LLM workspace — the AI’s live working area (host-visible); ignore its churn, keep the dir
 LLM_WORKSPACE/*
 !LLM_WORKSPACE/.gitkeep
+
+# SearXNG sidecar: only settings.yml is ours — the container generates the rest (uwsgi.ini etc.)
+searxng/*
+!searxng/settings.yml

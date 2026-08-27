@@ -123,6 +123,10 @@ err()  { echo -e "${C_RED}ERROR${C_RESET} $*" >&2; }
 lc()   { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 
 dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# Compose profiles derived from config: the OPTIONAL searxng sidecar joins the stack only
+# when search.provider is "searxng". Used by start (so it comes up) and stop/delete (so
+# it's included in teardown even after the config was switched back).
+search_profile() { [[ "$(lc "$(read_cfg search.provider duckduckgo)")" == "searxng" ]] && echo "--profile search" || echo ""; }
 
 require_compose_file() { [[ -f "$COMPOSE_FILE" ]] || { err "compose file not found: $COMPOSE_FILE"; exit 1; }; }
 daemon_running() { docker info >/dev/null 2>&1; }
@@ -231,7 +235,9 @@ cmd_start() {
   require_daemon
   clear_autopilot_state
   info "START: bringing up app + memory + workbench + voice..."
-  dc up -d || { err "Failed to start the stack."; return 1; }
+  # shellcheck disable=SC2046
+  dc $(search_profile) up -d || { err "Failed to start the stack."; return 1; }
+  [[ -n "$(search_profile)" ]] && info "Search: SearXNG sidecar enabled (search.provider = searxng)."
   wait_mem || true
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   echo
@@ -284,7 +290,8 @@ cmd_update() {
     info "No image-affecting changes — the app's bind-mounted source just needs a restart."
   fi
   info "Restarting with the new version..."
-  dc up -d || { err "Restart failed."; return 1; }
+  # shellcheck disable=SC2046
+  dc $(search_profile) up -d || { err "Restart failed."; return 1; }
   dc restart jarvis-app >/dev/null 2>&1 || true   # bind-mounted app code loads on restart
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Update complete. (Hard-refresh the browser — Cmd-Shift-R — to reload the frontend.)"
@@ -337,7 +344,9 @@ cmd_status() {
   fi
 }
 
-cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc stop; clear_autopilot_state; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
+# stop/down always include the search profile so the optional sidecar is covered even
+# if the config was switched away from searxng after it started.
+cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc --profile search stop; clear_autopilot_state; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
 
 cmd_delete() {
   require_daemon
@@ -356,7 +365,7 @@ cmd_delete() {
     fi
   fi
   warn "DELETE: removing containers, network, and the data volumes (semantic-memory vector store + workbench home). Bind mounts — config, shared folders, and LLM_WORKSPACE — survive."
-  dc down -v --remove-orphans
+  dc --profile search down -v --remove-orphans
   clear_autopilot_state
   ok "Removed."
 }
