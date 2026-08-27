@@ -47,8 +47,21 @@ async function runShell(command, timeoutS, signal) {
   const stream = await exec.start({ hijack: true, stdin: false });
   return await new Promise((resolve, reject) => {
     let out = Buffer.alloc(0), settled = false, stopped = false;
+    // Live progress: while a long command runs, broadcast the NEW output every 700ms
+    // (4KB tail cap) so the Activity panel shows a build/install scrolling in real time
+    // instead of a silent wait. Quick commands finish inside the first interval and
+    // emit nothing; the final output still arrives via the normal tool_result.
+    let streamedTo = 0;
+    const streamTimer = setInterval(() => {
+      if (out.length <= streamedTo) return;
+      const chunk = out.toString("utf8", Math.max(streamedTo, out.length - 4096), out.length);
+      streamedTo = out.length;
+      try { require("./scheduler").emitUiEvent("tool_stream", { id: nonce, tool: "run_shell", chunk }); } catch (_) {}
+    }, 700);
+    if (streamTimer.unref) streamTimer.unref();
     const finish = async (timedOut) => {
       if (settled) return; settled = true;
+      clearInterval(streamTimer);
       clearTimeout(guard);
       if (signal) try { signal.removeEventListener("abort", onAbort); } catch (_) {}
       let info = {};
@@ -87,7 +100,7 @@ async function runShell(command, timeoutS, signal) {
     container.modem.demuxStream(stream, sink, sink);
     stream.on("end", () => finish(false));
     stream.on("close", () => finish(false));
-    stream.on("error", (e) => { if (!settled) { settled = true; clearTimeout(guard); if (signal) try { signal.removeEventListener("abort", onAbort); } catch (_) {} if (stopped) return resolve({ exit_code: null, output: clipOutput(out.toString("utf8")) + "\n[STOPPED by user]" }); reject(e); } });
+    stream.on("error", (e) => { if (!settled) { settled = true; clearInterval(streamTimer); clearTimeout(guard); if (signal) try { signal.removeEventListener("abort", onAbort); } catch (_) {} if (stopped) return resolve({ exit_code: null, output: clipOutput(out.toString("utf8")) + "\n[STOPPED by user]" }); reject(e); } });
   });
 }
 
@@ -1372,4 +1385,5 @@ function isRetryable(name) {
 }
 
 // Only what's imported elsewhere is exported; everything else is reached via execTool.
-module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs, reloadExtraTools };
+// `docker` is shared with autobackup.js (same proxy-aware client, no duplicate init).
+module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs, reloadExtraTools, docker };
