@@ -405,3 +405,77 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .cfg-note { display: block; margin-top: 4px; font-size: .72rem; color: var(--muted); }
 .cfg-result.err { color: #ff6b7d; }
 .cfg-result code { background: rgba(255,255,255,.08); padding: 1px 6px; border-radius: 5px; font-family: ui-monospace, monospace; }
+
+/* =================== Batch-4 UI: modals, light theme, chat tabs, toolbars =================== */
+
+/* --- modal system (replaces native prompt/confirm/alert) --- */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 300; }
+.modal-card { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 18px; width: min(500px, 92vw); max-height: 84vh; overflow: auto; box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.modal-card h4 { margin: 0 0 8px; }
+.modal-body { color: var(--muted); font-size: .88rem; white-space: pre-wrap; margin-bottom: 12px; }
+.modal-body .st-list { display: flex; flex-direction: column; gap: 6px; }
+.modal-card input[type="text"], .modal-card textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px; font: inherit; margin-bottom: 12px; }
+.modal-card textarea { min-height: 90px; resize: vertical; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions button { border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
+.modal-cancel { background: transparent; border: 1px solid var(--edge); color: var(--muted); }
+.modal-cancel:hover { color: var(--text); }
+.modal-ok { background: var(--accent); border: 1px solid var(--accent); color: #04222e; font-weight: 700; }
+.modal-ok.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* --- light theme: token overrides + the few glass effects that assumed a dark ground --- */
+html[data-theme="light"] {
+  --bg: #eef3f7; --panel: #ffffff; --edge: #c6d7e2; --text: #12232f; --muted: #4f6b7b;
+  --accent: #0783b0; --gold: #9a6f10; --user: #dbe8f8; --danger: #c62f2f;
+}
+html[data-theme="light"] .ctx-bar { background: rgba(0,0,0,.12); }
+html[data-theme="light"] .jstatus { background: rgba(0,0,0,.03); }
+html[data-theme="light"] .ambient-exit, html[data-theme="light"] .ambient-style { background: rgba(0,0,0,.06); }
+html[data-theme="light"] .apd-close:hover { background: rgba(0,0,0,.06); }
+html[data-theme="light"] .modal-overlay { background: rgba(20,40,55,.35); }
+html[data-theme="light"] .modal-ok { color: #fff; }
+
+/* --- chat tabs (parallel named conversations) --- */
+.chat-tabs { display: flex; align-items: center; gap: 4px; padding: 5px 10px 0; overflow-x: auto; scrollbar-width: thin; }
+.chat-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; border: 1px solid var(--edge); border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); padding: 4px 8px 4px 12px; font-size: .76rem; cursor: pointer; white-space: nowrap; }
+.chat-tab .ct-name { overflow: hidden; text-overflow: ellipsis; }
+.chat-tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
+.chat-tab .ct-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: .8rem; padding: 0 2px; border-radius: 4px; }
+.chat-tab .ct-x:hover { color: var(--danger); }
+.chat-tab-add { border: 1px dashed var(--edge); background: transparent; color: var(--muted); border-radius: 8px; padding: 3px 9px; cursor: pointer; font-size: .8rem; }
+.chat-tab-add:hover { color: var(--accent); border-color: var(--accent); }
+
+/* --- in-chat search --- */
+.chat-search { display: none; align-items: center; gap: 6px; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--edge); }
+.chat-search.open { display: flex; }
+.chat-search input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: .82rem; }
+.chat-search .cs-count { font-size: .72rem; color: var(--muted); white-space: nowrap; }
+.chat-search button { background: transparent; border: 1px solid var(--edge); color: var(--muted); border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+.chat-search button:hover { color: var(--accent); }
+.bubble mark { background: var(--gold); color: #1a1a1a; border-radius: 3px; padding: 0 1px; }
+.msg.search-current .bubble { outline: 2px solid var(--gold); }
+
+/* --- activity panel: toolbar (filter) + live stream + per-entry copy --- */
+.act-toolbar { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--edge); }
+.act-toolbar input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 7px; padding: 4px 8px; font: inherit; font-size: .78rem; }
+.entry { position: relative; }
+.entry .e-copy { position: absolute; top: 4px; right: 4px; opacity: 0; border: 1px solid var(--edge); background: var(--panel); color: var(--muted); border-radius: 5px; padding: 1px 6px; font-size: .68rem; cursor: pointer; }
+.entry:hover .e-copy { opacity: 1; }
+.entry pre.live { border-left: 2px solid var(--accent); animation: livepulse 1.6s infinite; }
+@keyframes livepulse { 0%,100% { border-left-color: var(--accent); } 50% { border-left-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .entry pre.live { animation: none; } }
+
+/* --- files tab toolbar (RW/RO switch + upload) --- */
+.files-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+/* --- self-test status rows (Config → Diagnostics) --- */
+.st-row { display: flex; align-items: baseline; gap: 8px; font-size: .82rem; }
+.st-row .st-ic { font-weight: 700; }
+.st-row.ok .st-ic { color: #3ad07a; }
+.st-row.bad .st-ic { color: var(--danger); }
+.st-row .st-detail { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+#selftest-results { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+
+/* --- autopilot history modal rows --- */
+.aph-row { border-top: 1px solid var(--edge); padding: 7px 0; font-size: .8rem; }
+.aph-row .aph-meta { color: var(--muted); font-size: .7rem; margin-bottom: 2px; }

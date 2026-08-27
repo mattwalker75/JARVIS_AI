@@ -22,6 +22,8 @@
 //   Drag-drop upload .... uploadFile/setupDropZone
 //   init() .............. startup sequence (config fetch, restore, connect)
 //   "===== Config tab" .. full config/secrets editor, model pickers, prompt library
+//   "===== Batch-4" ..... chat tabs, theme toggle, in-chat search, .md export,
+//                         self-test panel, manual backup, Autopilot cycle history
 const $ = (id) => document.getElementById(id);
 const messagesEl = $("messages"), formEl = $("composer"), inputEl = $("input"), stopBtn = $("stop");
 const statusEl = $("jarvis-status");   // always-visible working/idle pill in the header
@@ -29,8 +31,59 @@ const statusEl = $("jarvis-status");   // always-visible working/idle pill in th
 let chatWatchdog = localStorage.getItem("jarvis.watchdog") !== "0";   // default ON (kill stalled streams)
 let chatPlan = localStorage.getItem("jarvis.plan") === "1";           // default OFF (plan-first mode)
 function sendChatWS(extra) {
+  // Strip UI-only fields (ts) — only {role, content} may reach the model API.
+  if (extra && Array.isArray(extra.messages)) extra = { ...extra, messages: extra.messages.map(({ role, content }) => ({ role, content })) };
   ws.send(JSON.stringify({ type: "chat", watchdog: chatWatchdog, planMode: chatPlan, ...extra }));
 }
+
+// Apply the saved theme BEFORE anything renders further (default: dark, the JARVIS look).
+(function () {
+  const t = localStorage.getItem("jarvis.theme");
+  if (t === "light") document.documentElement.dataset.theme = "light";
+})();
+
+// ---- Modal system — replaces every native prompt()/confirm()/alert() -----------------
+// uiModal resolves null on cancel/Esc/backdrop; with `input`/`textarea` it resolves the
+// entered string; with `fields` it resolves {id: value}; otherwise true on OK.
+function uiModal({ title, body, bodyHtml, input, textarea, value = "", placeholder = "", fields, okText = "OK", cancelText = "Cancel", danger = false, noCancel = false }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div"); overlay.className = "modal-overlay";
+    const card = document.createElement("div"); card.className = "modal-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    let h = `<h4>${esc(title || "")}</h4>`;
+    if (body) h += `<div class="modal-body">${esc(body)}</div>`;
+    if (bodyHtml) h += `<div class="modal-body">${bodyHtml}</div>`;   // trusted, app-built markup only
+    if (input) h += `<input type="text" class="m-in" value="${esc(value)}" placeholder="${esc(placeholder)}">`;
+    if (textarea) h += `<textarea class="m-in" placeholder="${esc(placeholder)}">${esc(value)}</textarea>`;
+    if (fields) for (const f of fields) {
+      h += `<label style="display:block;font-size:.76rem;color:var(--muted);margin-bottom:2px">${esc(f.label)}</label>`;
+      h += f.type === "textarea"
+        ? `<textarea class="m-in" data-field="${esc(f.id)}">${esc(f.value == null ? "" : String(f.value))}</textarea>`
+        : `<input type="text" class="m-in" data-field="${esc(f.id)}" value="${esc(f.value == null ? "" : String(f.value))}">`;
+    }
+    h += `<div class="modal-actions">${noCancel ? "" : `<button class="modal-cancel">${esc(cancelText)}</button>`}<button class="modal-ok${danger ? " danger" : ""}">${esc(okText)}</button></div>`;
+    card.innerHTML = h;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const done = (v) => { document.removeEventListener("keydown", onKey, true); overlay.remove(); resolve(v); };
+    const ok = () => {
+      if (fields) { const out = {}; card.querySelectorAll("[data-field]").forEach((el) => { out[el.dataset.field] = el.value; }); return done(out); }
+      if (input || textarea) return done(card.querySelector(".m-in").value);
+      done(true);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(null); }
+      else if (e.key === "Enter" && !e.shiftKey && e.target && e.target.tagName !== "TEXTAREA") { e.preventDefault(); ok(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay && !noCancel) done(null); });
+    const c = card.querySelector(".modal-cancel"); if (c) c.addEventListener("click", () => done(null));
+    card.querySelector(".modal-ok").addEventListener("click", ok);
+    const first = card.querySelector(".m-in") || card.querySelector(".modal-ok");
+    first.focus(); if (first.select) first.select();
+  });
+}
+const uiConfirm = (msg, opts = {}) => uiModal({ title: opts.title || "Are you sure?", body: msg, okText: opts.okText || "OK", danger: !!opts.danger }).then((v) => v !== null);
+const uiPrompt = (title, value = "", opts = {}) => uiModal({ title, body: opts.body, input: !opts.textarea, textarea: !!opts.textarea, value, placeholder: opts.placeholder || "", okText: opts.okText || "Save" });
 
 // Auto-scroll only when the user is already at the bottom. If they scroll up to read
 // while the AI is streaming, stop yanking them back down; re-engage when they return.
@@ -71,14 +124,32 @@ document.addEventListener("visibilitychange", () => {
 });
 
 const history = [];
-// Persist the conversation so a browser refresh doesn't lose it.
-const HISTORY_KEY = "jarvis_history";
-function saveHistory() { try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-100))); } catch (_) {} }
+// ---- Parallel named conversations (chat tabs) ---------------------------------------
+// Each open chat is a localStorage slot (jarvis_chat_<id>); jarvis.chats tracks the tab
+// list + active id. `history` always holds the ACTIVE chat; switching tabs saves the
+// current slot and loads the target. Entries carry a `ts` for hover timestamps —
+// stripped before anything is sent to the model (see sendChatWS).
+const CHATS_META_KEY = "jarvis.chats";
+const chatSlotKey = (id) => "jarvis_chat_" + id;
+let chatsMeta = (() => {
+  let m; try { m = JSON.parse(localStorage.getItem(CHATS_META_KEY) || "null"); } catch (_) { m = null; }
+  if (m && Array.isArray(m.list) && m.list.length) return m;
+  // First run (or migration): fold the legacy single-history key into tab 1.
+  const id = "c" + Date.now().toString(36);
+  try { const legacy = localStorage.getItem("jarvis_history"); if (legacy) { localStorage.setItem(chatSlotKey(id), legacy); localStorage.removeItem("jarvis_history"); } } catch (_) {}
+  return { list: [{ id, name: "Chat 1" }], active: id };
+})();
+function saveChatsMeta() { try { localStorage.setItem(CHATS_META_KEY, JSON.stringify(chatsMeta)); } catch (_) {} }
+function saveHistory() { try { localStorage.setItem(chatSlotKey(chatsMeta.active), JSON.stringify(history.slice(-100))); } catch (_) {} }
 function restoreHistory() {
-  let saved; try { saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch (_) { saved = []; }
-  if (!Array.isArray(saved) || !saved.length) return;
+  let saved; try { saved = JSON.parse(localStorage.getItem(chatSlotKey(chatsMeta.active)) || "[]"); } catch (_) { saved = []; }
+  if (!Array.isArray(saved)) return;
   for (const m of saved) {
-    if (m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string") { addMessage(m.role, m.content, null, true); history.push(m); }
+    if (m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string") {
+      const b = addMessage(m.role, m.content, null, true);
+      if (b && m.ts) b.title = new Date(m.ts).toLocaleString();
+      history.push(m);
+    }
   }
 }
 let cfg = null, ws = null;
@@ -354,12 +425,51 @@ function sendCancel() {
 function addActivity(tool, input, output) {
   const hint = activityEl.querySelector(".hint"); if (hint) hint.remove();
   const e = document.createElement("div"); e.className = "entry";
+  e.dataset.tool = String(tool || "").toLowerCase();   // for the filter box
   let html = `<span class="tname">${esc(tool)}</span>`;
   if (input !== undefined) html += ` <span class="tin">${esc(typeof input === "string" ? input : JSON.stringify(input))}</span>`;
-  if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre>`;
-  e.innerHTML = html; activityEl.appendChild(e); activityEl.scrollTop = activityEl.scrollHeight;
+  if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre><button class="e-copy" title="Copy output">⧉</button>`;
+  e.innerHTML = html;
+  applyActFilter(e);
+  activityEl.appendChild(e); activityEl.scrollTop = activityEl.scrollHeight;
   while (activityEl.children.length > 200) activityEl.removeChild(activityEl.firstChild); // cap DOM growth
   if (typeof drawer !== "undefined" && drawer) drawer.notifyActivity();   // badge the toggle if the drawer is closed
+  return e;
+}
+// Filter entries by tool-name substring (empty = show all). Applied live to existing
+// entries and to each new one as it arrives.
+function applyActFilter(entry) {
+  const q = (($("act-filter") || {}).value || "").trim().toLowerCase();
+  const apply = (el) => { el.style.display = !q || (el.dataset.tool || "").includes(q) ? "" : "none"; };
+  if (entry) return apply(entry);
+  activityEl.querySelectorAll(".entry").forEach(apply);
+}
+(() => { const f = $("act-filter"); if (f) f.addEventListener("input", () => applyActFilter()); })();
+// Copy an entry's output (delegated — entries come and go).
+activityEl.addEventListener("click", (e) => {
+  const btn = e.target.closest && e.target.closest(".e-copy"); if (!btn) return;
+  const pre = btn.parentElement.querySelector("pre");
+  (navigator.clipboard ? navigator.clipboard.writeText(pre ? pre.innerText : "") : Promise.reject())
+    .then(() => { btn.textContent = "✓"; setTimeout(() => (btn.textContent = "⧉"), 1200); }).catch(() => {});
+});
+// Live run_shell output: chunks stream in keyed by command id; append to a growing
+// <pre> (8KB tail cap) so long builds scroll in real time. The final tool_result still
+// arrives as its own complete entry, at which point the live entry is retired.
+const liveStreams = {};
+function addStreamChunk(d) {
+  let pre = liveStreams[d.id];
+  if (!pre) {
+    const e = addActivity(d.tool + " ⏵ live", undefined, "");
+    pre = e.querySelector("pre"); pre.classList.add("live");
+    liveStreams[d.id] = pre;
+  }
+  let txt = pre.textContent + d.chunk;
+  if (txt.length > 8000) txt = "…" + txt.slice(-8000);
+  pre.textContent = txt;
+  activityEl.scrollTop = activityEl.scrollHeight;
+}
+function retireStreams() {
+  for (const id of Object.keys(liveStreams)) { liveStreams[id].classList.remove("live"); delete liveStreams[id]; }
 }
 
 let wsBackoff = 1000, connLost = false;
@@ -373,7 +483,8 @@ function connectWS() {
     // Any of these events means the model is actively producing output — reset the stall clock.
     if (["tool", "tool_result", "usage", "reasoning", "token"].includes(d.type)) markActivity();
     if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
-    else if (d.type === "tool_result") { addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
+    else if (d.type === "tool_result") { if (d.tool === "run_shell" || d.tool === "sub▸ run_shell") retireStreams(); addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
+    else if (d.type === "tool_stream") { addStreamChunk(d); markActivity(); }
     else if (d.type === "usage") {
       addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
       sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
@@ -395,12 +506,14 @@ function connectWS() {
       hideWorking(); finalizeThink();
       const t = d.text || "";
       const finalText = streamBubble ? (streamText || t) : t;
+      let replyBubble = streamBubble;
       if (streamBubble) { const lvl = renderAssistant(streamBubble, finalText); if (lvl) flashChat(lvl); }
-      else addMessage("assistant", finalText);
+      else replyBubble = addMessage("assistant", finalText);
+      if (replyBubble) replyBubble.title = new Date().toLocaleString();
       // ephemeral = a verbose Autopilot cycle: show it, but don't add it to the chat's
       // model-context history (would bloat/confuse your next chat turn) and don't speak it.
       if (!d.ephemeral) {
-        history.push({ role: "assistant", content: finalText }); saveHistory();
+        history.push({ role: "assistant", content: finalText, ts: Date.now() }); saveHistory();
         if (window.JarvisVoice) {
           if (ttsSpokenLen > 0 && streamText) { const rest = streamText.slice(ttsSpokenLen); if (rest.trim()) JarvisVoice.speak(rest); }
           else JarvisVoice.speak(plain(finalText));
@@ -424,8 +537,9 @@ function connectWS() {
       addActivity("task ▸ " + (d.run.label || d.run.id) + " (run " + d.run.runs + ")", undefined, d.run.result || "(no output)");
       refreshTasks();
     } else if (d.type === "chat_post") {
-      addMessage("assistant", d.message);
-      history.push({ role: "assistant", content: d.message }); saveHistory();
+      const pb = addMessage("assistant", d.message);
+      if (pb) pb.title = new Date().toLocaleString();
+      history.push({ role: "assistant", content: d.message, ts: Date.now() }); saveHistory();
       if (window.JarvisVoice) JarvisVoice.speak(plain(d.message));
     }
   };
@@ -460,13 +574,25 @@ function renderMemories(filter) {
   items.forEach((m) => {
     const row = document.createElement("div"); row.className = "mem-item";
     const txt = document.createElement("span"); txt.className = "mem-text"; txt.textContent = m.memory || "";
+    const edit = document.createElement("button"); edit.className = "ghost"; edit.textContent = "✏️"; edit.title = "Edit this memory (keeps its id)";
+    edit.addEventListener("click", async () => {
+      const next = await uiPrompt("Edit memory", m.memory || "", { textarea: true, okText: "Save" });
+      if (next === null || !next.trim() || next === m.memory) return;
+      edit.disabled = true;
+      try {
+        const r = await (await fetch("/api/memories/" + encodeURIComponent(m.id), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: next.trim() }) })).json();
+        if (r.error) addMessage("assistant", "Memory update failed: " + r.error, "error");
+        else { m.memory = next.trim(); txt.textContent = m.memory; }
+      } catch (e) { addMessage("assistant", "Memory update failed: " + e, "error"); }
+      edit.disabled = false;
+    });
     const del = document.createElement("button"); del.className = "ghost"; del.textContent = "🗑"; del.title = "Delete this memory";
     del.addEventListener("click", async () => {
       del.disabled = true;
       try { await fetch("/api/memories/" + encodeURIComponent(m.id), { method: "DELETE" }); memItems = memItems.filter((x) => x.id !== m.id); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No memories saved yet.</div>'; }
       catch { del.disabled = false; }
     });
-    row.appendChild(txt); row.appendChild(del); el.appendChild(row);
+    row.appendChild(txt); row.appendChild(edit); row.appendChild(del); el.appendChild(row);
   });
 }
 const memRefresh = $("mem-refresh");
@@ -474,7 +600,7 @@ if (memRefresh) memRefresh.addEventListener("click", refreshMemories);
 // Consolidate: LLM-merged dedupe of the whole store (guarded server-side).
 const memConsolidate = $("mem-consolidate");
 if (memConsolidate) memConsolidate.addEventListener("click", async () => {
-  if (!confirm("Consolidate memories? Near-duplicates are merged and redundant entries deleted (the smart model reviews the whole store).")) return;
+  if (!(await uiConfirm("Consolidate memories? Near-duplicates are merged and redundant entries deleted (the smart model reviews the whole store).", { title: "Consolidate memory", okText: "Consolidate" }))) return;
   memConsolidate.disabled = true; const lbl = memConsolidate.textContent; memConsolidate.textContent = "…consolidating";
   try {
     const d = await (await fetch("/api/memories/consolidate", { method: "POST" })).json();
@@ -487,28 +613,52 @@ if (memConsolidate) memConsolidate.addEventListener("click", async () => {
 const memSearch = $("mem-search");
 if (memSearch) memSearch.addEventListener("input", () => renderMemories(memSearch.value));
 
-// --- Files tab: browse / download / delete the shared read-write folder ---
+// --- Files tab: browse / download / upload / delete the shared folders (RW + RO) ---
 function fmtBytes(n) { if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(1) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
+let filesDir = "rw";   // which shared folder the tab shows (read-write | read-only)
 async function refreshFiles() {
   const el = $("files-list"); if (!el) return;
+  const ro = filesDir === "ro";
+  const up = $("files-upload-lbl"); if (up) up.hidden = ro;   // uploads land in RW only
   el.innerHTML = '<div class="hint">Loading…</div>';
-  let d; try { d = await (await fetch("/api/files?dir=rw")).json(); } catch { el.innerHTML = '<div class="hint">Failed to load files.</div>'; return; }
+  let d; try { d = await (await fetch("/api/files?dir=" + filesDir)).json(); } catch { el.innerHTML = '<div class="hint">Failed to load files.</div>'; return; }
   if (d.error) { el.innerHTML = '<div class="hint">Error: ' + esc(d.error) + '</div>'; return; }
   const files = d.files || [];
-  if (!files.length) { el.innerHTML = '<div class="hint">No files yet. JARVIS saves what it makes here; drag a file into the chat to add one.</div>'; return; }
+  if (!files.length) {
+    el.innerHTML = '<div class="hint">' + (ro ? "Nothing in the read-only folder. Put reference files in LLM_READ_ONLY_FILES/ on your Mac." : "No files yet. JARVIS saves what it makes here; drag a file into the chat (or ⤒ Upload) to add one.") + '</div>';
+    return;
+  }
   el.innerHTML = "";
   files.forEach((f) => {
     const enc = encodeURIComponent(f.path);
     const row = document.createElement("div"); row.className = "file-item";
-    const link = document.createElement("a"); link.className = "file-name"; link.href = "/api/files/raw?dir=rw&path=" + enc; link.target = "_blank"; link.textContent = f.path; link.title = "Open / preview";
+    const link = document.createElement("a"); link.className = "file-name"; link.href = "/api/files/raw?dir=" + filesDir + "&path=" + enc; link.target = "_blank"; link.textContent = f.path; link.title = "Open / preview";
     const meta = document.createElement("span"); meta.className = "file-meta"; meta.textContent = fmtBytes(f.size);
-    const dl = document.createElement("a"); dl.className = "ghost file-btn"; dl.href = "/api/files/raw?dir=rw&download=1&path=" + enc; dl.textContent = "⬇"; dl.title = "Download";
-    const del = document.createElement("button"); del.className = "ghost file-btn"; del.textContent = "🗑"; del.title = "Delete";
-    del.addEventListener("click", async () => { if (!confirm("Delete " + f.path + "?")) return; del.disabled = true; try { await fetch("/api/files?dir=rw&path=" + enc, { method: "DELETE" }); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No files yet.</div>'; } catch { del.disabled = false; } });
-    row.append(link, meta, dl, del); el.appendChild(row);
+    const dl = document.createElement("a"); dl.className = "ghost file-btn"; dl.href = "/api/files/raw?dir=" + filesDir + "&download=1&path=" + enc; dl.textContent = "⬇"; dl.title = "Download";
+    row.append(link, meta, dl);
+    if (!ro) {   // the read-only folder is exactly that
+      const del = document.createElement("button"); del.className = "ghost file-btn"; del.textContent = "🗑"; del.title = "Delete";
+      del.addEventListener("click", async () => { if (!(await uiConfirm("Delete " + f.path + "?", { title: "Delete file", okText: "Delete", danger: true }))) return; del.disabled = true; try { await fetch("/api/files?dir=rw&path=" + enc, { method: "DELETE" }); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No files yet.</div>'; } catch { del.disabled = false; } });
+      row.append(del);
+    }
+    el.appendChild(row);
   });
 }
 const filesRefresh = $("files-refresh"); if (filesRefresh) filesRefresh.addEventListener("click", refreshFiles);
+(() => {   // RW/RO switch + explicit upload button (drag-drop onto the chat still works too)
+  const seg = $("files-dir");
+  if (seg) seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-dir]"); if (!b) return;
+    filesDir = b.dataset.dir === "ro" ? "ro" : "rw";
+    seg.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
+    refreshFiles();
+  });
+  const inp = $("files-upload");
+  if (inp) inp.addEventListener("change", async (e) => {
+    for (const f of [...(e.target.files || [])]) await uploadFile(f);
+    e.target.value = ""; refreshFiles();
+  });
+})();
 
 // --- Settings persistence + model switcher ---
 function persistSetting(p, value) { fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: p, value }) }).catch(() => {}); }
@@ -651,7 +801,9 @@ function send(text) {
   if (text.startsWith("/")) { inputEl.value = ""; autoGrow(); handleSlash(text); return; }   // slash command
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Connecting… try again in a moment.", "error"); return; }
   stickBottom = true;                     // a fresh send always snaps to the bottom
-  addMessage("user", text); history.push({ role: "user", content: text }); saveHistory();
+  const ub = addMessage("user", text); const now = Date.now();
+  if (ub) ub.title = new Date(now).toLocaleString();
+  history.push({ role: "user", content: text, ts: now }); saveHistory();
   inputEl.value = ""; autoGrow(); showWorking("working…");
   sendChatWS({ messages: history, persona: currentPersona || undefined });
 }
@@ -725,7 +877,7 @@ function renderPlan(plan) {
     handle.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
   }
   if (clr) clr.addEventListener("click", async () => {
-    if (!confirm("Clear the current plan?")) return;
+    if (!(await uiConfirm("Clear the current plan? The checklist is discarded (finished work is untouched).", { title: "Clear plan", okText: "Clear", danger: true }))) return;
     try { await fetch("/api/plan", { method: "DELETE" }); } catch (_) {}
     banner.hidden = true;
   });
@@ -868,12 +1020,12 @@ function renderAutopilot(st) {
   const apPost = async (path, body) => { try { renderAutopilot(await (await fetch("/api/autopilot/" + path, { method: "POST", headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined })).json()); } catch (_) {} };
   const wrap = $("ap-wrapup"), stop = $("ap-stop"), pauseB = $("ap-pause"), extendB = $("ap-extend"), modifyB = $("ap-modify"), continueB = $("ap-continue"), dismissB = $("ap-dismiss");
   if (wrap) wrap.addEventListener("click", () => apPost("wrapup"));
-  if (stop) stop.addEventListener("click", () => {
+  if (stop) stop.addEventListener("click", async () => {
     if (apLastStatus === "stopping") {
       // A stop is already pending but the current step hasn't quit — offer the forced stop.
-      if (confirm("Autopilot is still finishing its current step and hasn't stopped yet.\n\nPerform a FORCED stop? This aborts the running step immediately and kills any preview servers it started (ports 9101-9150).")) apPost("forcestop");
+      if (await uiConfirm("Autopilot is still finishing its current step and hasn't stopped yet.\n\nPerform a FORCED stop? This aborts the running step immediately and kills any preview servers it started (ports 9101-9150).", { title: "Force stop", okText: "Force stop", danger: true })) apPost("forcestop");
     } else {
-      if (confirm("Stop Autopilot? It aborts the current step and stops. (If it doesn't stop, click Stop again for a forced stop.)")) apPost("stop");
+      if (await uiConfirm("Stop Autopilot? It aborts the current step and stops. (If it doesn't stop, click Stop again for a forced stop.)", { title: "Stop Autopilot", okText: "Stop", danger: true })) apPost("stop");
     }
   });
   if (pauseB) pauseB.addEventListener("click", () => apPost(pauseB.dataset.act === "resume" ? "resume" : "pause"));
@@ -990,16 +1142,46 @@ async function refreshTasks() {
   tasksList.innerHTML = "";
   tasks.forEach((t) => {
     const recurring = t.type === "recurring";
+    const paused = t.status === "paused";
     const el = document.createElement("div"); el.className = "task";
     el.innerHTML =
-      `<div class="t-top"><span class="t-label">${esc(t.label || t.prompt.slice(0, 40))}</span>` +
-      `<span><span class="badge ${recurring ? "recurring" : ""}">${recurring ? "every " + Math.round(t.every_seconds / 60) + "m" : "once"}</span> ` +
+      `<div class="t-top"><span class="t-label">${paused ? "⏸ " : ""}${esc(t.label || t.prompt.slice(0, 40))}</span>` +
+      `<span><span class="badge ${recurring ? "recurring" : ""}">${paused ? "paused" : recurring ? "every " + Math.round(t.every_seconds / 60) + "m" : "once"}</span> ` +
+      `<button class="ghost file-btn t-edit" data-id="${esc(t.id)}" title="Edit this task">✏️</button>` +
+      `<button class="ghost file-btn t-pause" data-id="${esc(t.id)}" data-paused="${paused ? "1" : ""}" title="${paused ? "Resume this task" : "Pause this task (keeps it, skips runs)"}">${paused ? "▶" : "⏸"}</button>` +
       `<button class="cancel" data-id="${esc(t.id)}">cancel</button></span></div>` +
-      `<div class="t-meta">next: ${esc(fmtWhen(t.next_run))}${t.last_run ? " · last run: " + esc(fmtWhen(t.last_run)) : ""}${t.until ? " · until: " + esc(t.until) : ""} · runs: ${t.runs}</div>` +
+      `<div class="t-meta">next: ${paused ? "(paused)" : esc(fmtWhen(t.next_run))}${t.last_run ? " · last run: " + esc(fmtWhen(t.last_run)) : ""}${t.until ? " · until: " + esc(t.until) : ""} · runs: ${t.runs}</div>` +
       `<div class="t-prompt">${esc(t.prompt)}</div>` +
       (t.last_result ? `<div class="t-result">↳ ${esc(t.last_result)}</div>` : "");
+    el.dataset.task = JSON.stringify({ id: t.id, label: t.label, prompt: t.prompt, every_seconds: t.every_seconds, until: t.until });
     tasksList.appendChild(el);
   });
+}
+async function taskUpdate(body) {
+  try {
+    const r = await (await fetch("/api/tasks/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    if (r.error) addMessage("assistant", "Task update failed: " + r.error, "error");
+  } catch (e) { addMessage("assistant", "Task update failed: " + e, "error"); }
+  refreshTasks();
+}
+// Edit a task in place (the visible prompt is truncated to 140 chars server-side; fine
+// for a tweak — ask JARVIS in chat for a full rewrite of a very long task).
+async function editTaskDialog(t) {
+  const out = await uiModal({
+    title: "Edit task", okText: "Save changes",
+    fields: [
+      { id: "label", label: "Label", value: t.label || "" },
+      { id: "prompt", label: "Prompt (what the task does)", value: t.prompt || "", type: "textarea" },
+      { id: "every_minutes", label: "Repeat every (minutes — empty = one-shot stays as is)", value: t.every_seconds ? Math.round(t.every_seconds / 60) : "" },
+      { id: "until", label: "Stop condition (plain language, empty = none)", value: t.until || "" },
+    ],
+  });
+  if (!out) return;
+  const body = { id: t.id, label: out.label, until: out.until };
+  if (out.prompt && out.prompt.trim()) body.prompt = out.prompt;
+  const mins = Number(out.every_minutes);
+  if (mins > 0) body.every_seconds = Math.round(mins * 60);
+  await taskUpdate(body);
 }
 function addNoteEl(n, prepend) {
   if (!notesList) return;
@@ -1030,7 +1212,17 @@ async function refreshNotes() {
   notes.slice().reverse().forEach((n) => addNoteEl(n));
 }
 if (tasksList) tasksList.addEventListener("click", async (e) => {
+  const pauseBtn = e.target.closest("button.t-pause");
+  if (pauseBtn) { await taskUpdate({ id: pauseBtn.dataset.id, paused: !pauseBtn.dataset.paused }); return; }
+  const editBtn = e.target.closest("button.t-edit");
+  if (editBtn) {
+    const holder = editBtn.closest(".task");
+    let t = null; try { t = JSON.parse(holder.dataset.task || "null"); } catch (_) {}
+    if (t) await editTaskDialog(t);
+    return;
+  }
   const btn = e.target.closest("button.cancel"); if (!btn) return;
+  if (!(await uiConfirm("Cancel this task? It stops permanently (pause instead to keep it).", { title: "Cancel task", okText: "Cancel task", danger: true }))) return;
   try { await fetch("/api/tasks/cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: btn.dataset.id }) }); } catch {}
   refreshTasks();
 });
@@ -1078,15 +1270,15 @@ function loadConversation(messages) {
   saveHistory(); resetSessUsage(); refreshContextMeter();   // reset usage + show the loaded convo's context estimate
 }
 async function saveCurrent() {
-  const name = prompt("Save conversation as:", currentSession.name || "Session " + new Date().toLocaleString());
-  if (name === null) return;
+  const name = await uiPrompt("Save conversation as", currentSession.name || "Session " + new Date().toLocaleString(), { okText: "Save" });
+  if (name === null || !name.trim()) return;
   try {
     const r = await (await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: currentSession.id, name, messages: history }) })).json();
     currentSession = { id: r.id, name: r.name }; renderCurrent(); refreshSessions();
-  } catch (e) { alert("save failed: " + e); }
+  } catch (e) { addMessage("assistant", "Session save failed: " + e, "error"); }
 }
-function newSession() {
-  if (history.length && !confirm("Start a new chat? The current conversation will be cleared.")) return;
+async function newSession() {
+  if (history.length && !(await uiConfirm("Start a new chat? The current conversation will be cleared.", { title: "New chat", okText: "New chat" }))) return;
   messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
   try { fetch("/api/plan", { method: "DELETE" }); } catch (_) {} renderPlan(null);   // a fresh chat starts with no active plan (don't inherit a stale one)
@@ -1101,7 +1293,7 @@ async function loadSession(id) {
     const d = await (await fetch("/api/sessions/" + encodeURIComponent(id))).json();
     loadConversation(d.messages); currentSession = { id: d.id, name: d.name }; renderCurrent();
     if (sessionsDrop) sessionsDrop.hidden = true;
-  } catch (e) { alert("load failed: " + e); }
+  } catch (e) { addMessage("assistant", "Session load failed: " + e, "error"); }
 }
 if (sessionsBtn) sessionsBtn.addEventListener("click", (e) => { e.stopPropagation(); sessionsDrop.hidden = !sessionsDrop.hidden; if (!sessionsDrop.hidden) { refreshSessions(); renderCurrent(); } });
 document.addEventListener("click", (e) => { if (sessionsDrop && !sessionsDrop.hidden && !sessionsDrop.contains(e.target) && e.target !== sessionsBtn) sessionsDrop.hidden = true; });
@@ -1112,7 +1304,11 @@ if (sessionsItems) sessionsItems.addEventListener("click", async (e) => {
   const id = btn.dataset.id, act = btn.dataset.act;
   if (act === "load") loadSession(id);
   else if (act === "export") location.href = "/api/sessions/" + encodeURIComponent(id) + "/export";
-  else if (act === "del") { try { await fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" }); } catch {} if (currentSession.id === id) { currentSession = { id: null, name: null }; renderCurrent(); } refreshSessions(); }
+  else if (act === "del") {
+    if (!(await uiConfirm("Delete this saved session?", { title: "Delete session", okText: "Delete", danger: true }))) return;
+    try { await fetch("/api/sessions/" + encodeURIComponent(id), { method: "DELETE" }); } catch {}
+    if (currentSession.id === id) { currentSession = { id: null, name: null }; renderCurrent(); } refreshSessions();
+  }
 });
 if (sessionImport) sessionImport.addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0]; if (!file) return;
@@ -1120,7 +1316,7 @@ if (sessionImport) sessionImport.addEventListener("change", async (e) => {
     const d = JSON.parse(await file.text());
     const r = await (await fetch("/api/sessions/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: d.name, messages: d.messages }) })).json();
     await refreshSessions(); loadSession(r.id);
-  } catch (err) { alert("import failed: " + err); }
+  } catch (err) { addMessage("assistant", "Session import failed: " + err, "error"); }
   e.target.value = "";
 });
 
@@ -1404,6 +1600,11 @@ const CFG_FIELDS = [
   ["cfg-shared-rw", "shared.read_write_dir", "str"],
   ["cfg-sec-hosts", "security.allowed_hosts", "csv"],
   ["cfg-backups-retain", "backups.retain", "num"],
+  ["cfg-auto-backup", "backups.auto.enabled", "bool"],
+  ["cfg-auto-backup-hours", "backups.auto.every_hours", "num"],
+  ["cfg-auto-backup-keep", "backups.auto.keep", "num"],
+  ["cfg-ntfy-url", "notifications.ntfy_url", "str"],
+  ["cfg-ntfy-min", "notifications.min_level", "str"],
   ["cfg-secret-notice", "secret_access_notice", "bool"],
   ["cfg-custom-tools-model", "custom_tools.allow_model_authored", "bool"],
   ["cfg-log-level", "logging.level", "num"],
@@ -1488,10 +1689,10 @@ function renderModelSelect(sel, current) {
   sel.value = current;
 }
 // Type a model the endpoint didn't list; inject it and keep it selected.
-function onModelSelectChange(e) {
+async function onModelSelectChange(e) {
   const sel = e.target;
   if (sel.value !== MODEL_CUSTOM) return;
-  const name = (prompt("Enter a model name (as the provider expects it):", "") || "").trim();
+  const name = ((await uiPrompt("Custom model", "", { body: "Enter a model name exactly as the provider expects it.", okText: "Use model" })) || "").trim();
   if (name) { if (!modelOptions.includes(name)) modelOptions.push(name); renderModelSelect(sel, name); }
   else { renderModelSelect(sel, ""); }
   collectStructured(); renderRawConfig();
@@ -1651,7 +1852,7 @@ async function renderPromptPresets() {   // DEFAULT (general base) pinned first;
     catch (e) { toast("Save failed: " + e.message, false); }
   });
   if (saveAsB) saveAsB.addEventListener("click", async () => {
-    const name = (prompt("Save this prompt set as (name):", "") || "").trim();
+    const name = ((await uiPrompt("Save prompt set as", "", { placeholder: "e.g. research_v2", okText: "Save set" })) || "").trim();
     if (!name || name.toLowerCase() === "default") return;
     try { const d = await put(name); if (d.error) return toast("Save failed: " + d.error, false); await renderPromptPresets(); if (sel) sel.value = name; toast(`Saved set "${name}" (Prompts/${name}_master.prompt + ${name}_system.prompt).`, true); }
     catch (e) { toast("Save failed: " + e.message, false); }
@@ -1673,7 +1874,7 @@ async function renderPromptPresets() {   // DEFAULT (general base) pinned first;
   });
   if (delB) delB.addEventListener("click", async () => {
     const name = sel && sel.value; if (!name) return;
-    if (!confirm(`Delete the saved set "${name}" (both files)?`)) return;
+    if (!(await uiConfirm(`Delete the saved set "${name}" (both files)?`, { title: "Delete prompt set", okText: "Delete", danger: true }))) return;
     try { await fetch("/api/prompts/" + encodeURIComponent(name), { method: "DELETE" }); await renderPromptPresets(); toast(`Deleted "${name}".`, true); }
     catch (e) { toast("Delete failed: " + e.message, false); }
   });
@@ -1764,4 +1965,185 @@ MODEL_SELECT_IDS.forEach((id) => { const s = $(id); if (s) s.addEventListener("c
   });
   const save = $("cfg-save"); if (save) save.addEventListener("click", saveConfig);
   const rel = $("cfg-reload-from-disk"); if (rel) rel.addEventListener("click", loadConfig);
+})();
+
+// ===================== Batch-4 features ======================================
+// Chat tabs (parallel conversations) · theme toggle · in-chat search · .md export
+// · self-test panel · manual backup · Autopilot cycle history
+
+// --- Chat tabs ---------------------------------------------------------------
+function renderChatTabs() {
+  const bar = $("chat-tabs"); if (!bar) return;
+  bar.innerHTML = "";
+  for (const c of chatsMeta.list) {
+    const tab = document.createElement("button");
+    tab.className = "chat-tab" + (c.id === chatsMeta.active ? " active" : "");
+    tab.setAttribute("role", "tab");
+    tab.innerHTML = `<span class="ct-name">${esc(c.name)}</span>` +
+      (chatsMeta.list.length > 1 ? `<span class="ct-x" title="Close this chat">✕</span>` : "");
+    tab.title = c.name + " — click to switch, double-click to rename";
+    tab.addEventListener("click", (e) => {
+      if (e.target.classList.contains("ct-x")) return closeChat(c.id);
+      if (c.id !== chatsMeta.active) switchChat(c.id);
+    });
+    tab.addEventListener("dblclick", async () => {
+      const name = await uiPrompt("Rename chat", c.name, { okText: "Rename" });
+      if (name && name.trim()) { c.name = name.trim().slice(0, 40); saveChatsMeta(); renderChatTabs(); }
+    });
+    bar.appendChild(tab);
+  }
+  const add = document.createElement("button");
+  add.className = "chat-tab-add"; add.textContent = "＋"; add.title = "Open another conversation in parallel";
+  add.addEventListener("click", () => {
+    saveHistory();
+    const id = "c" + Date.now().toString(36);
+    chatsMeta.list.push({ id, name: "Chat " + (chatsMeta.list.length + 1) });
+    chatsMeta.active = id; saveChatsMeta();
+    messagesEl.innerHTML = ""; history.length = 0;
+    currentSession = { id: null, name: null }; renderCurrent();
+    resetSessUsage(); refreshContextMeter(); renderChatTabs();
+    addMessage("assistant", "New parallel chat. The other tabs keep their conversations — switch any time.");
+  });
+  bar.appendChild(add);
+}
+function switchChat(id) {
+  if (!chatsMeta.list.some((c) => c.id === id)) return;
+  saveHistory();                       // persist the outgoing chat
+  chatsMeta.active = id; saveChatsMeta();
+  messagesEl.innerHTML = ""; history.length = 0;
+  currentSession = { id: null, name: null }; renderCurrent();
+  restoreHistory(); resetSessUsage(); refreshContextMeter(); renderChatTabs();
+  stickBottom = true; messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+async function closeChat(id) {
+  const c = chatsMeta.list.find((x) => x.id === id); if (!c || chatsMeta.list.length < 2) return;
+  if (!(await uiConfirm(`Close "${c.name}"? Its conversation is discarded (save it via Sessions first if you want to keep it).`, { title: "Close chat", okText: "Close", danger: true }))) return;
+  try { localStorage.removeItem(chatSlotKey(id)); } catch (_) {}
+  chatsMeta.list = chatsMeta.list.filter((x) => x.id !== id);
+  if (chatsMeta.active === id) return switchChat(chatsMeta.list[0].id);
+  saveChatsMeta(); renderChatTabs();
+}
+renderChatTabs();
+
+// --- Theme toggle ------------------------------------------------------------
+(() => {
+  const btn = $("theme-toggle"); if (!btn) return;
+  const paint = () => { const light = document.documentElement.dataset.theme === "light"; btn.textContent = light ? "🌙" : "☀️"; btn.title = light ? "Switch to the dark theme" : "Switch to the light theme"; };
+  btn.addEventListener("click", () => {
+    const light = document.documentElement.dataset.theme === "light";
+    if (light) { delete document.documentElement.dataset.theme; localStorage.setItem("jarvis.theme", "dark"); }
+    else { document.documentElement.dataset.theme = "light"; localStorage.setItem("jarvis.theme", "light"); }
+    paint();
+  });
+  paint();
+})();
+
+// --- In-chat search (Cmd/Ctrl-F) --------------------------------------------
+(() => {
+  const bar = $("chat-search"), input = $("cs-input"), count = $("cs-count");
+  if (!bar || !input) return;
+  let matches = [], cur = -1;
+  const clearMarks = () => { messagesEl.querySelectorAll(".msg.search-current").forEach((m) => m.classList.remove("search-current")); };
+  function runSearch() {
+    clearMarks(); matches = []; cur = -1;
+    const q = input.value.trim().toLowerCase();
+    if (q.length >= 2) {
+      for (const msg of messagesEl.querySelectorAll(".msg")) {
+        const b = msg.querySelector(".bubble");
+        if (b && b.textContent.toLowerCase().includes(q)) matches.push(msg);
+      }
+    }
+    count.textContent = matches.length ? `${matches.length} match${matches.length > 1 ? "es" : ""}` : (q.length >= 2 ? "no matches" : "");
+    if (matches.length) jump(matches.length - 1);   // start from the most recent
+  }
+  function jump(i) {
+    if (!matches.length) return;
+    clearMarks();
+    cur = ((i % matches.length) + matches.length) % matches.length;
+    const m = matches[cur];
+    m.classList.add("search-current");
+    m.scrollIntoView({ block: "center" });
+    count.textContent = `${cur + 1}/${matches.length}`;
+  }
+  const open = () => { bar.classList.add("open"); input.focus(); input.select(); };
+  const close = () => { bar.classList.remove("open"); clearMarks(); };
+  const sb = $("chat-search-btn"); if (sb) sb.addEventListener("click", () => bar.classList.contains("open") ? close() : open());
+  input.addEventListener("input", runSearch);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); jump(e.shiftKey ? cur - 1 : cur + 1); }
+    else if (e.key === "Escape") { e.stopPropagation(); close(); }
+  });
+  $("cs-prev").addEventListener("click", () => jump(cur - 1));
+  $("cs-next").addEventListener("click", () => jump(cur + 1));
+  $("cs-close").addEventListener("click", close);
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && (e.key === "f" || e.key === "F")) { e.preventDefault(); open(); }
+  });
+})();
+
+// --- Export the current conversation as Markdown -----------------------------
+(() => {
+  const btn = $("session-export-md"); if (!btn) return;
+  btn.addEventListener("click", () => {
+    const name = (chatsMeta.list.find((c) => c.id === chatsMeta.active) || {}).name || "conversation";
+    const lines = [`# ${name}`, "", `Exported ${new Date().toLocaleString()} from JARVIS.`, ""];
+    for (const m of history) {
+      const when = m.ts ? ` · ${new Date(m.ts).toLocaleString()}` : "";
+      lines.push(`## ${m.role === "user" ? "You" : "JARVIS"}${when}`, "", m.content, "");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name.replace(/[^\w-]+/g, "_") + ".md";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+})();
+
+// --- Self-test status panel + manual backup (Config → Diagnostics) -----------
+(() => {
+  const run = $("selftest-run"), out = $("selftest-results"), st = $("selftest-status");
+  const CHECKS = [["semantic_memory", "Semantic memory (Mem0)"], ["workbench", "Workbench shell"], ["shared_rw", "Shared files"], ["internet", "Internet"], ["desktop", "Desktop (GUI)"], ["vault", "Credential vault"]];
+  if (run) run.addEventListener("click", async () => {
+    run.disabled = true; st.textContent = "running… (a few seconds)"; out.innerHTML = "";
+    try {
+      const d = await (await fetch("/api/selftest")).json();
+      st.textContent = "";
+      for (const [key, label] of CHECKS) {
+        const v = d[key];
+        const bad = !v || v.error || (typeof v.output === "string" && /error/i.test(v.output) && v.exit_code);
+        const row = document.createElement("div"); row.className = "st-row " + (bad ? "bad" : "ok");
+        const detail = bad ? (v && v.error) || "check failed" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+        row.innerHTML = `<span class="st-ic">${bad ? "✗" : "✓"}</span><span>${esc(label)}</span><span class="st-detail">${esc(String(detail).slice(0, 120))}</span>`;
+        out.appendChild(row);
+      }
+    } catch (e) { st.textContent = "self-test failed: " + e.message; }
+    run.disabled = false;
+  });
+  const bk = $("backup-now");
+  if (bk) bk.addEventListener("click", async () => {
+    bk.disabled = true; const lbl = bk.textContent; bk.textContent = "…backing up";
+    try {
+      const d = await (await fetch("/api/backup/run", { method: "POST" })).json();
+      addMessage("assistant", d.error ? "Backup failed: " + d.error : "💾 Backup finished: " + (d.results || []).join(", ") + " → data/backups/", d.error ? "error" : "notice");
+    } catch (e) { addMessage("assistant", "Backup failed: " + e.message, "error"); }
+    bk.disabled = false; bk.textContent = lbl;
+  });
+})();
+
+// --- Autopilot cycle history (📜 on the bar) ---------------------------------
+(() => {
+  const btn = $("ap-history"); if (!btn) return;
+  btn.addEventListener("click", async () => {
+    let d; try { d = await (await fetch("/api/autopilot/history")).json(); } catch (e) { return; }
+    const rows = (d.cycles || []).slice().reverse().map((c) =>
+      `<div class="aph-row"><div class="aph-meta">cycle ${c.cycle}${c.wrapUp ? " · wrap-up" : ""}${c.didWork ? "" : " · no writes"} · ${esc(new Date(c.at).toLocaleTimeString())}</div>${esc(c.summary || "(no summary)")}</div>`).join("");
+    uiModal({
+      title: "Autopilot cycle history",
+      bodyHtml: d.cycles && d.cycles.length
+        ? `<div style="font-size:.78rem;color:var(--muted);margin-bottom:6px">${esc(d.objective || "")}</div>${rows}`
+        : "No cycles recorded for the current run.",
+      okText: "Close", noCancel: true,
+    });
+  });
 })();

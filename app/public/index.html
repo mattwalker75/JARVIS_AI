@@ -21,6 +21,8 @@
       </div>
     </div>
     <div class="controls">
+      <button id="theme-toggle" class="ghost" title="Toggle light / dark theme">☀️</button>
+      <button id="chat-search-btn" class="ghost" title="Search this conversation (Cmd/Ctrl-F)">🔍</button>
       <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
       <button id="ambient-btn" class="ghost" title="Ambient voice mode — full-screen orb, hands-free (tap the orb to talk, ✕ to exit)">🌌 Ambient</button>
       <select id="model-select" class="ghost model-select" title="Chat model" hidden></select>
@@ -59,6 +61,7 @@
             <button id="session-save" class="ghost">💾 Save current</button>
             <button id="session-new" class="ghost">＋ New</button>
             <label class="ghost import-lbl">⤒ Import<input id="session-import" type="file" accept="application/json" hidden></label>
+            <button id="session-export-md" class="ghost" title="Download this conversation as Markdown">⬇ .md</button>
           </div>
           <div class="sd-cur" id="session-current"></div>
           <div id="sessions-items"><div class="hint">No saved sessions.</div></div>
@@ -116,6 +119,7 @@
         <span class="ap-meta" id="ap-meta"></span>
         <span class="ap-obj" id="ap-barobj"></span>
         <button class="ap-ctl" id="ap-continue" title="Continue on the SAME plan (fresh 15-min budget) — picks up from the first incomplete step, no rebuild" hidden>▶ Continue</button>
+        <button class="ap-ctl" id="ap-history" title="Cycle history — what each Autopilot cycle reported">📜</button>
         <button class="ap-ctl" id="ap-pause" title="Pause — stop starting new cycles (time budget freezes); resume later">⏸ Pause</button>
         <button class="ap-ctl" id="ap-extend" title="Extend the time budget by 15 minutes">+15m</button>
         <button class="ap-ctl" id="ap-modify" title="Change the objective — the next cycle re-checks its plan against it">Modify</button>
@@ -132,6 +136,14 @@
         </div>
         <ol class="pb-steps" id="pb-steps"></ol>
         <div class="pb-handle" id="pb-handle" role="button" tabindex="0" title="Show / hide the plan steps" aria-label="Show or hide the plan steps"></div>
+      </div>
+      <div class="chat-tabs" id="chat-tabs" role="tablist" aria-label="Open conversations"></div>
+      <div class="chat-search" id="chat-search">
+        <input id="cs-input" placeholder="Search this conversation…" autocomplete="off">
+        <span class="cs-count" id="cs-count"></span>
+        <button id="cs-prev" title="Previous match">↑</button>
+        <button id="cs-next" title="Next match">↓</button>
+        <button id="cs-close" title="Close search (Esc)">✕</button>
       </div>
       <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
         <div class="msg assistant"><div class="bubble">
@@ -157,6 +169,7 @@
         <button class="tab" data-tab="config">Config</button>
       </div>
       <div class="panel active" id="panel-activity">
+        <div class="act-toolbar"><input id="act-filter" placeholder="Filter by tool name…" autocomplete="off" title="Show only entries whose tool name matches"></div>
         <div class="activity" id="activity">
           <div class="hint">Tool calls (memory, shell, files) stream here so you can watch what JARVIS does.</div>
         </div>
@@ -196,6 +209,13 @@
       <div class="panel" id="panel-files">
         <div class="tasks-pane">
           <div class="tasks-head"><h4>Shared files</h4><button id="files-refresh" class="ghost">↻</button></div>
+          <div class="files-toolbar">
+            <div class="seg" id="files-dir" role="group" aria-label="Which shared folder">
+              <button data-dir="rw" class="active" title="LLM_READ_WRITE_FILES — deliverables + your uploads">Read-write</button>
+              <button data-dir="ro" title="LLM_READ_ONLY_FILES — reference files you share to JARVIS (read-only)">Read-only</button>
+            </div>
+            <label class="ghost import-lbl" id="files-upload-lbl" title="Upload a file into the read-write shared folder">⤒ Upload<input id="files-upload" type="file" multiple hidden></label>
+          </div>
           <div id="files-list"><div class="hint">Files you and JARVIS exchange (downloads, reports, uploads).</div></div>
         </div>
       </div>
@@ -363,6 +383,14 @@
             <h5>Security &amp; housekeeping</h5>
             <label>Extra allowed hosts <span class="cfg-hint-inline">comma-separated</span><input id="cfg-sec-hosts" autocomplete="off" placeholder="e.g. jarvis.tail1234.ts.net — for a proxy/tunnel; localhost is always allowed"></label>
             <label>Config backups to keep<input id="cfg-backups-retain" type="number" min="0" title="Newest N config/secrets backups kept in data/ (each config backup contains the live API key). 0 = keep everything."></label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-auto-backup" title="Scheduled tarballs of the semantic-memory volume AND /LLM_WORKSPACE, written to data/backups/ (survive --delete)."> Automatic memory + workspace backups</label>
+            <div class="cfg-grid">
+              <label>Backup every (hours)<input id="cfg-auto-backup-hours" type="number" min="1"></label>
+              <label>Auto-backups to keep<input id="cfg-auto-backup-keep" type="number" min="1" title="Newest N tarballs kept per kind in data/backups/."></label>
+            </div>
+            <label>Notification bridge (ntfy URL)<input id="cfg-ntfy-url" autocomplete="off" placeholder="https://ntfy.sh/your-secret-topic — alerts reach your phone with the browser closed"></label>
+            <label>Bridge minimum level<select id="cfg-ntfy-min"><option value="info">info — send everything</option><option value="warning">warning — only warnings + errors</option><option value="error">error — only errors</option></select></label>
+            <div class="hint">Point the bridge at an <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> topic (public ntfy.sh with a hard-to-guess topic name, or self-hosted) and subscribe in the ntfy phone app — scheduled-task alerts and Autopilot results then arrive with the browser closed.</div>
             <label class="cfg-check"><input type="checkbox" id="cfg-secret-notice"> Post a 🔑 chat notice whenever a vault secret is read (get_secret)</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-custom-tools-model"> Load model-authored custom tools from the shared folder (⚠ arbitrary code in the app container)</label>
           </div>
@@ -383,6 +411,12 @@
               <label>Log retention (days)<input id="cfg-log-retain" type="number" min="1" title="Delete log files older than this."></label>
             </div>
             <div class="hint">Level 5 logs everything to <code>JARVIS_AI/Logs/</code> for debugging (secrets redacted). This setting applies <strong>immediately on save</strong> — no <code>--reload</code> needed.</div>
+            <div class="cfg-models-row">
+              <button id="selftest-run" type="button" class="ghost" title="Exercise memory, workbench shell, shared files, internet, desktop, and the vault — no model needed">🩺 Run self-test</button>
+              <button id="backup-now" type="button" class="ghost" title="Back up the semantic memory + /LLM_WORKSPACE to data/backups/ right now">💾 Back up now</button>
+              <span class="cfg-hint-inline" id="selftest-status"></span>
+            </div>
+            <div id="selftest-results"></div>
           </div>
 
           <details class="cfg-section cfg-raw">
