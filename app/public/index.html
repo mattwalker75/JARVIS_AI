@@ -3,7 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07121a">
   <title>JARVIS</title>
+  <!-- PWA: installable as a standalone app (own window / dock icon). No service worker —
+       Chrome no longer requires one for install, and a localhost app gains nothing offline. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/icon-192.png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
