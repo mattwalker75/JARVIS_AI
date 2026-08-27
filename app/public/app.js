@@ -134,13 +134,58 @@ const chatSlotKey = (id) => "jarvis_chat_" + id;
 let chatsMeta = (() => {
   let m; try { m = JSON.parse(localStorage.getItem(CHATS_META_KEY) || "null"); } catch (_) { m = null; }
   if (m && Array.isArray(m.list) && m.list.length) return m;
-  // First run (or migration): fold the legacy single-history key into tab 1.
+  // First run (or migration): fold the legacy single-history key into tab 1. `_fresh`
+  // (in-memory only) marks a brand-new browser profile — init() then tries to restore
+  // the live chats auto-persisted on the SERVER (data/sessions/live_*).
   const id = "c" + Date.now().toString(36);
-  try { const legacy = localStorage.getItem("jarvis_history"); if (legacy) { localStorage.setItem(chatSlotKey(id), legacy); localStorage.removeItem("jarvis_history"); } } catch (_) {}
-  return { list: [{ id, name: "Chat 1" }], active: id };
+  let legacy = null;
+  try { legacy = localStorage.getItem("jarvis_history"); if (legacy) { localStorage.setItem(chatSlotKey(id), legacy); localStorage.removeItem("jarvis_history"); } } catch (_) {}
+  return { list: [{ id, name: "Chat 1" }], active: id, _fresh: !legacy };
 })();
-function saveChatsMeta() { try { localStorage.setItem(CHATS_META_KEY, JSON.stringify(chatsMeta)); } catch (_) {} }
-function saveHistory() { try { localStorage.setItem(chatSlotKey(chatsMeta.active), JSON.stringify(history.slice(-100))); } catch (_) {} }
+function saveChatsMeta() { try { localStorage.setItem(CHATS_META_KEY, JSON.stringify({ list: chatsMeta.list, active: chatsMeta.active })); } catch (_) {} }
+function saveHistory() {
+  try { localStorage.setItem(chatSlotKey(chatsMeta.active), JSON.stringify(history.slice(-100))); } catch (_) {}
+  scheduleChatSync();
+}
+// --- Server-side auto-persistence of live chats -------------------------------------
+// Each tab is debounce-synced into data/sessions/ as "live_<id>", so live conversations
+// survive a cleared browser profile and appear in any browser pointed at this JARVIS.
+// A fresh browser (no local tabs) restores them automatically on load.
+const chatSyncTimers = {};
+function scheduleChatSync() {
+  // Debounce PER CHAT: capture which chat changed now — by the time the timer fires the
+  // user may have switched tabs, and a single shared timer would drop the outgoing
+  // chat's pending sync the moment the new tab schedules one.
+  const id = chatsMeta.active;
+  if (chatSyncTimers[id]) clearTimeout(chatSyncTimers[id]);
+  chatSyncTimers[id] = setTimeout(() => { delete chatSyncTimers[id]; syncChat(id).catch(() => {}); }, 2500);
+}
+async function syncChat(id) {
+  const c = chatsMeta.list.find((x) => x.id === id); if (!c) return;
+  let msgs = history;
+  if (id !== chatsMeta.active) { try { msgs = JSON.parse(localStorage.getItem(chatSlotKey(id)) || "[]"); } catch (_) { msgs = []; } }
+  if (!msgs.length) return;   // nothing to persist yet
+  await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: "live_" + id, name: c.name, messages: msgs }) });
+}
+async function maybeRestoreLiveChats() {
+  if (!chatsMeta._fresh) return;
+  delete chatsMeta._fresh;
+  let items = []; try { items = await (await fetch("/api/sessions")).json(); } catch (_) { return; }
+  const live = (items || []).filter((s) => String(s.id || "").startsWith("live_") && s.count > 0);
+  if (!live.length) return;
+  const list = [];
+  for (const s of live.slice(0, 12)) {
+    try {
+      const d = await (await fetch("/api/sessions/" + encodeURIComponent(s.id))).json();
+      const id = s.id.slice(5);
+      localStorage.setItem(chatSlotKey(id), JSON.stringify((d.messages || []).slice(-100)));
+      list.push({ id, name: s.name || "Chat" });
+    } catch (_) {}
+  }
+  if (!list.length) return;
+  chatsMeta.list = list; chatsMeta.active = list[0].id; saveChatsMeta();
+  if (typeof renderChatTabs === "function") renderChatTabs();
+}
 function restoreHistory() {
   let saved; try { saved = JSON.parse(localStorage.getItem(chatSlotKey(chatsMeta.active)) || "[]"); } catch (_) { saved = []; }
   if (!Array.isArray(saved)) return;
@@ -1255,9 +1300,10 @@ async function refreshSessions() {
   if (!items.length) { sessionsItems.innerHTML = '<div class="hint">No saved sessions.</div>'; return; }
   sessionsItems.innerHTML = "";
   items.forEach((s) => {
+    const isLive = String(s.id || "").startsWith("live_");   // auto-persisted live chat tab
     const el = document.createElement("div"); el.className = "session-item";
     el.innerHTML =
-      `<span class="s-name" title="${esc(s.name)}">${esc(s.name)}</span><span class="s-meta">${s.count}</span>` +
+      `<span class="s-name" title="${esc(s.name)}${isLive ? " — auto-saved live chat tab" : ""}">${isLive ? "● " : ""}${esc(s.name)}</span><span class="s-meta">${s.count}</span>` +
       `<button class="load" data-act="load" data-id="${esc(s.id)}">load</button>` +
       `<button data-act="export" data-id="${esc(s.id)}" title="export">⤓</button>` +
       `<button data-act="del" data-id="${esc(s.id)}" title="delete">✕</button>`;
@@ -1522,6 +1568,7 @@ async function init() {
     if (ok && savedMode !== "off") { setActiveMode(savedMode); JarvisVoice.setMode(savedMode); }
   }
   try { if (window.Notification && Notification.permission === "default") Notification.requestPermission(); } catch (_) {}
+  await maybeRestoreLiveChats();   // fresh browser: pull server-persisted live chats first
   restoreHistory();   // bring back the conversation after a refresh
   refreshContextMeter();   // always show the meter (0% on a fresh chat; an estimate after a refresh)
   refreshTasks(); refreshNotes(); setupDropZone(); loadModels();
@@ -1988,7 +2035,7 @@ function renderChatTabs() {
     });
     tab.addEventListener("dblclick", async () => {
       const name = await uiPrompt("Rename chat", c.name, { okText: "Rename" });
-      if (name && name.trim()) { c.name = name.trim().slice(0, 40); saveChatsMeta(); renderChatTabs(); }
+      if (name && name.trim()) { c.name = name.trim().slice(0, 40); saveChatsMeta(); renderChatTabs(); syncChat(c.id).catch(() => {}); }
     });
     bar.appendChild(tab);
   }
@@ -2019,6 +2066,7 @@ async function closeChat(id) {
   const c = chatsMeta.list.find((x) => x.id === id); if (!c || chatsMeta.list.length < 2) return;
   if (!(await uiConfirm(`Close "${c.name}"? Its conversation is discarded (save it via Sessions first if you want to keep it).`, { title: "Close chat", okText: "Close", danger: true }))) return;
   try { localStorage.removeItem(chatSlotKey(id)); } catch (_) {}
+  try { fetch("/api/sessions/" + encodeURIComponent("live_" + id), { method: "DELETE" }); } catch (_) {}   // drop the server copy too
   chatsMeta.list = chatsMeta.list.filter((x) => x.id !== id);
   if (chatsMeta.active === id) return switchChat(chatsMeta.list[0].id);
   saveChatsMeta(); renderChatTabs();
