@@ -190,7 +190,12 @@ once), and the script **discovers** the running servers and maps them. Models ar
 **`mlx-community`** repos (auto-downloaded on first serve). `mlx-serve` records what it started so
 **`mlx-up`** can relaunch your set after a reboot. For **multiple** models behind one endpoint use
 `--gateway`; for a single model, paste its `http://host.docker.internal:<port>/v1` straight into Config.
-`mlx-lm` is text-only — keep **vision** on Ollama (`qwen2.5vl`) for now.
+**Two runtimes.** `mlx-lm` serves **text** models; **vision-language** models (`image-text-to-text`)
+are implemented in **`mlx-vlm`**, which covers many more architectures — a number of recent models
+run only there. `mlx-serve` reads each model's `config.json` and starts the right server
+automatically (override with `--runtime lm|vlm`), and `list-models --details` names the runtime per
+model. Install when needed: `./mlx/venv/bin/pip install mlx-vlm`. Note mlx-vlm has **no
+`default_model` alias** — Config → Model must be the exact repo id you served.
 
 | MLX command | What it does |
 | --- | --- |

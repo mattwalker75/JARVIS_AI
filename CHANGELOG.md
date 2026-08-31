@@ -8,6 +8,29 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Added
+- 2026-08-31: **MLX vision-language support via mlx-vlm, routed automatically.** `mlx-lm` is
+  text-only and implements a fixed architecture list; vision-language models
+  (`image-text-to-text`) are implemented in [`mlx-vlm`](https://github.com/Blaizzy/mlx-vlm), which
+  also ships an OpenAI-compatible server. `mlx-serve` now reads the model's `config.json` and
+  starts **whichever runtime implements that architecture** (`--runtime lm|vlm` overrides), so a
+  model that mlx-lm rejects just works; discovery, `mlx-ls`, `mlx-stop all`, the registry and the
+  gateway routes all see mlx-vlm servers too. `list-models --details` names the runtime per model,
+  including `NO RUNTIME` for an architecture neither package implements.
+  **Why this mattered here:** 9 of 14 cached MLX models (~1.7 TB) could not load at all —
+  `glm5_next`, `qwen4_exp`, `gemma4_unified`, `deepseek_v4` are absent from mlx-lm 0.31.3 *and*
+  from upstream main, but all four are in mlx-vlm. The failure mode was nasty: the load raises in
+  the generation thread, so the request never returns and the model looks *slow* while
+  `/v1/models` still answers 200. Verified end to end — `gemma-4-12b-coder` loads in 4 s and
+  returns clean OpenAI `tool_calls`. Caveat documented: mlx-vlm has **no `default_model` alias**,
+  so Config → Model must be the exact repo id (the serve output now prints it).
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
+
+### Fixed
+- 2026-08-31: `mlx-ls` and `mlx-up` exited **1 whenever servers were actually running** — their
+  last statement was a `[[ … ]] && info` guard that is false in exactly that case, so the
+  conditional became the exit status and broke `&&` chaining. (`JARVIS_LOCAL_LLM.sh`)
+
 ### Changed
 - 2026-08-31: **`list-models --details` — what KIND of model is this?** MLX rows previously showed
   only a name and a size, while Ollama rows carried params/quant/capabilities; the metadata is now

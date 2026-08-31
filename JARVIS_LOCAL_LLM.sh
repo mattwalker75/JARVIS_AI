@@ -27,7 +27,10 @@
 #   ./JARVIS_LOCAL_LLM.sh delete-model <model> [--backend ollama | mlx] [--yes]   # reclaim the disk
 #
 # MLX model management (discovery-based, like Ollama — bring models online, the script finds them):
-#   ./JARVIS_LOCAL_LLM.sh mlx-serve <model> [--port N] [--gateway]   # start ONE model as its own server (+ register it)
+#   TWO RUNTIMES, picked per model: mlx-lm serves TEXT models; mlx-vlm serves VISION-LANGUAGE ones
+#   (it implements far more architectures). mlx-serve reads the model's config.json and starts the
+#   right one — override with --runtime lm|vlm. Both speak the same OpenAI dialect to JARVIS.
+#   ./JARVIS_LOCAL_LLM.sh mlx-serve <model> [--port N] [--runtime lm|vlm] [--gateway]   # start ONE model (+ register it)
 #   ./JARVIS_LOCAL_LLM.sh mlx-stop  <model | port | all>             # stop one/all MLX servers
 #   ./JARVIS_LOCAL_LLM.sh mlx-ls                                     # list running MLX servers (model + port)
 #   ./JARVIS_LOCAL_LLM.sh mlx-up                                     # relaunch the registered set (e.g. after a reboot)
@@ -401,6 +404,7 @@ gateway_url()  { echo "http://${APP_HOST}:${GATEWAY_PORT}/v1"; }
 MLX_VENV="${SCRIPT_DIR}/mlx/venv"
 MLX_MODELS_DIR="${SCRIPT_DIR}/mlx/models"
 MLX_SERVER="$MLX_VENV/bin/mlx_lm.server"
+MLX_VLM_SERVER="$MLX_VENV/bin/mlx_vlm.server"
 
 MLX_REGISTRY="${SCRIPT_DIR}/mlx/serving.json"
 MLX_PORT_BASE=8080
@@ -415,9 +419,12 @@ mlx_apply_config() { info "MLX models cache: $MLX_MODELS_DIR (HF_HOME)"; }
 #      but one process per model). Emit "model|port" for each, parsed from its command line.
 mlx_discover() {
   local pid args model port
-  for pid in $(pgrep -f 'mlx_lm\.server' 2>/dev/null); do
+  # BOTH runtimes: mlx-lm serves text models, mlx-vlm serves vision-language ones (see
+  # mlx_runtime_for). Discovery must see either, or a VLM server would be invisible to
+  # mlx-ls / list-models / mlx-stop.
+  for pid in $(pgrep -f 'mlx_lm\.server|mlx_vlm\.server' 2>/dev/null); do
     args="$(ps -p "$pid" -o args= 2>/dev/null)"
-    [[ "$args" == *mlx_lm.server* ]] || continue
+    [[ "$args" == *mlx_lm.server* || "$args" == *mlx_vlm.server* ]] || continue
     model="$(sed -n 's/.*--model[= ][= ]*\([^ ]*\).*/\1/p' <<<"$args")"
     port="$(sed -n 's/.*--port[= ][= ]*\([0-9][0-9]*\).*/\1/p' <<<"$args")"
     [[ -n "$port" ]] || port="$MLX_PORT_BASE"
@@ -467,7 +474,42 @@ mlx_next_port() {  # first free port at/after MLX_PORT_BASE
   echo "$p"
 }
 
-# Bring ONE model online as its own mlx_lm.server (backgrounded, logged) + record it in the registry.
+# WHICH RUNTIME can actually load this model? mlx-lm is TEXT-ONLY and implements a fixed set of
+# architectures in mlx_lm/models/<model_type>.py; vision-language models (image-text-to-text) are
+# implemented in mlx-vlm instead — same OpenAI dialect, different package. Decided from the model's
+# own config.json model_type: read from the local cache when we have it (offline, instant), else
+# fetched from the Hub (config.json alone, ~1 KB). Echoes "lm" | "vlm" | "" (unknown).
+mlx_runtime_for() {  # $1 = repo id or local path
+  HF_HOME="$MLX_MODELS_DIR" "$MLX_VENV/bin/python3" - "$1" "$MLX_MODELS_DIR" <<'PY' 2>/dev/null
+import json, os, sys, glob, importlib.util
+model, root = sys.argv[1], sys.argv[2]
+mt = None
+def read_cfg(d):
+    try: return json.load(open(os.path.join(d, "config.json"))).get("model_type")
+    except Exception: return None
+if os.path.isdir(model):
+    mt = read_cfg(model)
+if mt is None:
+    snaps = sorted(glob.glob(os.path.join(root, "hub", "models--" + model.replace("/", "--"), "snapshots", "*")))
+    if snaps: mt = read_cfg(snaps[-1])
+if mt is None:                       # not cached yet — ask the Hub for just config.json
+    try:
+        from huggingface_hub import hf_hub_download
+        mt = json.load(open(hf_hub_download(model, "config.json"))).get("model_type")
+    except Exception: pass
+if not mt: sys.exit(0)
+def implements(pkg):                 # models/<type>.py OR models/<type>/ (mlx-vlm uses packages)
+    try: spec = importlib.util.find_spec(pkg)
+    except Exception: return False
+    if not spec or not spec.origin: return False
+    base = os.path.join(os.path.dirname(spec.origin), "models", mt)
+    return os.path.exists(base + ".py") or os.path.isdir(base)
+print("lm" if implements("mlx_lm") else "vlm" if implements("mlx_vlm") else "")
+PY
+}
+
+# Bring ONE model online as its own server (backgrounded, logged) + record it in the registry.
+# The runtime is chosen per model, so you never have to remember which package a model needs.
 mlx_serve_one() {  # model [port]
   mlx_ensure_venv || return 1
   local model="$1" port="${2:-}"
@@ -475,11 +517,31 @@ mlx_serve_one() {  # model [port]
   local up; up="$(mlx_discover | awk -F'|' -v m="$model" '$1==m{print $2; exit}')"
   if [[ -n "$up" ]]; then ok "MLX $model already up on :$up."; mlx_registry_add "$model" "$up"; return 0; fi
   [[ -n "$port" ]] || port="$(mlx_next_port)"
+  # Route to the runtime that implements this architecture (--runtime overrides).
+  local rt="${MLX_RUNTIME_ARG:-}" server=""
+  [[ -n "$rt" ]] || rt="$(mlx_runtime_for "$model")"
+  case "$rt" in
+    lm)  server="$MLX_SERVER" ;;
+    vlm) server="$MLX_VLM_SERVER"
+         [[ -x "$server" ]] || { err "$model needs mlx-vlm (vision-language architecture) — install it:"
+                                 echo "    ./mlx/venv/bin/pip install mlx-vlm"; return 1; } ;;
+    *)   server="$MLX_SERVER"
+         warn "couldn't identify $model's architecture — trying mlx-lm; if it reports 'Model type ... not supported', retry with --runtime vlm." ;;
+  esac
   local log; log="${SCRIPT_DIR}/mlx/$(echo "$model" | tr '/:' '__').log"
-  info "Starting MLX $model on :$port  (first run downloads into mlx/models; big models take a while)..."
-  HF_HOME="$MLX_MODELS_DIR" nohup "$MLX_SERVER" --model "$model" --host 0.0.0.0 --port "$port" > "$log" 2>&1 &
+  info "Starting MLX $model on :$port via $(basename "$server")  (first run downloads into mlx/models; big models take a while)..."
+  HF_HOME="$MLX_MODELS_DIR" nohup "$server" --model "$model" --host 0.0.0.0 --port "$port" > "$log" 2>&1 &
   mlx_registry_add "$model" "$port"
-  for _ in $(seq 1 180); do port_up "http://localhost:${port}/v1/models" && { ok "MLX $model up on :$port."; return 0; }; sleep 1; done
+  for _ in $(seq 1 180); do
+    port_up "http://localhost:${port}/v1/models" && {
+      ok "MLX $model up on :$port."
+      # The served name is NOT optional on mlx-vlm: it has no "default_model" alias, and any other
+      # string is treated as a repo id to fetch. Say exactly what to put in Config.
+      info "Endpoint: http://${APP_HOST}:${port}/v1   ·   Config → Model must be exactly:  ${model}"
+      return 0
+    }
+    sleep 1
+  done
   warn "MLX $model not answering on :$port yet — may still be loading (see $log)."
 }
 # Relaunch any registered model that isn't currently running (reboot recovery).
@@ -492,6 +554,7 @@ mlx_up() {
     else mlx_serve_one "$model" "$port"; fi
   done < <(mlx_registry_list)
   [[ "$any" == 0 ]] && info "No MLX models registered yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <model>"
+  return 0        # same trailing-test trap as mlx_ls
 }
 # Stop a running MLX server by model id or port, or all; drop it from the registry.
 mlx_stop_target() {  # model|port|all
@@ -504,7 +567,11 @@ mlx_stop_target() {  # model|port|all
       [[ "$target" != "all" ]] && mlx_registry_remove "$target"
     fi
   done < <(mlx_discover)
-  if [[ "$target" == "all" ]]; then pkill -f "mlx_lm\.server" 2>/dev/null || true; mlx_registry_remove all; ok "stopped all MLX servers."; fi
+  if [[ "$target" == "all" ]]; then
+    pkill -f "mlx_lm\.server" 2>/dev/null || true
+    pkill -f "mlx_vlm\.server" 2>/dev/null || true      # VLM servers are MLX servers too
+    mlx_registry_remove all; ok "stopped all MLX servers."
+  fi
   [[ "$stopped" == 0 && "$target" != "all" ]] && warn "No running MLX server matched '$target'."
   return 0
 }
@@ -515,6 +582,7 @@ mlx_ls() {
     printf 'MLX (:%s) ' "$port"; port_up "http://localhost:${port}/v1/models" && echo "up    $model" || echo "down  $model"
   done < <(mlx_discover)
   [[ "$any" == 0 ]] && info "No MLX servers running. Bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <model>"
+  return 0        # the trailing test must not become the exit status (it's false WHEN servers exist)
 }
 
 # ---- backend contract (all discovery-driven) ----
@@ -621,7 +689,7 @@ except Exception as e:
 # config.json (architecture, quantization, MoE width, context) and the chat template
 # (instruct vs base, tool-calling). No network, no model load, just a few small reads.
 def describe(repo):
-    import os, glob, re
+    import os, glob, re, importlib.util
     snaps = sorted(glob.glob(os.path.join(str(repo.repo_path), "snapshots", "*")))
     if not snaps: return {}
     d = snaps[-1]
@@ -637,6 +705,17 @@ def describe(repo):
     arch = (cfg.get("architectures") or [None])[0]
     out["model_type"] = cfg.get("model_type")
     out["arch"] = arch
+    # WHICH RUNTIME can load it: mlx-lm is text-only with a fixed architecture list; vision-language
+    # models live in mlx-vlm. A model in neither cannot be served at all, and saying so here beats
+    # discovering it as a hung request later.
+    mt = cfg.get("model_type")
+    def implements(pkg):
+        try: spec = importlib.util.find_spec(pkg)
+        except Exception: return False
+        if not spec or not spec.origin: return False
+        base = os.path.join(os.path.dirname(spec.origin), "models", mt or "")
+        return bool(mt) and (os.path.exists(base + ".py") or os.path.isdir(base))
+    out["runtime"] = "mlx-lm" if implements("mlx_lm") else "mlx-vlm" if implements("mlx_vlm") else None
     q = cfg.get("quantization") or {}
     out["quant_bits"] = q.get("bits")
     out["quant_group"] = q.get("group_size")
@@ -711,7 +790,10 @@ def detail_of(r):
     bits.append("chat" if r.get("chat") else f"{Y}BASE - no chat template{R}")
     if r.get("tools"):    bits.append(f"{G}tools{R}")
     if r.get("thinking"): bits.append("thinking")
-    if r.get("vision"):   bits.append("vision*")
+    if r.get("vision"):   bits.append("vision")
+    rt = r.get("runtime")
+    if rt == "mlx-vlm":  bits.append(f"{G}runs on mlx-vlm{R}")
+    elif rt is None:     bits.append(f"{Y}NO RUNTIME - {r.get('model_type')} unsupported by mlx-lm and mlx-vlm{R}")
     if r.get("variants"): bits.append(f"{Y}{len(r['variants'])} quant variants inside: {', '.join(r['variants'])}{R}")
     return " · ".join(bits)
 
@@ -809,8 +891,14 @@ mlx_config_help() {
      - Single model:    point Endpoint URL straight at its :port; List models shows it.
 
 NOTE: MLX runs on the HOST, not in the JARVIS containers (it needs Metal). JARVIS reaches it over
-      host.docker.internal. mlx-lm is text-only; vision models use a separate package (mlx-vlm) —
-      keep vision on Ollama (qwen2.5vl) for now.
+      host.docker.internal.
+RUNTIMES: mlx-lm serves TEXT models and implements a fixed architecture list; VISION-LANGUAGE
+      models (image-text-to-text) live in mlx-vlm instead, which implements many more — several
+      recent models are mlx-vlm only. mlx-serve reads each model's config.json and starts the
+      right server (override: --runtime lm|vlm); list-models --details names the runtime per
+      model. If a model needs it:  ./mlx/venv/bin/pip install mlx-vlm
+      CAUTION: mlx-vlm has NO "default_model" alias — set Config → Model to the EXACT repo id
+      you served, or it will try to download a repo by whatever name you typed.
 TIP:  tool-calling — JARVIS is tool-heavy. If a model doesn't emit clean OpenAI tool_calls, JARVIS's
       text-tool-call salvage still handles it, but verify with a quick task after first start.
 TXT
@@ -851,8 +939,8 @@ list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON / DETAILS from the 
   echo "Reclaim disk:        ./JARVIS_LOCAL_LLM.sh delete-model <model>"
   if [[ "$DETAILS" == 1 && "$show_mlx" == 1 ]]; then
     echo
-    echo "* vision architecture — mlx-lm serves TEXT only, so the vision half won't be reachable"
-    echo "  through mlx_lm.server (that needs mlx-vlm); keep the vision tier on Ollama."
+    echo "Runtime: models are served by mlx-lm (text) or mlx-vlm (vision-language) — mlx-serve picks"
+    echo "  per model from its architecture, so you don't have to. Override with --runtime lm|vlm."
   elif [[ "$DETAILS" != 1 ]]; then
     echo "More about each:     add --details  (architecture, quantization, context, chat/tools)"
   fi
@@ -944,7 +1032,7 @@ delete_model() {  # $1 = name
 }
 
 # ============================ dispatch ============================
-CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""; AS_JSON=0; YES=0; DETAILS=0
+CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""; AS_JSON=0; YES=0; DETAILS=0; MLX_RUNTIME_ARG=""
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
     start|stop|status|url|config|gateway-sync) CMD="$(lc "$1")" ;;
@@ -957,6 +1045,7 @@ while [[ $# -gt 0 ]]; do
     --port)                shift; MLX_PORT_ARG="${1:-}" ;;
     --json)                AS_JSON=1 ;;
     --details|--detail|-l) DETAILS=1 ;;
+    --runtime)             shift; MLX_RUNTIME_ARG="$(lc "${1:-}")" ;;   # force lm | vlm
     -y|--yes)              YES=1 ;;
     -h|--help|help)        usage; exit 0 ;;
     -*)                    err "unknown option: $1"; usage; exit 1 ;;

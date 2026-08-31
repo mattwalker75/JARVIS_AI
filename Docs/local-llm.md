@@ -19,7 +19,7 @@ There are **two backends** today (a third, the optional LiteLLM gateway, unifies
 | Get models | `ollama pull <tag>` | Hugging Face `mlx-community` (auto-downloads) |
 | Serving | **one daemon, many models** (swaps on demand) | **one server per model** (a process per port) |
 | Models stored in | `~/.ollama/` (system-wide) | `mlx/models/` (in the repo, gitignored) |
-| Vision | ✅ (e.g. `qwen2.5vl`) | ❌ text-only (use Ollama for vision) |
+| Vision | ✅ (e.g. `qwen2.5vl`) | ✅ via **mlx-vlm** (mlx-lm itself is text-only; `mlx-serve` routes automatically) |
 | Pick in JARVIS | the Ollama **tag** (`qwen3:8b`) | the **model id** (`mlx-community/…`) via gateway, or the `:port` direct |
 
 Either backend has a built-in setup guide:
@@ -124,7 +124,8 @@ straight at its `:port`.
 > **Reboot recovery:** MLX servers aren't a daemon, so after a restart run `./JARVIS_LOCAL_LLM.sh mlx-up`
 > (relaunches your registered set) — or `mlx-serve` them again.
 > **Tool-calling:** JARVIS is tool-heavy; verify a model emits clean tool calls (JARVIS's text-tool
-> salvage is the fallback). **Vision:** `mlx-lm` is text-only — keep vision on Ollama.
+> salvage is the fallback). **Vision:** `mlx-lm` is text-only, but `mlx-serve` starts **mlx-vlm**
+> for vision-language models automatically — see [Two runtimes](#two-runtimes-mlx-lm-vs-mlx-vlm).
 
 ---
 
@@ -245,9 +246,35 @@ for MLX it's read straight out of each repo's `config.json` and chat template �
 model load**, so it stays instant. Things worth watching for: **`BASE - no chat template`** (a
 foundation model that won't converse or call tools), **`unquantized`** (full-precision weights —
 enormous and slow on a Mac), **`N quant variants inside`** (one repo holding several quantizations,
-usually the reason a repo is huge), and **`vision*`** — a vision architecture whose image half
-`mlx_lm.server` can't actually serve, since mlx-lm is text-only (that needs `mlx-vlm`; keep the
-vision tier on Ollama).
+usually the reason a repo is huge), **`vision`** (a vision-language architecture), and the
+**runtime** each model needs — `runs on mlx-vlm`, or `NO RUNTIME` for an architecture neither
+package implements, which is a model you cannot serve at all.
+
+## Two runtimes: mlx-lm vs mlx-vlm
+
+`mlx-lm` is **text-only** and implements a fixed set of architectures in
+`mlx_lm/models/<model_type>.py`. If your model's `config.json` names a type it doesn't have, it
+fails with `Model type … not supported` — and because the failure happens in the generation thread,
+the request never returns: the model looks *slow* rather than broken, while `/v1/models` keeps
+answering 200.
+
+**Vision-language models** (`pipeline_tag: image-text-to-text`) are implemented in
+**[`mlx-vlm`](https://github.com/Blaizzy/mlx-vlm)** instead, which covers far more architectures and
+ships its own OpenAI-compatible server. Many recent MLX conversions run *only* there.
+
+```bash
+./mlx/venv/bin/pip install mlx-vlm        # once, into the same venv
+./JARVIS_LOCAL_LLM.sh mlx-serve <repo>    # picks mlx-lm or mlx-vlm from the model's config.json
+./JARVIS_LOCAL_LLM.sh mlx-serve <repo> --runtime vlm   # force it
+```
+
+Both speak the same OpenAI dialect, so JARVIS doesn't care which is running — the endpoint URL and
+tool-calling behave identically. Two things to know:
+
+- **mlx-vlm has no `default_model` alias.** Set Config → Model to the **exact repo id** you served;
+  any other string is treated as a Hugging Face repo to download.
+- **Architecture support ≠ it fits.** A model still has to fit in RAM (mlx-vlm's
+  `--expert-cache-gb` can offload MoE experts for models larger than memory).
 
 **Reclaiming space** — deletion is exact-name-only, refuses while a model is serving, shows what
 it frees, and asks first:
