@@ -11,6 +11,15 @@
 #   ./JARVIS_LOCAL_LLM.sh status
 #   ./JARVIS_LOCAL_LLM.sh config       [--backend ollama | mlx]         # print setup steps (install / models / configure)
 #
+# GETTING models — this script manages runtimes; each runtime's own tool does the downloading:
+#   Ollama:  ollama pull qwen3:8b        # the tag you pull is what you paste into Config → Model
+#            ollama pull qwen2.5vl:32b   # a VISION model (for screenshots / the vision tier)
+#            BROWSE EVERY AVAILABLE MODEL:  https://ollama.com/library   (search: https://ollama.com/search)
+#   MLX:     auto-downloads on first  mlx-serve <repo>  (into mlx/models), or pre-fetch without
+#            loading it:  hf download <repo>   — run  source ./ACTIVATE.sh  first, or it lands in
+#            ~/.cache/huggingface instead and list-models won't see it.
+#            BROWSE PRE-QUANTIZED MLX BUILDS:  https://huggingface.co/mlx-community  ('-4bit' fits most Macs)
+#
 # What have I got? (inventory of DOWNLOADED models — no --backend = both runtimes)
 #   ./JARVIS_LOCAL_LLM.sh list-models  [--backend ollama | mlx] [--json]
 #   ./JARVIS_LOCAL_LLM.sh delete-model <model> [--backend ollama | mlx] [--yes]   # reclaim the disk
@@ -133,6 +142,10 @@ ollama_config_help() {
 2) PULL the model(s) you want   (the tag becomes your JARVIS model / tier value)
      ollama pull qwen3:8b          # a general chat model
      ollama pull qwen2.5vl:32b     # a VISION model (needed for the vision tier / screenshots)
+   BROWSE every model you can pull — names, sizes, variants:
+     https://ollama.com/library    (or https://ollama.com/search to search)
+   Each model page lists its tags (e.g. qwen3:8b, qwen3:32b) — the tag is the exact string
+   you pull AND the exact string you set as the JARVIS model / tier.
    LIST the models you have downloaded (size, params, vision/tools capability):
      ./JARVIS_LOCAL_LLM.sh list-models --backend ollama
    DELETE a downloaded model to reclaim disk (exact name, confirms first):

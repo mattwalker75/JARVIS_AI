@@ -48,7 +48,9 @@ Either backend has a built-in setup guide:
 
 **1. Install** — <https://ollama.com/download/mac> (or `/download` for other OSes); check `ollama --version`.
 
-**2. Pull models** — the tag becomes the model name you set in JARVIS:
+**2. Pull models** — browse everything you can pull at **<https://ollama.com/library>**
+(or [search](https://ollama.com/search)). Each model page lists its tags (`qwen3:8b`,
+`qwen3:32b`, …); the tag is both what you pull and what you set as the model name in JARVIS:
 ```bash
 ollama pull qwen3:8b          # chat
 ollama pull qwen2.5vl:32b     # vision (for screenshots / the vision tier)

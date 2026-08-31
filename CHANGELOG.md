@@ -8,6 +8,17 @@ infrastructure, security, documentation, or test-policy changes.
 
 ## [Unreleased]
 
+### Changed
+- 2026-08-31: **`--help` now covers where models come from.** Downloading is the one step in the
+  local-model lifecycle that leaves this script (each runtime's own tool does it), so the help
+  screen now has a "GETTING models" section: `ollama pull <tag>` with the browse/search URLs
+  (<https://ollama.com/library>, `/search`), and for MLX the auto-download-on-serve behavior plus
+  `hf download <repo>` for pre-fetching without loading into RAM — including the warning that it
+  lands in `~/.cache/huggingface` (invisible to `list-models`) unless `ACTIVATE.sh` ran first.
+  The Ollama setup guide and `Docs/local-llm.md` gained the same library URL and a note that a
+  model page's tag is both what you pull and what you set as the JARVIS model/tier.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`)
+
 ### Added
 - 2026-08-31: **`list-models` — see what you've actually downloaded.** Every existing command
   answered a question about what's *live* (`status`, `mlx-ls`, Config's "List models" all need the
