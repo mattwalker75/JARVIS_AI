@@ -11,6 +11,10 @@
 #   ./JARVIS_LOCAL_LLM.sh status
 #   ./JARVIS_LOCAL_LLM.sh config       [--backend ollama | mlx]         # print setup steps (install / models / configure)
 #
+# What have I got? (inventory of DOWNLOADED models — no --backend = both runtimes)
+#   ./JARVIS_LOCAL_LLM.sh list-models  [--backend ollama | mlx] [--json]
+#   ./JARVIS_LOCAL_LLM.sh delete-model <model> [--backend ollama | mlx] [--yes]   # reclaim the disk
+#
 # MLX model management (discovery-based, like Ollama — bring models online, the script finds them):
 #   ./JARVIS_LOCAL_LLM.sh mlx-serve <model> [--port N] [--gateway]   # start ONE model as its own server (+ register it)
 #   ./JARVIS_LOCAL_LLM.sh mlx-stop  <model | port | all>             # stop one/all MLX servers
@@ -129,10 +133,10 @@ ollama_config_help() {
 2) PULL the model(s) you want   (the tag becomes your JARVIS model / tier value)
      ollama pull qwen3:8b          # a general chat model
      ollama pull qwen2.5vl:32b     # a VISION model (needed for the vision tier / screenshots)
-   LIST the models you have downloaded:
-     ollama list
-   DELETE a downloaded model to reclaim disk:
-     ollama rm qwen3:8b            # remove by its tag
+   LIST the models you have downloaded (size, params, vision/tools capability):
+     ./JARVIS_LOCAL_LLM.sh list-models --backend ollama
+   DELETE a downloaded model to reclaim disk (exact name, confirms first):
+     ./JARVIS_LOCAL_LLM.sh delete-model qwen3:8b
 
 3) (optional) TUNE the runtime in  config/JARVIS_CONFIG.json  -> the "ollama" block:
      manage            true = this script configures + restarts Ollama for you
@@ -191,6 +195,99 @@ for m in sorted(data, key=lambda x: (x.get("id") or x.get("name") or "")):
 sys.stderr.write(f"    ({n} Ollama models)\n")
 PY
   rm -f "$tmp"
+}
+
+# ---- INVENTORY: what's DOWNLOADED (vs `status`, which only says whether the daemon is up).
+# Prefers the live daemon — /api/tags carries parameter size, quantization and capabilities, so we
+# can mark vision models and embeddings. With Ollama stopped we read the on-disk manifests instead
+# (layer sizes sum to the real size), so the inventory still works when `ollama list` would error.
+ollama_list_models() {  # $1 = "json" for machine output
+  local mode="${1:-}" tmp="" up=0 color=0
+  [[ -n "$C_GRN" ]] && color=1
+  if port_up "http://localhost:${OLLAMA_PORT}/api/tags"; then
+    up=1; tmp="$(mktemp)"
+    curl -s --max-time 8 "http://localhost:${OLLAMA_PORT}/api/tags" -o "$tmp"
+  fi
+  # NOTE (same trap as ollama_gateway_routes): the JSON goes to a TEMP FILE passed by path — the
+  # python heredoc owns stdin, so a pipe would be swallowed.
+  python3 - "$mode" "$up" "${tmp:-/dev/null}" "${OLLAMA_MODELS:-$HOME/.ollama/models}" "$color" "$OLLAMA_PORT" <<'PY'
+import json, os, sys
+mode, up, tags_file, models_dir, color, port = sys.argv[1], sys.argv[2] == "1", sys.argv[3], sys.argv[4], sys.argv[5] == "1", sys.argv[6]
+G = "\033[0;32m" if color else ""; Y = "\033[0;33m" if color else ""
+D = "\033[2m"    if color else ""; R = "\033[0m"    if color else ""
+
+def human(n):
+    if not n: return "-"
+    for u, d in (("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)):
+        if n >= d:
+            v = n / d
+            return f"{v:.1f}{u}" if v < 10 else f"{v:.0f}{u}"
+    return f"{n}B"
+
+rows = []
+if up:
+    try:
+        for m in json.load(open(tags_file)).get("models", []):
+            d = m.get("details") or {}
+            rows.append({"name": m.get("name") or m.get("model"), "size": m.get("size"),
+                         "params": d.get("parameter_size"), "quant": d.get("quantization_level"),
+                         "caps": m.get("capabilities") or []})
+    except Exception:
+        rows = []
+else:
+    # Offline: manifests/<registry>/<namespace>/<name>/<tag>; "library" is the implicit namespace.
+    root = os.path.join(models_dir, "manifests")
+    for dirpath, _d, files in os.walk(root):
+        for fn in files:
+            p = os.path.join(dirpath, fn)
+            parts = os.path.relpath(p, root).split(os.sep)
+            if len(parts) < 4: continue
+            ns, name, tag = parts[-3], parts[-2], parts[-1]
+            full = f"{name}:{tag}" if ns == "library" else f"{ns}/{name}:{tag}"
+            try:
+                man = json.load(open(p))
+                size = sum(l.get("size", 0) for l in man.get("layers", [])) + (man.get("config") or {}).get("size", 0)
+            except Exception:
+                size = None
+            rows.append({"name": full, "size": size, "params": None, "quant": None, "caps": []})
+
+rows.sort(key=lambda r: -(r["size"] or 0))
+
+if mode == "json":
+    print(json.dumps(rows)); sys.exit(0)
+
+if not rows:
+    print(f"{D}OLLAMA: no models downloaded" + ("" if up else " (daemon stopped, nothing on disk either)") + f"{R}")
+    sys.exit(0)
+
+def what(r):
+    # JARVIS is tool-heavy and has a vision tier, so those capabilities are the ones worth
+    # surfacing next to the raw size — they decide which tier a model can actually fill.
+    caps = r["caps"]
+    if "embedding" in caps: return f"{Y}embedding - not a chat model{R}"
+    bits = [b for b in (r["params"], r["quant"]) if b]
+    if "vision" in caps: bits.append(f"{G}vision{R}")
+    if "tools"  in caps: bits.append(f"{G}tools{R}")
+    return " · ".join(bits)
+
+w = max(len(r["name"]) for r in rows)
+head = f"OLLAMA  (:{port}, up)" if up else f"OLLAMA  (daemon stopped - read from disk)"
+print(f"{head}")
+for r in rows:
+    print(f"  {G}●{R} {r['name']:<{w}}  {human(r['size']):>6}   {what(r)}")
+total = sum(r["size"] or 0 for r in rows)
+print(f"  {D}{len(rows)} tag(s), {human(total)} on disk{R}")
+PY
+  [[ -n "$tmp" ]] && rm -f "$tmp"
+  return 0
+}
+
+# Deletion is delegated to the Ollama CLI: the daemon owns its blob store (tags share layers), so
+# hand-removing files would corrupt it.
+ollama_delete_model() {  # $1 = tag
+  command -v ollama >/dev/null 2>&1 || { err "ollama CLI not on PATH — cannot delete."; return 1; }
+  port_up "http://localhost:${OLLAMA_PORT}/api/tags" || { err "Ollama is not running — start it first (deletion goes through the daemon)."; return 1; }
+  ollama rm "$1" || { err "ollama rm failed for '$1'."; return 1; }
 }
 
 # ============================ optional gateway (LiteLLM) ============================
@@ -296,6 +393,9 @@ mlx_discover() {
   done | sort -u
 }
 mlx_running() { [[ -n "$(mlx_discover)" ]]; }
+# Same discovery, handed over as a FILE path: the python heredocs below own stdin, so running-state
+# can't arrive on a pipe. Caller removes the file.
+mtemp_running() { local f; f="$(mktemp)"; mlx_discover > "$f" 2>/dev/null; echo "$f"; }
 
 # ---- REGISTRY (mlx/serving.json): auto-written by mlx-serve so `mlx-up` / `start` can relaunch your
 #      set after a reboot. NOT hand-edited — it just remembers what you brought online.
@@ -418,6 +518,134 @@ mlx_gateway_routes() {
   done < <(mlx_discover)
   echo "    ($n MLX servers discovered)" >&2
 }
+# ---- INVENTORY: what's DOWNLOADED into mlx/models (vs mlx-ls, which lists RUNNING servers).
+# Reads the Hugging Face cache index directly through the venv's huggingface_hub. Deliberately NOT
+# `mlx_lm.manage --scan`: that filters repo ids by the literal pattern "mlx", so it only ever shows
+# mlx-community/* and hides everything from other orgs (Vontra, orcarouter, sh0wie...).
+# Cross-references the running servers so you can see what's live vs merely present, and counts
+# weight files so a metadata-only shell (interrupted download) is flagged rather than offered.
+mlx_list_models() {  # $1 = "json" for machine output
+  local mode="${1:-}" color=0
+  [[ -n "$C_GRN" ]] && color=1
+  local hub="${MLX_MODELS_DIR}/hub"
+  if [[ ! -d "$hub" ]]; then
+    [[ "$mode" == "json" ]] && { echo "[]"; return 0; }
+    echo "MLX  (${MLX_MODELS_DIR})"
+    echo "  no models downloaded yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <repo>"
+    return 0
+  fi
+  # Running servers reach python via a FILE (the heredoc owns stdin).
+  local run; run="$(mtemp_running)"
+  local py="${MLX_VENV}/bin/python3"
+  if [[ ! -x "$py" ]]; then
+    # No venv (ACTIVATE.sh never run): names still come from the cache layout, sizes don't.
+    if [[ "$mode" == "json" ]]; then
+      echo "[]"
+    else
+      echo "MLX  (${MLX_MODELS_DIR})"
+      local d n org rest
+      for d in "$hub"/models--*; do
+        [[ -d "$d" ]] || continue
+        n="$(basename "$d")"; n="${n#models--}"; org="${n%%--*}"; rest="${n#*--}"
+        echo "  ○ ${org}/${rest}"
+      done
+      warn "sizes and serving state need the MLX env — run:  source ./ACTIVATE.sh"
+    fi
+    rm -f "$run"; return 0
+  fi
+  "$py" - "$mode" "$color" "$hub" "$run" "$MLX_MODELS_DIR" <<'PY'
+import json, sys
+mode, color, hub, runfile, root = sys.argv[1], sys.argv[2] == "1", sys.argv[3], sys.argv[4], sys.argv[5]
+G = "\033[0;32m" if color else ""; Y = "\033[0;33m" if color else ""
+D = "\033[2m"    if color else ""; R = "\033[0m"    if color else ""
+
+running = {}
+try:
+    for line in open(runfile):
+        line = line.strip()
+        if line:
+            m, _, p = line.partition("|")
+            running[m] = p
+except Exception:
+    pass
+
+def human(n):
+    if not n: return "-"
+    for u, d in (("T", 1e12), ("G", 1e9), ("M", 1e6), ("K", 1e3)):
+        if n >= d:
+            v = n / d
+            return f"{v:.1f}{u}" if v < 10 else f"{v:.0f}{u}"
+    return f"{n}B"
+
+try:
+    from huggingface_hub import scan_cache_dir
+    info = scan_cache_dir(hub)
+except Exception as e:
+    print(f"{Y}!! could not read the MLX cache ({e}){R}", file=sys.stderr)
+    print("[]" if mode == "json" else "", end="")
+    sys.exit(0)
+
+rows = []
+for repo in info.repos:
+    if repo.repo_type != "model": continue
+    weights = sum(1 for rev in repo.revisions for f in rev.files
+                  if str(f.file_path).endswith((".safetensors", ".npz", ".gguf")))
+    rows.append({"name": repo.repo_id, "size": repo.size_on_disk, "weights": weights,
+                 "complete": weights > 0, "serving_port": running.get(repo.repo_id)})
+
+# Serving first (what you can use right now), then biggest on disk.
+rows.sort(key=lambda r: (r["serving_port"] is None, -(r["size"] or 0)))
+
+if mode == "json":
+    print(json.dumps(rows)); sys.exit(0)
+
+print(f"MLX  ({root})")
+if not rows:
+    print("  no models downloaded yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <repo>")
+    sys.exit(0)
+w = max(len(r["name"]) for r in rows)
+for r in rows:
+    if not r["complete"]:
+        mark, note = f"{Y}⚠{R}", f"{Y}incomplete - no weight files{R}"
+    elif r["serving_port"]:
+        mark, note = f"{G}▶{R}", f"{G}serving on :{r['serving_port']}{R}"
+    else:
+        mark, note = "○", f"{D}downloaded{R}"
+    print(f"  {mark} {r['name']:<{w}}  {human(r['size']):>6}   {note}")
+total = sum(r["size"] or 0 for r in rows)
+print(f"  {D}{len(rows)} repo(s), {human(total)} on disk{R}")
+# A repo with broken refs is DROPPED from the scan (it lands in .warnings) while still occupying
+# disk — say so rather than let unaccounted gigabytes hide, which is the whole point of this command.
+if getattr(info, "warnings", None):
+    print(f"  {Y}⚠ {len(info.warnings)} cache entr(y/ies) unreadable and NOT counted above — still using disk.{R}")
+    for warning in info.warnings[:3]:
+        print(f"    {D}{str(warning)[:150]}{R}")
+PY
+  rm -f "$run"
+  return 0
+}
+
+# Whole-repo delete through huggingface_hub's own strategy (it understands blobs vs snapshot links).
+# The registry entry goes too, so `mlx-up` can't resurrect a model you just removed.
+mlx_delete_model() {  # $1 = repo id
+  local py="${MLX_VENV}/bin/python3"
+  [[ -x "$py" ]] || { err "MLX env missing — run:  source ./ACTIVATE.sh"; return 1; }
+  "$py" - "${MLX_MODELS_DIR}/hub" "$1" <<'PY' || return 1
+import sys
+from huggingface_hub import scan_cache_dir
+hub, name = sys.argv[1], sys.argv[2]
+info = scan_cache_dir(hub)
+hashes = [rev.commit_hash for repo in info.repos if repo.repo_id == name for rev in repo.revisions]
+if not hashes:
+    print(f"no cached revisions for {name}", file=sys.stderr); sys.exit(1)
+strategy = info.delete_revisions(*hashes)
+freed = strategy.expected_freed_size_str
+strategy.execute()
+print(f"freed {freed}")
+PY
+  mlx_registry_remove "$1"
+}
+
 mlx_config_help() {
   echo -e "${C_BOLD}Set up MLX for JARVIS${C_RESET}  — Apple's on-device LLM runtime (Apple Silicon). Models run on the macOS HOST."
   cat <<TXT
@@ -437,10 +665,14 @@ mlx_config_help() {
      hf download mlx-community/Qwen2.5-7B-Instruct-4bit   # just fetch it into mlx/models/
      mlx_lm.generate --model <repo> --prompt "hi"         # fetch + a quick test
    LIST the models you have downloaded (cached under mlx/models/):
-     mlx_lm.manage --scan
-   DELETE a downloaded model to reclaim disk (matches repos containing the pattern):
-     mlx_lm.manage --delete --pattern Qwen2.5-7B          # e.g. removes ...Qwen2.5-7B-Instruct-4bit
+     ./JARVIS_LOCAL_LLM.sh list-models --backend mlx      # size + which are serving right now
+   DELETE a downloaded model to reclaim disk (exact repo id, confirms first):
+     ./JARVIS_LOCAL_LLM.sh delete-model mlx-community/Qwen2.5-7B-Instruct-4bit
    (Everything saves under  mlx/models/  — gitignored.)
+
+   NOTE: mlx-lm ships its own 'mlx_lm.manage --scan', but it filters the cache by the literal
+   pattern "mlx", so it only ever shows mlx-community/* — models from other orgs (Vontra,
+   orcarouter, sh0wie...) are invisible to it. list-models reads the whole cache instead.
 
 3) BRING model(s) online — each runs as its OWN mlx_lm.server on its own port, so several stay hot
    at once (great with lots of RAM; no reload when JARVIS switches tiers). No config file — the script
@@ -472,15 +704,136 @@ TXT
 
 usage() { awk 'NR>=2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
+# ============================ inventory + deletion (backend-agnostic) ============================
+# No --backend = BOTH runtimes, like `status` — "what have I got?" is an inventory question, not a
+# per-backend one.
+list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON from the dispatcher
+  if [[ "$AS_JSON" == 1 ]]; then
+    if [[ "$BACKEND_EXPLICIT" == 1 ]]; then
+      printf '{"%s":%s}\n' "$BACKEND" "$("${BACKEND}_list_models" json)"
+    else
+      printf '{"ollama":%s,"mlx":%s}\n' "$(ollama_list_models json)" "$(mlx_list_models json)"
+    fi
+    return 0
+  fi
+  if [[ "$BACKEND_EXPLICIT" == 1 ]]; then
+    "${BACKEND}_list_models"
+  else
+    ollama_list_models; echo; mlx_list_models
+  fi
+  # Legend names only the symbols this listing can actually contain.
+  local show_ollama=1 show_mlx=1
+  [[ "$BACKEND_EXPLICIT" == 1 && "$BACKEND" == "mlx"    ]] && show_ollama=0
+  [[ "$BACKEND_EXPLICIT" == 1 && "$BACKEND" == "ollama" ]] && show_mlx=0
+  echo
+  { [[ "$show_mlx"    == 1 ]] && printf '%b serving now   ' "${C_BOLD}▶${C_RESET}"; }
+  { [[ "$show_ollama" == 1 ]] && printf '%b ready on demand   ' "${C_BOLD}●${C_RESET}"; }
+  printf '○ downloaded, not started   ⚠ incomplete\n'
+  [[ "$show_mlx"    == 1 ]] && echo "Start an MLX model:  ./JARVIS_LOCAL_LLM.sh mlx-serve <repo>"
+  [[ "$show_ollama" == 1 ]] && echo "Ollama loads any downloaded tag on demand — no start step."
+  echo "Use one:             paste the model name into JARVIS → Config → Model (or a tier)."
+  echo "Reclaim disk:        ./JARVIS_LOCAL_LLM.sh delete-model <model>"
+  return 0
+}
+
+# Exact-name membership tests — Ollama tags CAN contain '/' (e.g. AI-TAVS/Qwen3.6-...:35b), so the
+# backend is decided by what's actually installed, never by guessing from the name's shape.
+_has_model() {  # $1 = ollama|mlx  $2 = name
+  "$1_list_models" json | python3 -c 'import json,sys
+try: rows = json.load(sys.stdin)
+except Exception: rows = []
+print("1" if any(r.get("name") == sys.argv[1] for r in rows) else "0")' "$2"
+}
+_model_size() {  # $1 = ollama|mlx  $2 = name  -> human size or "?"
+  "$1_list_models" json | python3 -c 'import json,sys
+try: rows = json.load(sys.stdin)
+except Exception: rows = []
+n = next((r for r in rows if r.get("name") == sys.argv[1]), None)
+s = (n or {}).get("size") or 0
+for u, d in (("T",1e12),("G",1e9),("M",1e6),("K",1e3)):
+    if s >= d:
+        v = s/d; print(f"{v:.1f}{u}" if v < 10 else f"{v:.0f}{u}"); break
+else: print(f"{s}B" if s else "?")' "$2"
+}
+_suggest_close() {  # $1 = name — print near-matches from both inventories
+  { ollama_list_models json; mlx_list_models json; } | python3 -c 'import json,sys,difflib
+names=[]
+for line in sys.stdin:
+    line=line.strip()
+    if not line: continue
+    try: names += [r.get("name","") for r in json.loads(line)]
+    except Exception: pass
+close = difflib.get_close_matches(sys.argv[1], names, n=5, cutoff=0.4) or \
+        [n for n in names if sys.argv[1].lower() in n.lower()][:5]
+for c in close: print("    " + c)' "$1"
+}
+
+# DESTRUCTIVE. Guarded by: exact-name match only (no patterns), a refusal to delete a model that is
+# currently serving, an explicit y/N confirmation showing the reclaimed size, and read-only fallback
+# behavior on every error path.
+delete_model() {  # $1 = name
+  local name="${1:-}"
+  [[ -n "$name" ]] || { err "usage: ./JARVIS_LOCAL_LLM.sh delete-model <model> [--backend ollama|mlx] [--yes]"; return 1; }
+  local inO=0 inM=0
+  if [[ "$BACKEND_EXPLICIT" == 0 || "$BACKEND" == "ollama" ]]; then [[ "$(_has_model ollama "$name")" == 1 ]] && inO=1; fi
+  if [[ "$BACKEND_EXPLICIT" == 0 || "$BACKEND" == "mlx"    ]]; then [[ "$(_has_model mlx    "$name")" == 1 ]] && inM=1; fi
+
+  if [[ "$inO" == 0 && "$inM" == 0 ]]; then
+    err "no downloaded model named exactly '$name'."
+    local near; near="$(_suggest_close "$name")"
+    [[ -n "$near" ]] && { echo "  did you mean:"; echo "$near"; }
+    echo "  full inventory:  ./JARVIS_LOCAL_LLM.sh list-models"
+    return 1
+  fi
+  if [[ "$inO" == 1 && "$inM" == 1 ]]; then
+    err "'$name' exists in BOTH runtimes — disambiguate with --backend ollama|mlx."; return 1
+  fi
+
+  local target size
+  if [[ "$inO" == 1 ]]; then target="ollama"; else target="mlx"; fi
+  size="$(_model_size "$target" "$name")"
+
+  # A live MLX server holds the weights open; deleting under it would leave a zombie serving from
+  # page cache. Stop it first, deliberately, so the gateway routes get resynced too.
+  if [[ "$target" == "mlx" ]]; then
+    local port; port="$(mlx_discover | awk -F'|' -v m="$name" '$1==m{print $2; exit}')"
+    if [[ -n "$port" ]]; then
+      err "'$name' is currently serving on :$port — stop it first:"
+      echo "    ./JARVIS_LOCAL_LLM.sh mlx-stop $name"
+      return 1
+    fi
+  fi
+
+  echo
+  warn "About to DELETE a downloaded ${target} model — this cannot be undone (re-downloading is the only way back)."
+  echo -e "    ${C_BOLD}${name}${C_RESET}   frees ~${size}"
+  if [[ "$YES" != 1 ]]; then
+    local ans=""
+    read -r -p "  Delete it? [y/N] " ans || true
+    case "$(lc "${ans:-n}")" in
+      y|yes) ;;
+      *) info "Cancelled — nothing was deleted."; return 1 ;;
+    esac
+  fi
+  "${target}_delete_model" "$name" || { err "delete failed."; return 1; }
+  ok "Deleted $name."
+  info "Inventory:  ./JARVIS_LOCAL_LLM.sh list-models"
+}
+
 # ============================ dispatch ============================
-CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""
+CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""; AS_JSON=0; YES=0
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
     start|stop|status|url|config|gateway-sync) CMD="$(lc "$1")" ;;
     mlx-serve|mlx-stop|mlx-ls|mlx-up)          CMD="$(lc "$1")" ;;
+    # inventory: accept the kebab form plus the obvious near-misses (muscle memory shouldn't error)
+    list-models|list_models|list-model|list_model|models) CMD="list-models" ;;
+    delete-model|delete_model|rm-model|remove-model)      CMD="delete-model" ;;
     --gateway)             USE_GATEWAY=1 ;;
     --backend)             shift; BACKEND="$(lc "${1:-ollama}")"; BACKEND_EXPLICIT=1 ;;
     --port)                shift; MLX_PORT_ARG="${1:-}" ;;
+    --json)                AS_JSON=1 ;;
+    -y|--yes)              YES=1 ;;
     -h|--help|help)        usage; exit 0 ;;
     -*)                    err "unknown option: $1"; usage; exit 1 ;;
     *)                     MLX_ARG="$1" ;;    # positional: model id / target for the mlx-* commands
@@ -528,6 +881,8 @@ case "$CMD" in
   mlx-stop)   mlx_stop_target "${MLX_ARG:-all}" ;;
   mlx-ls)     mlx_ls ;;
   mlx-up)     mlx_up ;;
+  list-models)  list_models ;;
+  delete-model) delete_model "$MLX_ARG" || exit 1 ;;
   status)
     # Diagnostic view: report EVERY backend's real state, not just the --backend default (ollama).
     ollama_status

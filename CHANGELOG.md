@@ -9,6 +9,27 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-08-31: **`list-models` — see what you've actually downloaded.** Every existing command
+  answered a question about what's *live* (`status`, `mlx-ls`, Config's "List models" all need the
+  runtime up); nothing answered "what's on disk that I could start?".
+  `./JARVIS_LOCAL_LLM.sh list-models` now does, for **both** runtimes by default (`--backend` to
+  narrow, `--json` to script it): size on disk, parameter count, quantization, and vision/tools
+  capability, with `▶ serving now / ● ready on demand / ○ downloaded / ⚠ incomplete` marks and a
+  per-runtime disk total. Ollama reads the live daemon when it's up and the **on-disk manifests
+  when it isn't** (where `ollama list` errors); MLX reads the Hugging Face cache index directly —
+  deliberately **not** `mlx_lm.manage --scan`, which filters repo ids by the literal pattern `mlx`
+  and so hides every model that isn't from `mlx-community` (on this machine it showed 4 of 15).
+  Metadata-only repos from interrupted downloads are flagged rather than offered, and cache
+  entries the scanner can't read are reported instead of silently dropped from the disk total.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
+- 2026-08-31: **`delete-model` — reclaim the disk.** Deletion is exact-name-only (no patterns),
+  refuses while the model is serving, prints the space it frees, and confirms first (`--yes` skips
+  the prompt, never the safety checks); an unknown name suggests near matches instead of guessing.
+  Ollama deletions go through the daemon (tags share layers, so hand-removing blobs would corrupt
+  the store); MLX deletions go through the Hugging Face cache and drop the model from
+  `mlx/serving.json`, so `mlx-up` can't re-download something you just removed. Ambiguous names
+  (an Ollama tag and an MLX repo id that match exactly) require `--backend` rather than picking one.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
 - 2026-08-27: **Optional SearXNG search sidecar.** `search.provider: "searxng"` switches the
   `web_search` tool from the rate-limit-prone DuckDuckGo HTML scrape to a self-hosted
   [SearXNG](https://docs.searxng.org/) metasearch JSON API. The container rides the compose

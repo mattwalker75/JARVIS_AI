@@ -52,7 +52,7 @@ Either backend has a built-in setup guide:
 ```bash
 ollama pull qwen3:8b          # chat
 ollama pull qwen2.5vl:32b     # vision (for screenshots / the vision tier)
-ollama list                   # what you have
+./JARVIS_LOCAL_LLM.sh list-models --backend ollama    # what you have (size, params, vision/tools)
 ```
 
 **3. (optional) Tune** the runtime in the `ollama` block of `config/JARVIS_CONFIG.json`
@@ -88,8 +88,12 @@ org (pre-quantized; `-4bit` variants suit most Macs). They **auto-download on fi
 ```bash
 hf download mlx-community/Qwen2.5-7B-Instruct-4bit    # into mlx/models/
 mlx_lm.generate --model <repo> --prompt "hi"          # fetch + quick test
-mlx_lm.manage --scan                                  # list cached ; --delete to remove
+./JARVIS_LOCAL_LLM.sh list-models --backend mlx       # what you have (size + what's serving)
 ```
+
+> Don't use mlx-lm's own `mlx_lm.manage --scan` to audit your cache: it filters repo ids by the
+> literal pattern `mlx`, so it only ever lists `mlx-community/*` and silently hides models from
+> every other org. `list-models` reads the whole cache.
 
 **3. Bring model(s) online** — MLX is **discovery-based, like Ollama** (no config array): each model
 runs as its own `mlx_lm.server` on its own port, so several stay **hot at once** (no reload when JARVIS
@@ -189,10 +193,52 @@ gateway on `--gateway` startup. Then set the relevant tier's model to `claude-so
 
 ---
 
+## What have I got? (inventory & cleanup)
+
+`status` and `mlx-ls` answer what's **running**. `list-models` answers what's **downloaded** — the
+question you actually ask before serving a model or filling in a Config tier:
+
+```bash
+./JARVIS_LOCAL_LLM.sh list-models                    # both runtimes
+./JARVIS_LOCAL_LLM.sh list-models --backend mlx      # just one
+./JARVIS_LOCAL_LLM.sh list-models --json             # for scripting
+```
+
+```
+OLLAMA  (:11434, up)
+  ● qwen3:8b                                 5.2G   8.2B · Q4_K_M · tools
+  ● qwen2.5vl:32b                             21G   33.5B · Q4_K_M · vision
+  ● nomic-embed-text:latest                  274M   embedding - not a chat model
+  10 tag(s), 260G on disk
+
+MLX  (…/mlx/models)
+  ▶ mlx-community/Qwen2.5-7B-Instruct-4bit   4.3G   serving on :8080
+  ○ mlx-community/Qwen3.8-27B-4bit            16G   downloaded
+  ⚠ some-org/Interrupted-Download                -   incomplete - no weight files
+```
+
+`▶` serving now · `●` ready on demand (Ollama loads any downloaded tag) · `○` downloaded, not
+started · `⚠` incomplete. Sizes are real bytes on disk, so this doubles as a disk audit — local
+model caches reach terabytes quickly. Ollama's listing also works with the **daemon stopped**
+(read from the on-disk manifests), where `ollama list` would just error.
+
+**Reclaiming space** — deletion is exact-name-only, refuses while a model is serving, shows what
+it frees, and asks first:
+
+```bash
+./JARVIS_LOCAL_LLM.sh delete-model qwen3:8b
+./JARVIS_LOCAL_LLM.sh delete-model mlx-community/Qwen3.8-27B-4bit --yes   # skip the prompt
+```
+
+Ollama deletions go through the daemon (tags share layers — hand-deleting blobs would corrupt the
+store); MLX deletions go through the Hugging Face cache and also drop the model from the serve
+registry, so `mlx-up` can't re-download something you just removed.
+
 ## Command reference
 
 See **[CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime)** for the full
-table (`start` / `stop` / `status` / `url` / `config`, `--backend`, `--gateway`).
+table (`start` / `stop` / `status` / `url` / `config` / `list-models` / `delete-model`,
+`--backend`, `--gateway`).
 
 ## Troubleshooting
 

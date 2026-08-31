@@ -132,6 +132,8 @@ and **MLX** (Apple Silicon) today, with vLLM / llama.cpp addable later as new ba
 | `status` | Show whether the runtime and the gateway (`:4000`) are up. |
 | `stop [--gateway]` | Stop the runtime (and the gateway with `--gateway`). |
 | `config [--backend ollama\|mlx]` | Print a start-to-finish **setup guide** for that backend — install, models, tuning, and how to point JARVIS at it. Great first stop. |
+| `list-models [--backend ollama\|mlx] [--json]` | **Inventory of what you've DOWNLOADED** — the question `status` and `mlx-ls` can't answer (they only report what's *live*). No `--backend` lists both runtimes. Shows size on disk, parameter count, quantization, and vision/tools capability; marks what's serving right now, and flags incomplete downloads. `--json` for scripting. |
+| `delete-model <model> [--backend ollama\|mlx] [--yes]` | Delete a downloaded model to reclaim disk. **Exact name only** (no patterns), refuses while the model is serving, shows the space reclaimed and confirms first (`--yes` skips the prompt, never the safety checks). Ollama deletes go through the daemon; MLX repos through the Hugging Face cache, and the model is dropped from the serve registry so `mlx-up` can't resurrect it. |
 
 ```bash
 # First time? print the setup steps (install link, pull commands, config)
@@ -143,6 +145,10 @@ and **MLX** (Apple Silicon) today, with vLLM / llama.cpp addable later as new ba
 
 # With the LiteLLM gateway (one endpoint, multi-model routing across providers)
 ./JARVIS_LOCAL_LLM.sh start --gateway   # → prints http://host.docker.internal:4000/v1
+
+# What have I actually got on disk? (both runtimes; add --backend to narrow)
+./JARVIS_LOCAL_LLM.sh list-models
+./JARVIS_LOCAL_LLM.sh delete-model qwen3:8b     # reclaim the space (confirms first)
 ```
 
 The **`--gateway`** option fronts the runtime with the LiteLLM gateway, which lives in
@@ -173,6 +179,7 @@ source ./ACTIVATE.sh        # 1st run: creates mlx/venv + installs mlx-lm; model
 ./JARVIS_LOCAL_LLM.sh config --backend mlx                        # full setup guide
 ./JARVIS_LOCAL_LLM.sh mlx-serve mlx-community/Qwen2.5-7B-Instruct-4bit   # bring a model online (its own port)
 ./JARVIS_LOCAL_LLM.sh mlx-ls                                      # list running MLX servers
+./JARVIS_LOCAL_LLM.sh list-models --backend mlx                   # list DOWNLOADED models (+ what's serving)
 ./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway              # discover them → one URL via LiteLLM
 ./JARVIS_LOCAL_LLM.sh mlx-stop all                               # stop the server process(es)
 ```
