@@ -484,14 +484,36 @@ mlx_runtime_for() {  # $1 = repo id or local path
 import json, os, sys, glob, importlib.util
 model, root = sys.argv[1], sys.argv[2]
 mt = None
+srcdir = None
 def read_cfg(d):
-    try: return json.load(open(os.path.join(d, "config.json"))).get("model_type")
+    try: return json.load(open(os.path.join(d, "config.json")))
     except Exception: return None
+def type_of(d):
+    global srcdir
+    c = read_cfg(d)
+    if c is None: return None
+    srcdir = d
+    return c.get("model_type")
 if os.path.isdir(model):
-    mt = read_cfg(model)
+    mt = type_of(model)
 if mt is None:
     snaps = sorted(glob.glob(os.path.join(root, "hub", "models--" + model.replace("/", "--"), "snapshots", "*")))
-    if snaps: mt = read_cfg(snaps[-1])
+    if snaps: mt = type_of(snaps[-1])
+
+# A repo may SHIP ITS OWN implementation (config "model_file"), which is how a model runs on a
+# runtime that has no built-in support for its architecture. Both packages will load such a file,
+# but they expect different interfaces — mlx-lm wants Model/ModelArgs, mlx-vlm wants ModelConfig —
+# so route by what the file was actually written against, not by who implements the model_type.
+if srcdir:
+    cfg = read_cfg(srcdir) or {}
+    mf = cfg.get("model_file")
+    if mf and os.path.exists(os.path.join(srcdir, mf)):
+        try:
+            src = open(os.path.join(srcdir, mf), errors="ignore").read(4000)
+            if "mlx_lm" in src: print("lm"); sys.exit(0)
+            if "mlx_vlm" in src: print("vlm"); sys.exit(0)
+        except Exception:
+            pass
 if mt is None:                       # not cached yet — ask the Hub for just config.json
     try:
         from huggingface_hub import hf_hub_download

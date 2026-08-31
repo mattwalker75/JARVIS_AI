@@ -27,6 +27,15 @@ infrastructure, security, documentation, or test-policy changes.
   (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
 
 ### Fixed
+- 2026-08-31: **`mlx-serve` ignored repo-shipped model code when routing.** A model repo can carry
+  its own MLX implementation (`config.json` → `"model_file": "<arch>.py"`), which is how a model
+  runs on a runtime that has no built-in support for its architecture. Routing looked only at
+  which package implements the `model_type`, so such a model went to mlx-vlm purely because
+  mlx-vlm knows the architecture — and failed with
+  `module 'custom_model' has no attribute 'ModelConfig'`, since both runtimes load shipped code
+  but expect different interfaces (mlx-lm: `Model`/`ModelArgs`; mlx-vlm: `ModelConfig`).
+  `mlx_runtime_for` now detects `model_file` and routes by which framework the file imports.
+  (`JARVIS_LOCAL_LLM.sh`)
 - 2026-08-31: `mlx-ls` and `mlx-up` exited **1 whenever servers were actually running** — their
   last statement was a `[[ … ]] && info` guard that is false in exactly that case, so the
   conditional became the exit status and broke `&&` chaining. (`JARVIS_LOCAL_LLM.sh`)
