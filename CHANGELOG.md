@@ -9,6 +9,19 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Changed
+- 2026-08-31: **`list-models --details` — what KIND of model is this?** MLX rows previously showed
+  only a name and a size, while Ollama rows carried params/quant/capabilities; the metadata is now
+  symmetric and lives behind one flag. The default view is deliberately lean (name, size, state,
+  and warnings you can't afford to miss — an embedding model in a chat tier, an incomplete
+  download); `--details` adds a line per model with architecture, dense vs MoE width,
+  quantization, context window, instruct-vs-base, tool-calling, thinking and vision. Ollama's
+  detail comes from the daemon, MLX's is read straight from each repo's `config.json` + chat
+  template — no network, no model load, still ~0.4 s across a 2 TB cache. Flags worth having:
+  `BASE - no chat template` (a foundation model that can't converse or call tools),
+  `unquantized`, `N quant variants inside` (one repo holding several quantizations — usually why
+  a repo is enormous), and `vision*` (a vision architecture whose image half `mlx_lm.server`
+  can't serve, since mlx-lm is text-only). `--json` always returns the full record.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
 - 2026-08-31: **`--help` now covers where models come from.** Downloading is the one step in the
   local-model lifecycle that leaves this script (each runtime's own tool does it), so the help
   screen now has a "GETTING models" section: `ollama pull <tag>` with the browse/search URLs

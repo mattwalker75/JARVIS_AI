@@ -203,13 +203,14 @@ question you actually ask before serving a model or filling in a Config tier:
 ```bash
 ./JARVIS_LOCAL_LLM.sh list-models                    # both runtimes
 ./JARVIS_LOCAL_LLM.sh list-models --backend mlx      # just one
-./JARVIS_LOCAL_LLM.sh list-models --json             # for scripting
+./JARVIS_LOCAL_LLM.sh list-models --details          # what KIND of model each one is
+./JARVIS_LOCAL_LLM.sh list-models --json             # for scripting (always full detail)
 ```
 
 ```
 OLLAMA  (:11434, up)
-  ● qwen3:8b                                 5.2G   8.2B · Q4_K_M · tools
-  ● qwen2.5vl:32b                             21G   33.5B · Q4_K_M · vision
+  ● qwen3:8b                                 5.2G
+  ● qwen2.5vl:32b                             21G
   ● nomic-embed-text:latest                  274M   embedding - not a chat model
   10 tag(s), 260G on disk
 
@@ -223,6 +224,30 @@ MLX  (…/mlx/models)
 started · `⚠` incomplete. Sizes are real bytes on disk, so this doubles as a disk audit — local
 model caches reach terabytes quickly. Ollama's listing also works with the **daemon stopped**
 (read from the on-disk manifests), where `ollama list` would just error.
+
+**`--details` — what kind of model is this?** The default view stays scannable (name, size, state,
+and warnings you can't afford to miss). `--details` adds a second line per model describing what it
+actually *is*, so you can tell a tool-calling instruct model from a base model before serving 100 GB
+of it:
+
+```
+  ● qwen3:8b                                  5.2G
+      qwen3 · 8.2B · Q4_K_M · 40K ctx · tools · thinking
+  ○ some-org/Big-Model-MLX                    926G   downloaded
+      glm5_next MoE-288 · 4bit/g64 · 1M ctx · chat · tools · thinking · vision*
+      · 5 quant variants inside: 2-bit, 2bit-lite, 3-bit, 4-bit, 6-bit
+  ○ some-org/Foundation-MLX                   167G   downloaded
+      deepseek_v4 MoE-256 · 4bit/g32 · 1M ctx · BASE - no chat template
+```
+
+For Ollama this comes from the daemon (family, parameters, quantization, context, capabilities);
+for MLX it's read straight out of each repo's `config.json` and chat template — **no network and no
+model load**, so it stays instant. Things worth watching for: **`BASE - no chat template`** (a
+foundation model that won't converse or call tools), **`unquantized`** (full-precision weights —
+enormous and slow on a Mac), **`N quant variants inside`** (one repo holding several quantizations,
+usually the reason a repo is huge), and **`vision*`** — a vision architecture whose image half
+`mlx_lm.server` can't actually serve, since mlx-lm is text-only (that needs `mlx-vlm`; keep the
+vision tier on Ollama).
 
 **Reclaiming space** — deletion is exact-name-only, refuses while a model is serving, shows what
 it frees, and asks first:

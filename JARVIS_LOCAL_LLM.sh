@@ -21,7 +21,9 @@
 #            BROWSE PRE-QUANTIZED MLX BUILDS:  https://huggingface.co/mlx-community  ('-4bit' fits most Macs)
 #
 # What have I got? (inventory of DOWNLOADED models — no --backend = both runtimes)
-#   ./JARVIS_LOCAL_LLM.sh list-models  [--backend ollama | mlx] [--json]
+#   ./JARVIS_LOCAL_LLM.sh list-models  [--backend ollama | mlx] [--details] [--json]
+#            --details = what KIND of model each one is: architecture, dense/MoE, quantization,
+#            context window, instruct-vs-base, tool-calling, vision (read from the local files)
 #   ./JARVIS_LOCAL_LLM.sh delete-model <model> [--backend ollama | mlx] [--yes]   # reclaim the disk
 #
 # MLX model management (discovery-based, like Ollama — bring models online, the script finds them):
@@ -214,7 +216,7 @@ PY
 # Prefers the live daemon — /api/tags carries parameter size, quantization and capabilities, so we
 # can mark vision models and embeddings. With Ollama stopped we read the on-disk manifests instead
 # (layer sizes sum to the real size), so the inventory still works when `ollama list` would error.
-ollama_list_models() {  # $1 = "json" for machine output
+ollama_list_models() {  # $1 = "" | "details" | "json"
   local mode="${1:-}" tmp="" up=0 color=0
   [[ -n "$C_GRN" ]] && color=1
   if port_up "http://localhost:${OLLAMA_PORT}/api/tags"; then
@@ -244,6 +246,7 @@ if up:
             d = m.get("details") or {}
             rows.append({"name": m.get("name") or m.get("model"), "size": m.get("size"),
                          "params": d.get("parameter_size"), "quant": d.get("quantization_level"),
+                         "family": d.get("family"), "ctx": d.get("context_length"),
                          "caps": m.get("capabilities") or []})
     except Exception:
         rows = []
@@ -262,7 +265,8 @@ else:
                 size = sum(l.get("size", 0) for l in man.get("layers", [])) + (man.get("config") or {}).get("size", 0)
             except Exception:
                 size = None
-            rows.append({"name": full, "size": size, "params": None, "quant": None, "caps": []})
+            rows.append({"name": full, "size": size, "params": None, "quant": None,
+                         "family": None, "ctx": None, "caps": []})
 
 rows.sort(key=lambda r: -(r["size"] or 0))
 
@@ -273,21 +277,36 @@ if not rows:
     print(f"{D}OLLAMA: no models downloaded" + ("" if up else " (daemon stopped, nothing on disk either)") + f"{R}")
     sys.exit(0)
 
-def what(r):
-    # JARVIS is tool-heavy and has a vision tier, so those capabilities are the ones worth
-    # surfacing next to the raw size — they decide which tier a model can actually fill.
+def ctxfmt(n):
+    if not n: return None
+    if n >= 1048576: return f"{n/1048576:.0f}M"
+    if n >= 1024:    return f"{n/1024:.0f}K"
+    return str(n)
+
+# The default view carries only what you can't afford to miss: an embedding model would be a
+# silent mistake as a chat tier. Everything descriptive lives behind --details.
+def warn_of(r):
+    return f"{Y}embedding - not a chat model{R}" if "embedding" in r["caps"] else ""
+
+def detail_of(r):
     caps = r["caps"]
-    if "embedding" in caps: return f"{Y}embedding - not a chat model{R}"
     bits = [b for b in (r["params"], r["quant"]) if b]
-    if "vision" in caps: bits.append(f"{G}vision{R}")
-    if "tools"  in caps: bits.append(f"{G}tools{R}")
-    return " · ".join(bits)
+    if r["family"]: bits.insert(0, r["family"])
+    c = ctxfmt(r["ctx"])
+    if c: bits.append(f"{c} ctx")
+    if "vision"   in caps: bits.append(f"{G}vision{R}")
+    if "tools"    in caps: bits.append(f"{G}tools{R}")
+    if "thinking" in caps: bits.append("thinking")
+    if "embedding" in caps: bits.append(f"{Y}embedding{R}")
+    return " · ".join(bits) or f"{D}(no metadata reported){R}"
 
 w = max(len(r["name"]) for r in rows)
 head = f"OLLAMA  (:{port}, up)" if up else f"OLLAMA  (daemon stopped - read from disk)"
 print(f"{head}")
 for r in rows:
-    print(f"  {G}●{R} {r['name']:<{w}}  {human(r['size']):>6}   {what(r)}")
+    print(f"  {G}●{R} {r['name']:<{w}}  {human(r['size']):>6}   {warn_of(r)}".rstrip())
+    if mode == "details":
+        print(f"      {D}{detail_of(r)}{R}")
 total = sum(r["size"] or 0 for r in rows)
 print(f"  {D}{len(rows)} tag(s), {human(total)} on disk{R}")
 PY
@@ -537,7 +556,7 @@ mlx_gateway_routes() {
 # mlx-community/* and hides everything from other orgs (Vontra, orcarouter, sh0wie...).
 # Cross-references the running servers so you can see what's live vs merely present, and counts
 # weight files so a metadata-only shell (interrupted download) is flagged rather than offered.
-mlx_list_models() {  # $1 = "json" for machine output
+mlx_list_models() {  # $1 = "" | "details" | "json"
   local mode="${1:-}" color=0
   [[ -n "$C_GRN" ]] && color=1
   local hub="${MLX_MODELS_DIR}/hub"
@@ -598,13 +617,70 @@ except Exception as e:
     print("[]" if mode == "json" else "", end="")
     sys.exit(0)
 
+# WHAT KIND of model is this? Everything needed is already on disk in the snapshot —
+# config.json (architecture, quantization, MoE width, context) and the chat template
+# (instruct vs base, tool-calling). No network, no model load, just a few small reads.
+def describe(repo):
+    import os, glob, re
+    snaps = sorted(glob.glob(os.path.join(str(repo.repo_path), "snapshots", "*")))
+    if not snaps: return {}
+    d = snaps[-1]
+    out = {}
+    try:
+        cfg = json.load(open(os.path.join(d, "config.json")))
+    except Exception:
+        cfg = {}
+    tcfg = cfg.get("text_config") or {}
+    def g(k):
+        v = cfg.get(k)
+        return tcfg.get(k) if v is None else v
+    arch = (cfg.get("architectures") or [None])[0]
+    out["model_type"] = cfg.get("model_type")
+    out["arch"] = arch
+    q = cfg.get("quantization") or {}
+    out["quant_bits"] = q.get("bits")
+    out["quant_group"] = q.get("group_size")
+    out["experts"] = g("num_experts") or g("num_local_experts") or g("n_routed_experts")
+    out["layers"] = g("num_hidden_layers")
+    out["ctx"] = g("max_position_embeddings")
+    # A vision tower means mlx-lm (text-only) can't serve the whole model — worth knowing.
+    out["vision"] = bool(cfg.get("vision_config")) or bool(
+        arch and re.search(r"VL|Vision|Conditional", arch))
+    # Chat template: present = instruct-tuned; absent = a BASE model that won't converse.
+    tmpl = ""
+    p = os.path.join(d, "chat_template.jinja")
+    if os.path.exists(p):
+        try: tmpl = open(p, errors="ignore").read()
+        except Exception: tmpl = ""
+    if not tmpl:
+        try: tmpl = (json.load(open(os.path.join(d, "tokenizer_config.json"))) or {}).get("chat_template") or ""
+        except Exception: tmpl = ""
+    if isinstance(tmpl, list): tmpl = json.dumps(tmpl)
+    low = tmpl.lower()
+    out["chat"] = bool(tmpl)
+    out["tools"] = "tool" in low
+    out["thinking"] = "think" in low
+    # Some repos ship SEVERAL quantizations side by side (2-bit/, 4-bit/, 6-bit/ ...), which is
+    # usually why a single repo is enormous. Name them so the disk cost is explainable.
+    try:
+        out["variants"] = sorted(os.path.basename(v) for v in glob.glob(os.path.join(d, "*"))
+                                 if os.path.isdir(v) and re.match(r"^\d+[\.\-]?\d*-?bit", os.path.basename(v), re.I))
+    except Exception:
+        out["variants"] = []
+    return out
+
+want_detail = mode in ("details", "json")
 rows = []
 for repo in info.repos:
     if repo.repo_type != "model": continue
     weights = sum(1 for rev in repo.revisions for f in rev.files
                   if str(f.file_path).endswith((".safetensors", ".npz", ".gguf")))
-    rows.append({"name": repo.repo_id, "size": repo.size_on_disk, "weights": weights,
-                 "complete": weights > 0, "serving_port": running.get(repo.repo_id)})
+    row = {"name": repo.repo_id, "size": repo.size_on_disk, "weights": weights,
+           "complete": weights > 0, "serving_port": running.get(repo.repo_id)}
+    if want_detail:
+        try: row.update(describe(repo))
+        except Exception: pass
+    rows.append(row)
 
 # Serving first (what you can use right now), then biggest on disk.
 rows.sort(key=lambda r: (r["serving_port"] is None, -(r["size"] or 0)))
@@ -616,6 +692,29 @@ print(f"MLX  ({root})")
 if not rows:
     print("  no models downloaded yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <repo>")
     sys.exit(0)
+def ctxfmt(n):
+    if not n: return None
+    if n >= 1048576: return f"{n/1048576:.0f}M"
+    if n >= 1024:    return f"{n/1024:.0f}K"
+    return str(n)
+
+def detail_of(r):
+    bits = []
+    kind = r.get("model_type") or "?"
+    bits.append(f"{kind} MoE-{r['experts']}" if r.get("experts") else f"{kind} dense")
+    if r.get("quant_bits"):
+        bits.append(f"{r['quant_bits']}bit" + (f"/g{r['quant_group']}" if r.get("quant_group") else ""))
+    else:
+        bits.append(f"{Y}unquantized{R}")          # full precision: enormous and slow on a Mac
+    c = ctxfmt(r.get("ctx"))
+    if c: bits.append(f"{c} ctx")
+    bits.append("chat" if r.get("chat") else f"{Y}BASE - no chat template{R}")
+    if r.get("tools"):    bits.append(f"{G}tools{R}")
+    if r.get("thinking"): bits.append("thinking")
+    if r.get("vision"):   bits.append("vision*")
+    if r.get("variants"): bits.append(f"{Y}{len(r['variants'])} quant variants inside: {', '.join(r['variants'])}{R}")
+    return " · ".join(bits)
+
 w = max(len(r["name"]) for r in rows)
 for r in rows:
     if not r["complete"]:
@@ -625,6 +724,8 @@ for r in rows:
     else:
         mark, note = "○", f"{D}downloaded{R}"
     print(f"  {mark} {r['name']:<{w}}  {human(r['size']):>6}   {note}")
+    if mode == "details" and r["complete"]:
+        print(f"      {D}{detail_of(r)}{R}")
 total = sum(r["size"] or 0 for r in rows)
 print(f"  {D}{len(rows)} repo(s), {human(total)} on disk{R}")
 # A repo with broken refs is DROPPED from the scan (it lands in .warnings) while still occupying
@@ -720,8 +821,9 @@ usage() { awk 'NR>=2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${
 # ============================ inventory + deletion (backend-agnostic) ============================
 # No --backend = BOTH runtimes, like `status` — "what have I got?" is an inventory question, not a
 # per-backend one.
-list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON from the dispatcher
+list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON / DETAILS from the dispatcher
   if [[ "$AS_JSON" == 1 ]]; then
+    # JSON is for machines: always the full record, no --details needed.
     if [[ "$BACKEND_EXPLICIT" == 1 ]]; then
       printf '{"%s":%s}\n' "$BACKEND" "$("${BACKEND}_list_models" json)"
     else
@@ -729,10 +831,11 @@ list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON from the dispatcher
     fi
     return 0
   fi
+  local mode=""; [[ "$DETAILS" == 1 ]] && mode="details"
   if [[ "$BACKEND_EXPLICIT" == 1 ]]; then
-    "${BACKEND}_list_models"
+    "${BACKEND}_list_models" "$mode"
   else
-    ollama_list_models; echo; mlx_list_models
+    ollama_list_models "$mode"; echo; mlx_list_models "$mode"
   fi
   # Legend names only the symbols this listing can actually contain.
   local show_ollama=1 show_mlx=1
@@ -746,6 +849,13 @@ list_models() {  # uses BACKEND / BACKEND_EXPLICIT / AS_JSON from the dispatcher
   [[ "$show_ollama" == 1 ]] && echo "Ollama loads any downloaded tag on demand — no start step."
   echo "Use one:             paste the model name into JARVIS → Config → Model (or a tier)."
   echo "Reclaim disk:        ./JARVIS_LOCAL_LLM.sh delete-model <model>"
+  if [[ "$DETAILS" == 1 && "$show_mlx" == 1 ]]; then
+    echo
+    echo "* vision architecture — mlx-lm serves TEXT only, so the vision half won't be reachable"
+    echo "  through mlx_lm.server (that needs mlx-vlm); keep the vision tier on Ollama."
+  elif [[ "$DETAILS" != 1 ]]; then
+    echo "More about each:     add --details  (architecture, quantization, context, chat/tools)"
+  fi
   return 0
 }
 
@@ -834,7 +944,7 @@ delete_model() {  # $1 = name
 }
 
 # ============================ dispatch ============================
-CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""; AS_JSON=0; YES=0
+CMD=""; BACKEND="ollama"; BACKEND_EXPLICIT=0; USE_GATEWAY=0; MLX_ARG=""; MLX_PORT_ARG=""; AS_JSON=0; YES=0; DETAILS=0
 while [[ $# -gt 0 ]]; do
   case "$(lc "$1")" in
     start|stop|status|url|config|gateway-sync) CMD="$(lc "$1")" ;;
@@ -846,6 +956,7 @@ while [[ $# -gt 0 ]]; do
     --backend)             shift; BACKEND="$(lc "${1:-ollama}")"; BACKEND_EXPLICIT=1 ;;
     --port)                shift; MLX_PORT_ARG="${1:-}" ;;
     --json)                AS_JSON=1 ;;
+    --details|--detail|-l) DETAILS=1 ;;
     -y|--yes)              YES=1 ;;
     -h|--help|help)        usage; exit 0 ;;
     -*)                    err "unknown option: $1"; usage; exit 1 ;;
