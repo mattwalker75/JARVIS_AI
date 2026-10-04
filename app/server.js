@@ -6,7 +6,7 @@ const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
 const os = require("os");
-const { config, loadError, publicConfig, systemPrompt, setSetting, setProtected, readFullConfig, writeFullConfig } = require("./src/config");
+const { config, loadError, publicConfig, systemPrompt, setSetting, setProtected, readFullConfig, writeFullConfig, workbenchEnabled } = require("./src/config");
 const auth = require("./src/auth");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
@@ -182,13 +182,17 @@ app.get("/api/selftest", async (_req, res) => {
     const r = await tools.searchMemory("self-test connectivity probe", 1);
     out.semantic_memory = { ok: true, stored_memories: (r.results || []).length };
   } catch (e) { out.semantic_memory = { error: e.message }; }
-  try { out.workbench = await tools.runShell("whoami; uname -sr; echo '--- shared ---'; ls -1 /LLM_READ_ONLY_FILES /LLM_READ_WRITE_FILES 2>&1"); }
+  const wbOn = workbenchEnabled();   // off = nothing to test (Config → Workbench & shared folders)
+  const wbOff = { skipped: "the workbench is turned off" };
+  if (!wbOn) out.workbench = wbOff;
+  else try { out.workbench = await tools.runShell("whoami; uname -sr; echo '--- shared ---'; ls -1 /LLM_READ_ONLY_FILES /LLM_READ_WRITE_FILES 2>&1"); }
   catch (e) { out.workbench = { error: e.message }; }
   try { out.shared_rw = await tools.listDir(config.shared.read_write_dir); }
   catch (e) { out.shared_rw = { error: e.message }; }
   try { out.internet = await tools.fetchUrl("https://api.ipify.org?format=json"); }
   catch (e) { out.internet = { error: e.message }; }
-  try { out.desktop = await tools.runShell("xdpyinfo >/dev/null 2>&1 && echo display-ok || echo no-display; for t in chromium xdotool import; do command -v $t >/dev/null && echo have-$t; done"); }
+  if (!wbOn) out.desktop = wbOff;
+  else try { out.desktop = await tools.runShell("xdpyinfo >/dev/null 2>&1 && echo display-ok || echo no-display; for t in chromium xdotool import; do command -v $t >/dev/null && echo have-$t; done"); }
   catch (e) { out.desktop = { error: e.message }; }
   try { out.vault = { secrets_loaded: (await tools.execTool("list_secrets", {})).length }; }
   catch (e) { out.vault = { error: e.message }; }
@@ -423,14 +427,30 @@ app.post("/api/config/full", (req, res) => {
   try {
     const { config: c, secrets: s } = req.body || {};
     if (c === undefined && s === undefined) return res.status(400).json({ error: "nothing to save" });
+    const wbWas = workbenchEnabled();
     const r = writeFullConfig({ config: c, secrets: s });
     // writeFullConfig mutates the in-memory config in place, so changes apply on the next turn —
     // no --reload for ordinary settings (base_url/model/tiers/params/prompts/log level, etc.).
     // Hot-reload the runtime-added tools too, so added/removed MCP servers and custom tools
     // take effect without a restart (fire-and-forget; a dead server just logs and is skipped).
     if (c !== undefined) tools.reloadExtraTools().catch(() => {});
+    // The workbench switch (workbench.enabled) also stops / starts its container, so turning
+    // it off really frees the machine and turning it on needs no terminal.
+    if (workbenchEnabled() !== wbWas) {
+      tools.syncWorkbench()
+        .then((wb) => res.json({ ...r, reload_required: false, applied_live: true, workbench: { ...wb, changed: true } }))
+        .catch((e) => res.json({ ...r, reload_required: false, applied_live: true, workbench: { enabled: workbenchEnabled(), container: "unknown", action: "none", changed: true, note: "Could not check the workbench container (" + e.message + ") — run ./JARVIS.sh --reload to apply." } }));
+      return;
+    }
     res.json({ ...r, reload_required: false, applied_live: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// The optional Linux workbench: is it switched on, and what is its container doing?
+// ("running" | "stopped" | "missing" | "unknown" — shown under the switch in the Config tab.)
+app.get("/api/workbench", async (_req, res) => {
+  try { res.json(await tools.workbenchStatus()); }
+  catch (e) { res.json({ enabled: workbenchEnabled(), container: "unknown", error: e.message }); }
 });
 
 // Hot-reload custom tools + MCP servers on demand (also runs automatically on config save).
@@ -461,6 +481,7 @@ app.post("/api/tts", async (req, res) => {
 // workbench (fully local — no Google speech service). Needs the workbench running.
 let sttInFlight = false;   // one whisper job at a time — a runaway client must not stack workbench jobs
 app.post("/api/stt", async (req, res) => {
+  if (!workbenchEnabled()) return res.status(409).json({ error: "Local speech input uses the Linux workbench, which is turned off (Config → Workbench & shared folders). Switch the speech engine to Browser." });
   if (sttInFlight) return res.status(409).json({ error: "a transcription is already running — try again in a moment" });
   const { dataUrl, language } = req.body || {};
   const m = /^data:(audio|video)\/[\w.+-]+;base64,(.+)$/s.exec(String(dataUrl || ""));

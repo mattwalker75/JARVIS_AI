@@ -51,6 +51,17 @@ const CODING_RULE =
   "To CHANGE an existing file, use edit_workbench_file (a targeted find-and-replace of an exact snippet) instead of rewriting the whole file with write_workbench_file — whole-file rewrites are slow and tend to reintroduce bugs. Use write_workbench_file only to CREATE a file or replace a small one. " +
   "To DEBUG a web app that renders wrong/blank or misbehaves at RUNTIME: serve it, then browser_goto its URL and call browser_console to read the actual JavaScript error + console output (browser_goto also reports load-time errors). Do NOT try to diagnose a runtime rendering bug by only re-reading the static HTML/JS — you cannot see a runtime error that way. " +
   "After you CREATE or EDIT code, quickly syntax-check it before moving on (e.g. run_shell `node -c file.js`, `python3 -m py_compile file.py`, `bash -n script.sh`, or just run it) — this catches typos and undefined variables you introduced, instead of shipping a silently-broken file.";
+// The Linux workbench container is OPTIONAL (workbench.enabled, default on — Config →
+// Workbench). With it off there is no shell, desktop, browser automation, app preview,
+// PDF/Office reading or local speech-to-text: those tools are withheld from the model
+// (tools.activeToolDefs), the Workbench tab is hidden, and ./JARVIS.sh leaves the container
+// stopped. Everything else — chat, memory, web search, files, email, tasks — keeps working.
+function workbenchEnabled() { return !(config.workbench && config.workbench.enabled === false); }
+const NO_WORKBENCH_RULE =
+  "\n\nNO WORKBENCH: the Linux workbench is switched OFF in this setup, so you have NO shell, NO desktop, NO browser automation and NO app previews. " +
+  "Do not promise or attempt to run commands, install software, build or serve apps, click through websites, take screenshots, read PDF/Office documents, or transcribe audio — those tools do not exist right now. " +
+  "You still have long-term memory, web search and page fetching, the shared folders (list/read/write/edit files), image analysis, email, the credential vault, scheduled tasks and plans. " +
+  "If a request truly needs the workbench, say so plainly and tell the user it can be switched on in the Config tab (Workbench & shared folders).";
 // The ACTIVE prompt lives in editable files: /Prompts/default_master.prompt + default_system.prompt
 // (all file access via ./prompts — shared with the /api/prompts routes). Read fresh (small files)
 // so edits apply on the next turn without a restart; fall back to the config values (then a
@@ -68,7 +79,7 @@ function systemPrompt(persona) {
   else if (p && p.append) sp = sp + "\n\n" + p.append;
   // Order: MASTER (identity/mission) -> SYSTEM (operating instructions) -> constant guardrails.
   const base = (master ? master + "\n\n" : "") + sp;
-  return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + CODING_RULE;
+  return base.replace(/\{assistant_name\}/g, assistantName()) + TOOL_USE_RULE + PLANNER_RULE + (workbenchEnabled() ? CODING_RULE : NO_WORKBENCH_RULE);
 }
 
 // Name of the prompt set in use (null = custom/hand-edited default) — see ./prompts.
@@ -137,13 +148,14 @@ function publicConfig() {
       followup_seconds: Number(v.followup_seconds) || 0,
       ambient_style: v.ambient_style === "orb" ? "orb" : "face",
       mic_mode: v.mic_mode || "off",
-      stt_engine: v.stt_engine === "local" ? "local" : "browser",
+      stt_engine: v.stt_engine === "local" && workbenchEnabled() ? "local" : "browser",   // local = whisper in the workbench
       tts_engine: v.tts_engine === "piper" ? "piper" : "browser",
       tts_voice: v.tts_voice || "",
       tts_rate: v.tts_rate || 1.0,
       tts_pitch: v.tts_pitch || 1.0,
     },
     workbench_url: (config.workbench && config.workbench.desktop_url) || "",
+    workbench_enabled: workbenchEnabled(),
     personas: Object.keys(config.personas || {}),
     skills_autohint: config.skills_autohint !== false,
     stall_seconds: Number((config.ui || {}).stall_seconds) || 25,
@@ -295,4 +307,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, modelFor, modelMode, paramsFor, setSetting, setProtected, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };
+module.exports = { config, loadError, publicConfig, workbenchEnabled, modelFor, modelMode, paramsFor, setSetting, setProtected, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

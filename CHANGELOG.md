@@ -9,6 +9,32 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-10-04: **The Linux workbench is optional** — Config → Workbench & shared folders →
+  *Use the Linux workbench* (`workbench.enabled`, on unless it says `false`). The workbench is
+  the heaviest container and is only needed for software development, deep research and
+  automation; with it off JARVIS runs as a chat + memory + web + files assistant.
+  - **Applies on Save.** Turning it off stops the workbench container and hides the
+    **Workbench** tab; turning it on starts the container and brings the tab back. The line
+    under the switch shows what the container is doing (`GET /api/workbench`). A container
+    that was never built needs one `./JARVIS.sh --reload` to be created.
+  - **The model.** The tools that run inside the workbench are withheld — `run_shell`,
+    `write_workbench_file` / `edit_workbench_file`, `serve_app`, every `browser_*` tool, the
+    desktop tools, `read_document` and `transcribe_audio` — and refused with a plain reason if
+    something still calls one. The system prompt says the workbench is off, and the workbench
+    skill playbooks are not listed or hinted. Memory, web search, shared files, image analysis,
+    email, the vault, tasks, plans, custom tools and MCP servers are unaffected.
+  - **The launcher.** The compose service is under a `workbench` profile. `--setup` skips its
+    image, `--start` / `--reload` / `--update` leave it stopped (and stop one still running),
+    `--status` shows it as off, `--reset-workbench` is refused; `--stop` and `--delete` always
+    cover it. A plain `docker compose up` no longer starts the workbench — use `./JARVIS.sh`.
+  - Also: the local (whisper) speech engine is unavailable and falls back to the browser
+    engine, the self-test skips the workbench and desktop checks, the automatic backup skips
+    the workspace half, and `/workbench` says where to turn it on.
+  - Tests: `workbench.test.js`, `workbench-server.test.js` (real server + a fake Docker API)
+    and `launcher.test.js` (the real `JARVIS.sh` with a fake `docker`). `smoke-server.test.js`
+    now refuses to run against a server left over from an earlier run and no longer leaves
+    one behind. (`app/src/tools.js`, `app/src/config.js`, `app/src/skills.js`, `app/server.js`,
+    `JARVIS.sh`, `docker-compose.yml`, `app/public/*`)
 - 2026-10-04: **Optional login with several users, and a network switch** — Config → Access &
   users. Off by default; nothing changes for a single local user.
   - **Login.** *Turn the login on…* asks for the first login name and password; after that

@@ -2,7 +2,16 @@
 // Skills are served directly from skills_data.js (no database). The list_skills /
 // get_skill tools read this in-memory catalog; edit skills_data.js and reload.
 const SKILLS = require("./skills_data");
-const { activePromptName } = require("./config");
+const { activePromptName, workbenchEnabled } = require("./config");
+
+// Playbooks that are about working INSIDE the Linux workbench (shell, desktop, browser,
+// previews, document conversion). With the workbench turned off (workbench.enabled = false)
+// they are not listed, not hinted, and get_skill says why — their tools do not exist then.
+const WORKBENCH_SKILLS = new Set([
+  "workbench-shell", "web-preview", "browser", "desktop-control", "workflow-login-and-act",
+  "create-documents", "documents", "data-analysis", "app-integration",
+]);
+function usable(s) { return workbenchEnabled() || !WORKBENCH_SKILLS.has(s.name); }
 
 // A skill with a `prompts` list is a SPECIALTY skill — only surfaced when one of those
 // prompt sets is the active one (e.g. the survival KB skill under the "survivalist" prompt).
@@ -11,7 +20,7 @@ function inScope(s, active) { return !s.prompts || (active && s.prompts.includes
 
 function list() {
   const active = activePromptName();
-  return SKILLS.filter((s) => inScope(s, active))
+  return SKILLS.filter((s) => inScope(s, active) && usable(s))
     .map((s) => ({ name: s.name, category: s.category, summary: s.summary }))
     .sort((a, b) => (a.category + a.name).localeCompare(b.category + b.name));
 }
@@ -19,6 +28,7 @@ function list() {
 function get(name) {
   const s = SKILLS.find((x) => x.name === name);
   if (!s) throw new Error("no skill named '" + name + "' (use list_skills to see available skills)");
+  if (!usable(s)) throw new Error("the '" + name + "' skill needs the Linux workbench, which is turned off (Config → Workbench & shared folders)");
   return { name: s.name, category: s.category, summary: s.summary, details: s.details };
 }
 
@@ -51,7 +61,7 @@ function hint(text) {
   const active = activePromptName();
   const matched = [];
   for (const s of SKILLS) {
-    if (!inScope(s, active)) continue;   // don't hint a specialty skill outside its prompt
+    if (!inScope(s, active) || !usable(s)) continue;   // don't hint a specialty skill outside its prompt, or one whose tools are off
     const re = TRIGGERS[s.name];
     if (re && re.test(text)) matched.push(s.name);
   }
@@ -60,4 +70,4 @@ function hint(text) {
   return `Skill hint: get_skill(${top}) has a proven step-by-step playbook for this kind of task — read it before you start (skip only if the request is trivial).`;
 }
 
-module.exports = { list, get, hint };
+module.exports = { list, get, hint, WORKBENCH_SKILLS };

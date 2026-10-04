@@ -157,8 +157,50 @@ function workbenchReachable() {
   const local = (h) => ["localhost", "127.0.0.1", "[::1]", "::1"].includes(h);
   try { const u = new URL(cfg.workbench_url, location.href); return !(local(u.hostname) && !local(location.hostname)); } catch (_) { return true; }
 }
+// The workbench is OPTIONAL (Config → Workbench & shared folders → "Use the Linux
+// workbench"). Off = no Workbench tab, no embedded desktop connection, and no local
+// (whisper-in-the-workbench) speech engine. Called at start and after every Config save.
+function workbenchOn() { return !cfg || cfg.workbench_enabled !== false; }
+function applyWorkbenchUi() {
+  const on = workbenchOn();
+  const tab = document.querySelector('.tab[data-tab="workbench"]');
+  const bar = document.querySelector("#panel-workbench .desktop-bar"), note = $("desktop-remote");
+  if (tab) {
+    tab.hidden = !on;
+    if (!on && tab.classList.contains("active")) { const a = document.querySelector('.tab[data-tab="activity"]'); if (a) a.click(); }
+  }
+  if (desktop) {
+    if (!on || !cfg || !cfg.workbench_url) { if (desktop.getAttribute("src") && desktop.getAttribute("src") !== "about:blank") desktop.src = "about:blank"; }
+    else if (workbenchReachable()) {
+      desktop.hidden = false; if (bar) bar.hidden = false; if (note) note.hidden = true;
+      if (desktop.getAttribute("src") !== cfg.workbench_url) desktop.src = cfg.workbench_url;
+      if (desktopLink) desktopLink.href = cfg.workbench_url;
+    } else { desktop.hidden = true; if (bar) bar.hidden = true; if (note) note.hidden = false; }
+  }
+  for (const id of ["stt-engine", "cfg-stt-engine-field"]) {
+    const sel = $(id), opt = sel && sel.querySelector('option[value="local"]');
+    if (opt) { opt.disabled = !on; opt.title = on ? "" : "Needs the Linux workbench, which is turned off (Config → Workbench & shared folders)"; }
+  }
+  const stt = $("stt-engine");
+  if (!on && stt && stt.value === "local") { stt.value = "browser"; if (window.JarvisVoice) JarvisVoice.setSttEngine("browser"); }
+}
+// Under the switch in the Config tab: what the workbench container is doing right now.
+async function refreshWorkbenchStatus() {
+  const el = $("cfg-wb-status"); if (!el) return;
+  let d; try { d = await (await fetch("/api/workbench")).json(); } catch (_) { el.hidden = true; return; }
+  const c = d.container;
+  let t;
+  if (d.enabled) t = c === "running" ? "Workbench container: running."
+    : c === "stopped" ? "Workbench container: stopped — run ./JARVIS.sh --reload to start it."
+    : c === "missing" ? "Workbench container: not created yet — run ./JARVIS.sh --reload to create it (the first build takes several minutes)."
+    : "Workbench container: state unknown (the app could not reach Docker).";
+  else t = c === "running" ? "Turned off, but the workbench container is still running — run ./JARVIS.sh --reload to stop it."
+    : c === "unknown" ? "Turned off. (The app could not reach Docker to check the container.)"
+    : "Turned off — the workbench container is not running.";
+  el.textContent = t; el.hidden = false;
+}
 function reloadDesktop() {
-  if (!cfg || !cfg.workbench_url || !desktop || !workbenchReachable()) return;
+  if (!cfg || !cfg.workbench_url || !desktop || !workbenchReachable() || !workbenchOn()) return;
   desktop.src = "about:blank";
   setTimeout(() => { desktop.src = cfg.workbench_url; }, 60);
 }
@@ -873,6 +915,7 @@ function handleSlash(text) {
         .then(() => addMessage("assistant", "🧠 Remembered: " + arg, "notice")).catch((e) => addMessage("assistant", "Couldn't save: " + e, "error"));
       return;
     case "files": case "tasks": case "memory": case "activity": case "workbench": {
+      if (cmd === "workbench" && !workbenchOn()) { addMessage("assistant", "The Linux workbench is turned off, so there is no desktop to show. Turn it on in the Config tab → Workbench & shared folders.", "notice"); return; }
       const tab = document.querySelector('.tab[data-tab="' + cmd + '"]'); if (tab) tab.click(); return;
     }
     case "guide": case "howto": case "docs": {
@@ -1663,8 +1706,7 @@ async function init() {
   try { renderAutopilot(await (await fetch("/api/autopilot")).json()); } catch (_) {}  // reflect an in-progress run
   modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
-  if (cfg.workbench_url && workbenchReachable()) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }
-  else if (cfg.workbench_url) { desktop.hidden = true; const bar = document.querySelector("#panel-workbench .desktop-bar"); if (bar) bar.hidden = true; const note = $("desktop-remote"); if (note) note.hidden = false; }
+  applyWorkbenchUi();   // the Workbench tab + embedded desktop (hidden while the workbench is turned off)
   if (window.JarvisVoice && cfg.voice) {
     const ok = JarvisVoice.init(cfg.voice, {
       onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError,
@@ -1875,6 +1917,7 @@ const CFG_FIELDS = [
   ["cfg-ap-minutes", "autopilot.default_minutes", "num"],
   ["cfg-ap-cycles", "autopilot.max_cycles", "num"],
   ["cfg-ap-maxcost", "autopilot.max_cost_usd", "num"],
+  ["cfg-wb-enabled", "workbench.enabled", "bool"],
   ["cfg-wb-container", "workbench.container", "str"],
   ["cfg-wb-desktop", "workbench.desktop_url", "str"],
   ["cfg-wb-base-image", "workbench.base_image", "str"],
@@ -2015,6 +2058,7 @@ function populateStructured() {
   if (getPath(cfgObj, "secret_access_notice") === undefined) { const e = $("cfg-secret-notice"); if (e) e.checked = true; }
   if (getPath(cfgObj, "llm.smart_routing") === undefined) { const e = $("cfg-smart-routing"); if (e) e.checked = true; }
   if (getPath(cfgObj, "voice.stt_engine") === undefined) { const e = $("cfg-stt-engine-field"); if (e) e.value = "browser"; }
+  if (getPath(cfgObj, "workbench.enabled") === undefined) { const e = $("cfg-wb-enabled"); if (e) e.checked = true; }
   if (getPath(cfgObj, "search.provider") === undefined) { const e = $("cfg-search-provider"); if (e) e.value = "duckduckgo"; }
   if (getPath(cfgObj, "autopilot.autonomy") === undefined) { const e = $("cfg-ap-autonomy"); if (e) e.value = "guarded"; }
   if (getPath(cfgObj, "voice.ambient_style") === undefined) { const e = $("cfg-ambient-style"); if (e) e.value = "face"; }
@@ -2183,6 +2227,7 @@ async function loadConfig() {
   renderRawConfig();
   renderRawSecrets();
   renderAccess();          // network + login status, users
+  refreshWorkbenchStatus();
 }
 
 async function saveConfig() {
@@ -2209,11 +2254,21 @@ async function saveConfig() {
       cfg = await (await fetch("/api/config")).json();
       if (modelBadge) modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
     } catch (_) {}
+    applyWorkbenchUi(); refreshWorkbenchStatus();   // the workbench switch shows / hides its tab right away
+    // What happened to the workbench container, when the switch was just flipped.
+    let wbNote = "";
+    if (d.workbench && d.workbench.changed) {
+      const w = d.workbench;
+      wbNote = w.enabled
+        ? (w.action === "started" ? "Workbench turned on — its container was started." : w.container === "running" ? "Workbench turned on." : "Workbench turned on. " + (w.note || ""))
+        : (w.action === "stopped" ? "Workbench turned off — its container was stopped and the Workbench tab is hidden." : w.container === "running" || w.note ? "Workbench turned off — its tools and tab are gone. " + (w.note || "") : "Workbench turned off — the Workbench tab is hidden.");
+    }
     result.className = "cfg-result ok";
     const nb = (d.backups || []).length;
     result.innerHTML = "✅ Saved " + (d.saved || []).join(" + ") +
       (nb ? " (backed up " + nb + " file" + (nb > 1 ? "s" : "") + ")" : "") +
       " — <b>applied live</b>, takes effect on your next message. No restart needed." +
+      (wbNote ? "<span class=\"cfg-note\">" + esc(wbNote) + "</span>" : "") +
       "<span class=\"cfg-note\">A restart (<code>./JARVIS.sh --reload</code>) is only needed for the memory service's embedding key or container-level settings (ports). Local LLM runtimes: <code>./JARVIS_LOCAL_LLM.sh</code>.</span>";
   } catch (e) {
     result.className = "cfg-result err"; result.textContent = "Save failed: " + e.message;
@@ -2399,6 +2454,11 @@ renderChatTabs();
       st.textContent = "";
       for (const [key, label] of CHECKS) {
         const v = d[key];
+        if (v && v.skipped) {   // e.g. the workbench is turned off — nothing to test
+          const row = document.createElement("div"); row.className = "st-row skip";
+          row.innerHTML = `<span class="st-ic">–</span><span>${esc(label)}</span><span class="st-detail">skipped — ${esc(String(v.skipped))}</span>`;
+          out.appendChild(row); continue;
+        }
         const bad = !v || v.error || (typeof v.output === "string" && /error/i.test(v.output) && v.exit_code);
         const row = document.createElement("div"); row.className = "st-row " + (bad ? "bad" : "ok");
         const detail = bad ? (v && v.error) || "check failed" : (typeof v === "object" ? JSON.stringify(v) : String(v));

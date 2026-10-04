@@ -28,7 +28,7 @@ Five containers (`docker compose`, project `jarvis`, published ports bound to `1
 | --- | --- | --- |
 | `jarvis-app` | Node.js orchestrator + web UI (chat, tool-calling, voice) | 8110 |
 | `jarvis-memory` | Semantic long-term memory ([Mem0](https://github.com/mem0ai/mem0) + Chroma) | internal |
-| `jarvis-workbench` | Ubuntu XFCE desktop the LLM works in as root (noVNC) | 8111 |
+| `jarvis-workbench` *(optional)* | Ubuntu XFCE desktop the LLM works in as root (noVNC). Turn it off in Config → Workbench & shared folders to run JARVIS as a chat + memory + web + files assistant without it | 8111 |
 | `jarvis-piper` | Offline neural text-to-speech ([Piper](https://github.com/rhasspy/piper)) | internal |
 | `jarvis-docker-proxy` | Filtered Docker API (containers+exec only) the app uses to reach the workbench | internal |
 | `jarvis-searxng` *(optional)* | Self-hosted metasearch for `web_search` ([SearXNG](https://docs.searxng.org/); started when `search.provider = "searxng"`) | internal |

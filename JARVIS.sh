@@ -7,8 +7,13 @@
 #
 #   jarvis-app        Node.js backend + JS frontend (orchestrator)            :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           internal-only
-#   jarvis-workbench  Linux desktop (noVNC) the LLM works in as root          :8111
+#   jarvis-workbench  Linux desktop (noVNC) the LLM works in as root          :8111   (optional)
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only    :5000
+#
+# The WORKBENCH IS OPTIONAL: Config tab → Workbench & shared folders → "Use the Linux
+# workbench" (workbench.enabled in JARVIS_CONFIG.json; on unless it says false). With it off,
+# --setup skips its (large) image, --start / --reload / --update leave its container stopped,
+# and JARVIS runs as a chat + memory + web + files assistant with no shell or desktop.
 #
 # LLM HOSTING is NOT managed here. JARVIS just talks to whatever URL is in llm.base_url
 # (a cloud provider, or a local runtime). To run models locally, use ./JARVIS_LOCAL_LLM.sh
@@ -19,7 +24,8 @@
 #
 # Flags:
 #   -c, --check        Verify the local Docker daemon is running.
-#   -b, --setup        Build the app/workbench/memory/voice images.
+#   -b, --setup        Build the app/workbench/memory/voice images (the workbench image is
+#                      skipped while the workbench is turned off in the config).
 #   -u, --start        Start the whole stack; print URLs.
 #   -r, --reload       Restart the app to re-read config files (JARVIS_CONFIG.json +
 #                      JARVIS_SECRETS.json). Memory + workbench keep running. Run this after
@@ -27,6 +33,8 @@
 #                      Also applies a change to "Allow other devices on my network" (Config →
 #                      Access & users): the app container is re-created with its port published
 #                      to the network, or to this computer only. A reload signs every user out.
+#                      And it applies the workbench switch: the workbench container is stopped
+#                      when the workbench is turned off, and started (created if needed) when on.
 #       --update       Pull the latest JARVIS from git, show what changed, rebuild only the
 #                      images whose sources changed, and restart the stack.
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
@@ -165,6 +173,39 @@ dc() { net_env; docker compose -f "$COMPOSE_FILE" "$@"; }
 # when search.provider is "searxng". Used by start (so it comes up) and stop/delete (so
 # it's included in teardown even after the config was switched back).
 search_profile() { [[ "$(lc "$(read_cfg search.provider duckduckgo)")" == "searxng" ]] && echo "--profile search" || echo ""; }
+# The Linux workbench is OPTIONAL (Config → Workbench & shared folders → "Use the Linux
+# workbench", i.e. workbench.enabled — on unless the config says false). Its compose service
+# sits under the "workbench" profile, so with the switch off it is not built and not started;
+# sync_workbench also stops a container that is still running from before.
+workbench_enabled() { [[ "$(lc "$(read_cfg workbench.enabled true)")" != "false" ]]; }
+workbench_profile() { workbench_enabled && echo "--profile workbench" || echo ""; }
+stack_profiles() { echo "$(search_profile) $(workbench_profile)"; }
+# Every optional profile — for stop / delete / status, which must cover a sidecar or a
+# workbench that was started before the config was switched away from it.
+ALL_PROFILES="--profile search --profile workbench"
+# Workbench base image is configurable (workbench.base_image) — pin a digest there for
+# reproducible rebuilds; empty = the floating default tag (see workbench/Dockerfile).
+wb_base_env() {
+  WORKBENCH_BASE_IMAGE="$(read_cfg workbench.base_image "")"; export WORKBENCH_BASE_IMAGE
+  [[ -z "$WORKBENCH_BASE_IMAGE" ]] && unset WORKBENCH_BASE_IMAGE   # let the compose default apply
+  return 0
+}
+# Bring the workbench container in line with the switch (--start, --reload, --update).
+sync_workbench() {
+  if workbench_enabled; then
+    container_running "$WB_CONTAINER" && return 0
+    info "Workbench is turned on — starting its container..."
+    docker image inspect jarvis-workbench:local >/dev/null 2>&1 \
+      || warn "The workbench image has not been built yet — building it now (several minutes, needs internet)."
+    wb_base_env
+    dc --profile workbench up -d "$WB_CONTAINER" || { err "Failed to start the workbench."; return 1; }
+    ok "Workbench started."
+  elif container_running "$WB_CONTAINER"; then
+    info "Workbench is turned off in the config — stopping its container."
+    docker stop "$WB_CONTAINER" >/dev/null 2>&1 && ok "Workbench stopped." || warn "Could not stop ${WB_CONTAINER}."
+  fi
+  return 0
+}
 
 require_compose_file() { [[ -f "$COMPOSE_FILE" ]] || { err "compose file not found: $COMPOSE_FILE"; exit 1; }; }
 daemon_running() { docker info >/dev/null 2>&1; }
@@ -257,32 +298,40 @@ cmd_check() {
 cmd_setup() {
   require_daemon
   clear_autopilot_state
-  # Workbench base image is configurable (workbench.base_image) — pin a digest there for
-  # reproducible rebuilds; empty = the floating default tag (see workbench/Dockerfile).
-  WORKBENCH_BASE_IMAGE="$(read_cfg workbench.base_image "")"
-  export WORKBENCH_BASE_IMAGE
-  [[ -n "$WORKBENCH_BASE_IMAGE" ]] && info "Workbench base image (from config): ${WORKBENCH_BASE_IMAGE}"
-  [[ -z "$WORKBENCH_BASE_IMAGE" ]] && unset WORKBENCH_BASE_IMAGE   # let the compose default apply
-  info "SETUP: building the app + workbench + memory + voice (piper) images..."
-  warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
-  dc build jarvis-app jarvis-workbench jarvis-memory jarvis-piper || { err "Image build failed."; return 1; }
+  local targets="jarvis-app jarvis-memory jarvis-piper"
+  if workbench_enabled; then
+    targets="jarvis-app jarvis-workbench jarvis-memory jarvis-piper"
+    wb_base_env
+    [[ -n "${WORKBENCH_BASE_IMAGE:-}" ]] && info "Workbench base image (from config): ${WORKBENCH_BASE_IMAGE}"
+    info "SETUP: building the app + workbench + memory + voice (piper) images..."
+    warn "The workbench builds on linuxserver/webtop and installs a large toolchain; the first build can take several minutes and needs internet. jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
+  else
+    info "SETUP: building the app + memory + voice (piper) images..."
+    info "The workbench is turned off in the config (workbench.enabled = false) — skipping its image, the big one. Turn it on in the Config tab and run --setup again if you want it."
+    warn "jarvis-piper downloads its neural voice models (a few hundred MB) on first build."
+  fi
+  # shellcheck disable=SC2046,SC2086
+  dc $(workbench_profile) build $targets || { err "Image build failed."; return 1; }
   ok "SETUP complete. Next:  ./JARVIS.sh --start"
 }
 
 cmd_start() {
   require_daemon
   clear_autopilot_state
-  info "START: bringing up app + memory + workbench + voice..."
+  if workbench_enabled; then info "START: bringing up app + memory + workbench + voice..."; wb_base_env
+  else info "START: bringing up app + memory + voice (the workbench is turned off in the config)..."; fi
   # shellcheck disable=SC2046
-  dc $(search_profile) up -d || { err "Failed to start the stack."; return 1; }
+  dc $(stack_profiles) up -d || { err "Failed to start the stack."; return 1; }
   [[ -n "$(search_profile)" ]] && info "Search: SearXNG sidecar enabled (search.provider = searxng)."
+  sync_workbench   # off: stop a workbench container left running from before
   wait_mem || true
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   echo
   ok "JARVIS is up."
   echo -e "${C_BOLD}  Chat UI:${C_RESET}            http://localhost:${APP_PORT}/"
   access_summary
-  echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in — this computer only)"
+  if workbench_enabled; then echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in — this computer only)"
+  else echo -e "${C_BOLD}  Workbench:${C_RESET}          off — no shell, desktop or browser tools (turn it on in Config → Workbench & shared folders)"; fi
   echo -e "${C_BOLD}  Semantic memory:${C_RESET}    internal-only (the app reaches it at jarvis-memory:8000)"
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
   echo -e "  ${C_BOLD}Model:${C_RESET} set an endpoint in the Config tab. Cloud → paste the provider URL; local → run  ${C_BOLD}./JARVIS_LOCAL_LLM.sh start${C_RESET}  and paste the URL it prints."
@@ -292,7 +341,7 @@ cmd_start() {
 cmd_reload() {
   require_daemon
   info "RELOAD: restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
-  info "(The database, memory service, and workbench keep running; the LLM's memory and any browser session are preserved.)"
+  info "(The memory service and the workbench keep running; the LLM's memory and any browser session are preserved.)"
   info "(Local LLM runtimes are managed separately — see ./JARVIS_LOCAL_LLM.sh.)"
   # A change to network access is a change to the container's port binding, which a plain
   # restart keeps — re-create just the app container in that case.
@@ -304,9 +353,11 @@ cmd_reload() {
   else
     dc restart jarvis-app || { err "Reload failed."; return 1; }
   fi
+  sync_workbench   # the workbench switch: stop its container when off, start it when on
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Configuration reloaded."
   access_summary
+  workbench_enabled || echo -e "${C_BOLD}  Workbench:${C_RESET}          off (Config → Workbench & shared folders)"
 }
 
 # Pull the latest code, rebuild only what changed, restart. App source is bind-mounted,
@@ -327,20 +378,23 @@ cmd_update() {
   echo "$changed" | grep -q '^app/'       && to_build="$to_build jarvis-app"
   echo "$changed" | grep -q '^memory/'    && to_build="$to_build jarvis-memory"
   echo "$changed" | grep -q '^piper/'     && to_build="$to_build jarvis-piper"
-  echo "$changed" | grep -q '^workbench/' && to_build="$to_build jarvis-workbench"
+  if echo "$changed" | grep -q '^workbench/'; then
+    if workbench_enabled; then to_build="$to_build jarvis-workbench"
+    else info "workbench/ changed, but the workbench is turned off in the config — not rebuilding it (run --setup after turning it on)."; fi
+  fi
   if [[ -n "$to_build" ]]; then
     [[ "$to_build" == *workbench* ]] && warn "workbench/ changed — that rebuild is the big one (several minutes)."
-    WORKBENCH_BASE_IMAGE="$(read_cfg workbench.base_image "")"; export WORKBENCH_BASE_IMAGE
-    [[ -z "$WORKBENCH_BASE_IMAGE" ]] && unset WORKBENCH_BASE_IMAGE
+    wb_base_env
     info "Rebuilding:$to_build"
-    # shellcheck disable=SC2086
-    dc build $to_build || { err "Rebuild failed."; return 1; }
+    # shellcheck disable=SC2046,SC2086
+    dc $(workbench_profile) build $to_build || { err "Rebuild failed."; return 1; }
   else
     info "No image-affecting changes — the app's bind-mounted source just needs a restart."
   fi
   info "Restarting with the new version..."
   # shellcheck disable=SC2046
-  dc $(search_profile) up -d || { err "Restart failed."; return 1; }
+  dc $(stack_profiles) up -d || { err "Restart failed."; return 1; }
+  sync_workbench
   dc restart jarvis-app >/dev/null 2>&1 || true   # bind-mounted app code loads on restart
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Update complete. (Hard-refresh the browser — Cmd-Shift-R — to reload the frontend.)"
@@ -383,10 +437,14 @@ cmd_prompt() {
 
 cmd_status() {
   require_daemon
-  info "Container status:"; dc ps; echo
+  # shellcheck disable=SC2086
+  info "Container status:"; dc $ALL_PROFILES ps; echo
   for pair in "$MEM_CONTAINER memory" "$WB_CONTAINER workbench" "$APP_CONTAINER app"; do
     set -- $pair
-    if container_running "$1"; then echo -e "  $2  ($1): ${C_GRN}running${C_RESET}"; else echo -e "  $2  ($1): ${C_RED}stopped${C_RESET}"; fi
+    if [[ "$1" == "$WB_CONTAINER" ]] && ! workbench_enabled; then
+      if container_running "$1"; then echo -e "  $2  ($1): ${C_YEL}running, but turned off in the config${C_RESET} — run  ./JARVIS.sh --reload  to stop it"
+      else echo -e "  $2  ($1): off (turned off in Config → Workbench & shared folders)"; fi
+    elif container_running "$1"; then echo -e "  $2  ($1): ${C_GRN}running${C_RESET}"; else echo -e "  $2  ($1): ${C_RED}stopped${C_RESET}"; fi
   done
   if container_running "$APP_CONTAINER"; then
     echo -e "  app health (http://localhost:${APP_PORT}/healthz): HTTP $(curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/healthz 2>/dev/null)"
@@ -396,9 +454,10 @@ cmd_status() {
   access_summary
 }
 
-# stop/down always include the search profile so the optional sidecar is covered even
-# if the config was switched away from searxng after it started.
-cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc --profile search stop; clear_autopilot_state; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
+# stop/down always include every optional profile, so the search sidecar and the workbench
+# are covered even if the config was switched away from them after they started.
+# shellcheck disable=SC2086
+cmd_stop() { require_daemon; info "STOP: stopping the stack..."; dc $ALL_PROFILES stop; clear_autopilot_state; ok "Stopped. Restart with:  ./JARVIS.sh --start"; }
 
 cmd_delete() {
   require_daemon
@@ -417,7 +476,8 @@ cmd_delete() {
     fi
   fi
   warn "DELETE: removing containers, network, and the data volumes (semantic-memory vector store + workbench home). Bind mounts — config, shared folders, and LLM_WORKSPACE — survive."
-  dc --profile search down -v --remove-orphans
+  # shellcheck disable=SC2086
+  dc $ALL_PROFILES down -v --remove-orphans
   clear_autopilot_state
   ok "Removed."
 }
@@ -510,12 +570,14 @@ cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty LLM_WORK
 # + LLM_READ_WRITE_FILES are left completely untouched.
 cmd_reset_workbench() {
   require_daemon
+  workbench_enabled || { err "The workbench is turned off (workbench.enabled = false). Turn it on in the Config tab (Workbench & shared folders) first."; return 1; }
   info "RESET WORKBENCH: recreating the dev OS container ($WB_CONTAINER) from its clean image..."
   info "  WIPED: everything the LLM installed/changed at RUNTIME (apt & pip packages, system tweaks)."
   info "  KEPT:  /LLM_WORKSPACE build files + the workbench home (desktop / browser logins), and every"
   info "         other container (app, memory) + your config + LLM_READ_WRITE_FILES."
-  dc rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
-  dc up -d "$WB_CONTAINER" || { err "Failed to bring the workbench back up."; return 1; }
+  wb_base_env
+  dc --profile workbench rm -sf "$WB_CONTAINER" >/dev/null 2>&1 || true
+  dc --profile workbench up -d "$WB_CONTAINER" || { err "Failed to bring the workbench back up."; return 1; }
   wait_http "$WB_PORT" "/" "Workbench desktop" || true
   ok "Workbench reset to its image baseline. (the desktop takes a few seconds to come back)"
   info "Deeper wipes: /LLM_WORKSPACE too → ./JARVIS.sh --restore-workspace --fresh ; rebuild the image → ./JARVIS.sh --setup ."

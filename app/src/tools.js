@@ -5,7 +5,7 @@ const path = require("path");
 const dns = require("dns").promises;
 const net = require("net");
 const Docker = require("dockerode");
-const { config, getSecrets, setSecret: cfgSetSecret, deleteSecret: cfgDeleteSecret } = require("./config");
+const { config, getSecrets, setSecret: cfgSetSecret, deleteSecret: cfgDeleteSecret, workbenchEnabled } = require("./config");
 const log = require("./logger");
 
 // Prefer a FILTERED docker-socket proxy (set DOCKER_PROXY_HOST in compose) so the app never
@@ -23,10 +23,24 @@ function clipOutput(s, headMax = 12000, tailMax = 8000) {
   return s.slice(0, headMax) + `\n... [TRUNCATED: ${cut} bytes omitted from the middle — total output ${s.length} bytes] ...\n` + s.slice(-tailMax);
 }
 
+// --- the workbench is optional (workbench.enabled — Config → Workbench & shared folders) ---
+// Every tool that runs inside the workbench container. With the workbench off these are
+// withheld from the model (activeToolDefs) and refused if called anyway (a scheduled task or
+// an old conversation may still name one).
+const WORKBENCH_TOOLS = new Set([
+  "run_shell", "write_workbench_file", "edit_workbench_file", "serve_app",
+  "read_document", "transcribe_audio",                       // pdftotext / pandoc / whisper live in the workbench
+  "screenshot", "ui_actions", "open_url", "open_app", "click", "double_click", "right_click", "move_mouse", "type_text", "press_key", "scroll",
+  "browser_goto", "browser_snapshot", "browser_click", "browser_fill", "browser_extract", "browser_console", "browser_press", "browser_back", "browser_screenshot",
+]);
+const WORKBENCH_OFF = "the Linux workbench is turned off (Config → Workbench & shared folders)";
+function workbenchContainerName() { return (config.workbench && config.workbench.container) || "jarvis-workbench"; }
+
 // --- run_shell: root command in the workbench container ---
 let shellNonceSeq = 0;
 async function runShell(command, timeoutS, signal) {
-  const name = (config.workbench && config.workbench.container) || "jarvis-workbench";
+  if (!workbenchEnabled()) throw new Error(WORKBENCH_OFF + " — there is no shell to run this in");
+  const name = workbenchContainerName();
   const container = docker.getContainer(name);
   // Enforce a hard time limit INSIDE the container so an interactive prompt or a
   // foreground server can't hang the whole turn forever (`timeout` sends TERM, then KILL).
@@ -906,6 +920,7 @@ const PREVIEW_MIN = 9101, PREVIEW_MAX = 9150;
 // which kills whatever server was listening on it. Targeted to JARVIS's preview range so it
 // won't touch unrelated processes. Fire-and-forget.
 async function killWorkbenchJobs() {
+  if (!workbenchEnabled()) return;
   try { await runShell(`for p in $(seq ${PREVIEW_MIN} ${PREVIEW_MAX}); do fuser -k \${p}/tcp 2>/dev/null; done; true`, 20); }
   catch (_) {}
 }
@@ -1249,6 +1264,9 @@ async function execTool(name, args, signal, ctx) {
 }
 
 async function _execTool(name, args, signal, ctx) {
+  if (WORKBENCH_TOOLS.has(name) && !workbenchEnabled()) {
+    throw new Error(`${name} is unavailable: ${WORKBENCH_OFF}.` + (name === "read_document" ? " Plain-text files can still be read with read_file." : ""));
+  }
   switch (name) {
     case "delegate": return await delegate(args, signal, ctx);
     case "add_memory": return await addMemory(args.text, args.metadata);
@@ -1377,6 +1395,44 @@ function loadCustomTools() {
   }
 }
 
+// The tools the model is offered right now: everything, minus the workbench tools while the
+// workbench is off. Custom and MCP tools are never filtered (they don't run in the workbench).
+function activeToolDefs() {
+  return workbenchEnabled() ? toolDefs : toolDefs.filter((t) => !WORKBENCH_TOOLS.has(t.function && t.function.name));
+}
+
+// --- the workbench container itself ---------------------------------------------------
+// "running" | "stopped" | "missing" (never created) | "unknown" (Docker not reachable).
+function withTimeout(p, ms) {
+  return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timed out")), ms).unref())]);
+}
+async function workbenchContainerState() {
+  try {
+    const i = await withTimeout(docker.getContainer(workbenchContainerName()).inspect(), 4000);
+    return i && i.State && i.State.Running ? "running" : "stopped";
+  } catch (e) { return e && e.statusCode === 404 ? "missing" : "unknown"; }
+}
+async function workbenchStatus() { return { enabled: workbenchEnabled(), container: await workbenchContainerState() }; }
+// Bring the container in line with the setting — stop it when the workbench is off (that is
+// the point: it is the heavy one), start it again when it is on. Best-effort: ./JARVIS.sh
+// --start / --reload do the same from the host, and are the only way to CREATE the container.
+async function syncWorkbench() {
+  const enabled = workbenchEnabled();
+  const c = docker.getContainer(workbenchContainerName());
+  let state = await workbenchContainerState(), action = "none", note = "";
+  try {
+    if (!enabled && state === "running") { await withTimeout(c.stop({ t: 5 }), 30000); state = "stopped"; action = "stopped"; }
+    else if (enabled && state === "stopped") { await withTimeout(c.start(), 30000); state = "running"; action = "started"; }
+  } catch (e) {
+    if (e && e.statusCode === 304) state = enabled ? "running" : "stopped";   // already in that state
+    else note = `Could not ${enabled ? "start" : "stop"} the workbench container from here (${(e && e.message) || e}) — run ./JARVIS.sh --reload to apply.`;
+  }
+  if (!note && state === "unknown") note = `Could not reach Docker to ${enabled ? "start" : "stop"} the workbench container — run ./JARVIS.sh --reload to apply.`;
+  if (!note && enabled && state === "missing") note = "The workbench container does not exist yet — run ./JARVIS.sh --reload once to create it (if its image was never built, that takes several minutes).";
+  if (action !== "none") log.info("workbench", `container ${action} (workbench.enabled = ${enabled})`);
+  return { enabled, container: state, action, note };
+}
+
 // Snapshot of the built-in defs BEFORE custom/MCP tools are appended, so a reload can
 // reset to a clean baseline instead of accumulating duplicates.
 const BUILTIN_DEFS = toolDefs.slice();
@@ -1413,4 +1469,4 @@ function isRetryable(name) {
 
 // Only what's imported elsewhere is exported; everything else is reached via execTool.
 // `docker` is shared with autobackup.js (same proxy-aware client, no duplicate init).
-module.exports = { toolDefs, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs, reloadExtraTools, docker };
+module.exports = { toolDefs, activeToolDefs, WORKBENCH_TOOLS, execTool, isRetryable, searchMemory, runShell, listDir, fetchUrl, killWorkbenchJobs, reloadExtraTools, workbenchStatus, syncWorkbench, docker };

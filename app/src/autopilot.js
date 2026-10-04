@@ -203,7 +203,7 @@ async function loop() {
     // Cross-cycle continuity (fixes the observed "re-read the same file every cycle" loop):
     const recap = run.lastSummary ? ` Last cycle you reported: "${run.lastSummary.slice(0, 400)}". Continue FROM there — do NOT re-read files or re-plan things you already did unless they changed.` : "";
     // Anti-thrash: if recent cycles only read/planned without writing code, push hard to act.
-    const pushWrite = run.idleWork >= 2 ? " ⚠ You have spent multiple cycles only READING/PLANNING without changing any files. STOP re-reading. Make the concrete code change NOW with write_workbench_file (or run_shell), then run/test it — do not just describe what you'll do." : "";
+    const pushWrite = run.idleWork >= 2 ? " ⚠ You have spent multiple cycles only READING/PLANNING without changing any files. STOP re-reading. " + (config.workbenchEnabled() ? "Make the concrete code change NOW with write_workbench_file (or run_shell), then run/test it" : "Make the concrete change NOW with write_file / edit_file") + " — do not just describe what you'll do." : "";
     const objChange = run.objectiveChanged ? ` NOTE: the objective was just UPDATED to «${run.objective}». Re-check your plan against it and adjust steps (add/remove) before continuing.` : "";
     // Don't re-serve an app that's already running from an earlier cycle (a big source of wasted steps).
     const servedNote = run.servedPort ? ` A preview server is ALREADY running on http://localhost:${run.servedPort} from an earlier cycle — do NOT call serve_app for it again; only re-open/screenshot it if you actually changed the files it serves.` : "";

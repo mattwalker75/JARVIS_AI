@@ -4,8 +4,13 @@ name: jarvis
 #
 #   jarvis-app        Node.js backend + JS frontend (the orchestrator)        :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           internal-only
-#   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111
+#   jarvis-workbench  Linux XFCE desktop (noVNC) the LLM works in as root      :8111  (optional)
 #   jarvis-piper      Offline neural text-to-speech (Piper), internal-only     :5000
+#
+# The workbench is OPTIONAL — it sits under the "workbench" profile, and ./JARVIS.sh adds
+# that profile unless workbench.enabled is false in JARVIS_CONFIG.json (Config tab →
+# Workbench & shared folders). A plain `docker compose up` therefore does NOT start it;
+# use ./JARVIS.sh, or pass `--profile workbench` yourself.
 #
 # The app reaches the workbench via the Docker socket (docker exec), the memory
 # service over the internal network, and mounts the shared folders into both the app
@@ -27,6 +32,10 @@ services:
     image: jarvis-workbench:local
     container_name: jarvis-workbench
     restart: unless-stopped
+    # Optional: only part of the stack when the "workbench" profile is active (see the top
+    # of this file). Nothing depends on it — the app runs without it, minus the shell,
+    # desktop, browser and preview tools.
+    profiles: ["workbench"]
     # Hardened: use Docker's DEFAULT seccomp profile instead of disabling it, so the container the
     # LLM runs a root shell in can't reach the full host-kernel syscall surface. If a GUI app in the
     # workbench desktop misbehaves after this change (some webtop apps need extra syscalls), restore

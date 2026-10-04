@@ -43,6 +43,10 @@ async function waitUp(tries = 60) {
 }
 
 (async () => {
+  // A server left over from an earlier run would answer on this port and the suite would
+  // quietly test THAT (old code) instead of the one spawned below — refuse to start.
+  const stale = await new Promise((resolve) => { const s = require("net").connect(PORT, "127.0.0.1"); s.on("connect", () => { s.destroy(); resolve(true); }); s.on("error", () => resolve(false)); });
+  if (stale) { console.log(`  ✗ port ${PORT} is already in use (a server from an earlier run?) — stop it and run again`); process.exit(1); }
   // Scratch environment: mock provider, temp dirs for every persisted path.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-smoke-"));
   const mk = (d) => { const p = path.join(tmp, d); fs.mkdirSync(p, { recursive: true }); return p; };
@@ -132,12 +136,14 @@ async function waitUp(tries = 60) {
 
   // Wait for the child to actually exit before removing its scratch dirs (it may still
   // be flushing logs), and tolerate a straggler file — cleanup must never fail the run.
-  await new Promise((resolve) => { child.on("exit", resolve); child.kill(); setTimeout(resolve, 3000); });
+  // The server flushes on SIGTERM but does not exit on it, so follow up with SIGKILL —
+  // otherwise it lives on, holding the port for the next run.
+  await new Promise((resolve) => { child.on("exit", resolve); child.kill(); setTimeout(() => { try { child.kill("SIGKILL"); } catch (_) {} }, 1500); setTimeout(resolve, 3000); });
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
   console.log(failed ? `SMOKE-SERVER: ${failed} FAILED` : "SMOKE-SERVER: ALL PASSED");
   process.exit(failed ? 1 : 0);
 })().catch((e) => {
   console.error("smoke test crashed:", e);
-  if (child) child.kill();
+  if (child) child.kill("SIGKILL");
   process.exit(1);
 });

@@ -147,7 +147,7 @@ function pushNotification(n) {
   if (notifyCb) { try { notifyCb(note); } catch (_) {} }
   try { pushToBridge(note); } catch (_) {}
   // Best-effort toast on the watchable workbench desktop (needs libnotify-bin).
-  try {
+  if (require("./config").workbenchEnabled()) try {
     const safe = String(note.message || "").replace(/[\\$`"]/g, "").slice(0, 300);
     require("./tools").runShell(`notify-send "JARVIS" "${safe}" 2>/dev/null || true`).catch(() => {});
   } catch (_) {}

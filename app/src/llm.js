@@ -133,7 +133,8 @@ function oneSystemAtFront(msgs) {
 
 async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools, signal, watchdog, planMode, noTools, planKey) {
   const excluded = new Set(excludeTools || []);
-  const toolset = noTools ? [] : (excluded.size ? tools.toolDefs.filter((t) => !excluded.has(t.function && t.function.name)) : tools.toolDefs);
+  const offered = tools.activeToolDefs();   // everything, minus the workbench tools while the workbench is off
+  const toolset = noTools ? [] : (excluded.size ? offered.filter((t) => !excluded.has(t.function && t.function.name)) : offered);
   const llm = config.llm || {};
   const base = (llm.base_url || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = base + "/chat/completions";

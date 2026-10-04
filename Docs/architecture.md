@@ -59,6 +59,14 @@ Playwright, data/ML libs). The LLM runs commands here via `run_shell`, and a
 **Playwright browser daemon** (`app/src/browserd.py`, started on demand) provides the
 `browser_*` tools. You can watch it live in the **Workbench** tab.
 
+**The workbench is optional.** Its compose service sits under the `workbench` profile, which
+`./JARVIS.sh` adds unless `workbench.enabled` is `false` (Config → Workbench & shared
+folders). With it off the container is not built or started, the app withholds every tool
+that runs inside it (`WORKBENCH_TOOLS` in `app/src/tools.js` → `activeToolDefs()`), tells the
+model so in the system prompt, and hides the Workbench tab. Nothing else depends on the
+workbench, so the rest of the stack runs unchanged. See
+[Configuration](configuration.md#running-without-the-workbench-workbenchenabled).
+
 ### jarvis-piper (`:5000`, internal-only) — offline neural voice
 A tiny Python HTTP service (`piper/serve.py`) wrapping [Piper](https://github.com/rhasspy/piper),
 an on-device neural text-to-speech engine. The engine binary and voice models are baked

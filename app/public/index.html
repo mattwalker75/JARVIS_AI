@@ -405,6 +405,9 @@
 
           <div class="cfg-section">
             <h5>Workbench &amp; shared folders <span class="cfg-badge">container-level · --setup / restart</span></h5>
+            <label class="cfg-check"><input type="checkbox" id="cfg-wb-enabled"> Use the Linux workbench <span class="cfg-badge">applies on Save</span></label>
+            <div class="hint">The Linux desktop container JARVIS works in — shell, browser, desktop, app previews, PDF/Office reading, local speech input. Only needed for software development, deep research and automation. Off: JARVIS still chats, remembers, searches the web, uses your shared files, email and scheduled tasks; Save stops the container and hides the Workbench tab.</div>
+            <div class="cfg-note wb-status" id="cfg-wb-status" hidden></div>
             <div class="cfg-grid">
               <label>Container name<input id="cfg-wb-container" autocomplete="off" placeholder="jarvis-workbench"></label>
               <label>Desktop URL<input id="cfg-wb-desktop" autocomplete="off" placeholder="http://localhost:8111"></label>

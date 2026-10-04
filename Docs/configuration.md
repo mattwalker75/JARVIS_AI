@@ -38,7 +38,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `ollama` | Local-Ollama tuning — read by `JARVIS_LOCAL_LLM.sh`, not by JARVIS core. |
 | `voice` | Speech-to-text / text-to-speech behavior. |
 | `mem0` | Semantic memory service settings. |
-| `workbench` | Workbench container name + embedded desktop URL. |
+| `workbench` | Whether the Linux workbench is used at all (`enabled`), its container name + embedded desktop URL. |
 | `shared` | Shared folder paths. |
 | `personas` | Optional alternate system prompts. |
 | `mcp` | Optional external MCP tool servers. |
@@ -269,12 +269,33 @@ and `infer: true` re-enables Mem0's LLM extraction/dedup stages.
 
 ```jsonc
 "workbench": {
+  "enabled": true,            // false = run JARVIS without the Linux workbench (see below)
   "container": "jarvis-workbench",
   "desktop_url": "http://localhost:8111/",
   "base_image": ""            // workbench build base — "" = the floating default tag
 },
 "shared":    { "read_only_dir": "/LLM_READ_ONLY_FILES", "read_write_dir": "/LLM_READ_WRITE_FILES" }
 ```
+
+### Running without the workbench (`workbench.enabled`)
+
+The workbench is the heaviest container and is only needed for software development, deep
+research and automation. Turn it off in **Config → Workbench & shared folders → Use the
+Linux workbench** (or set `"enabled": false`; a missing key means on). The switch applies on
+**Save**:
+
+| With the workbench off | |
+| --- | --- |
+| Container | Stopped on Save (and started again when you turn it back on). `./JARVIS.sh --start`, `--reload` and `--update` leave it stopped; `--setup` skips building its image. |
+| Model tools | Withheld: `run_shell`, `write_workbench_file`, `edit_workbench_file`, `serve_app`, every `browser_*` tool, the desktop tools (`screenshot`, `ui_actions`, `open_url`, `open_app`, `click`, `type_text`, …), `read_document` (PDF/Office) and `transcribe_audio`. The system prompt tells the model the workbench is off, and the workbench skill playbooks are not listed. |
+| Still works | Chat, long-term memory, `web_search` / `fetch_url`, the shared folders (`list_dir`, `read_file`, `write_file`, `edit_file`), `analyze_image`, email, the vault, scheduled tasks, plans, custom tools and MCP servers. |
+| Web UI | The **Workbench** tab is hidden; the *local (whisper)* speech engine is unavailable (the browser engine is used); the self-test skips the workbench and desktop checks. |
+| Backups | The automatic backup skips the workspace half (it is archived from inside the workbench). `./JARVIS.sh --backup-workspace` still works — it reads the host folder. |
+
+Nothing is deleted: the workbench image, its home volume and `LLM_WORKSPACE/` stay as they
+are. If the workbench was never built (a fresh install with it off), turning it on later needs
+one `./JARVIS.sh --reload` to create the container — the first build takes several minutes.
+The line under the switch shows what the container is doing.
 
 `base_image` makes the workbench's base **configurable and pinnable**: it's read by
 `./JARVIS.sh --setup` and passed to the image build. Empty uses the floating

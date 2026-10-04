@@ -9,11 +9,11 @@ diagnostic commands. Run from the repo root. Lifecycle flags can be chained
 | Command | What it does |
 | --- | --- |
 | `-c`, `--check` | Verify Docker is running and the config is valid. |
-| `-b`, `--setup` | Build the app / memory / workbench images. First workbench build is large (several minutes). The workbench's base image comes from `workbench.base_image` in the config (pin a digest there for reproducible rebuilds). |
-| `-u`, `--start` | Start the whole stack; prints the URLs. |
-| `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
+| `-b`, `--setup` | Build the app / memory / workbench images (the workbench image is skipped while the workbench is turned off — `workbench.enabled: false`). First workbench build is large (several minutes). The workbench's base image comes from `workbench.base_image` in the config (pin a digest there for reproducible rebuilds). |
+| `-u`, `--start` | Start the whole stack; prints the URLs. With the workbench turned off, everything but the workbench starts (and a workbench still running from before is stopped). |
+| `-r`, `--reload` | Re-read `JARVIS_CONFIG.json` + secrets (restarts the app only; memory/workbench stay up). Also applies the workbench switch: stops the workbench container when it is turned off, starts it (creating it if needed) when it is on. Model-agnostic — it no longer touches Ollama or provider keys (that moved to [`JARVIS_LOCAL_LLM.sh`](#jarvis_local_llmsh--local-model-runtime)). |
 | `--update` | `git pull --ff-only`, show the incoming commits, **rebuild only the images whose sources changed** (app deps / memory / piper / workbench), and restart. App-code-only updates need just the restart (the source is bind-mounted). |
-| `-i`, `--status` | Show what's running + app health. |
+| `-i`, `--status` | Show what's running + app health. A workbench that is turned off is shown as *off*, not as a failure. |
 | `-x`, `--stop` | Stop the stack (keeps all data). |
 | `-d`, `--delete` | Remove containers, network, and the **data volumes** (semantic memory + workbench home). Bind mounts survive — including config, the shared folders, and **`LLM_WORKSPACE`** (the AI's working files persist on your Mac). If memory is online, it first **asks whether to back it up** before wiping. |
 | `-f`, `--force` | Skip interactive confirmations — currently `--delete`'s "back up memory first?" prompt (e.g. `--stop --delete --force`). |

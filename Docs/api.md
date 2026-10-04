@@ -82,7 +82,7 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/config` | Public config (no secrets): title, provider, model, voice, personas, context window. |
-| `GET /api/config/full` · `POST /api/config/full` | Read / write the full config + secrets (Config tab; auto-backs-up). |
+| `GET /api/config/full` · `POST /api/config/full` | Read / write the full config + secrets (Config tab; auto-backs-up). When the save flips `workbench.enabled`, the workbench container is stopped / started and the reply carries `workbench: { enabled, container, action, note, changed }`. |
 | `GET /api/models` | Available models (from the gateway or Ollama) + current. |
 | `POST /api/models/probe` | List models from an arbitrary endpoint: `{base_url, api_key}` (for the provider picker). |
 | `GET /api/context-window` | Resolve the context-meter ceiling (manual → Ollama num_ctx → gateway `/model/info` → default). |
@@ -91,7 +91,8 @@ it can use every tool while answering. Great for cron, Shortcuts, and other mach
 | `POST /api/tts` | Synthesize speech (Piper): body `{text, voice?, rate?}` → `audio/wav`. Proxied to `jarvis-piper`. |
 | `POST /api/stt` | Local speech-to-text: `{dataUrl}` (base64 audio) → `{text, language, duration_s}` — transcribed by whisper in the workbench (used by the "local" STT engine). |
 | `POST /api/tools/reload` | Hot-reload custom tools + MCP servers (also runs automatically on config save). Returns `{builtin, custom, mcp, total}`. |
-| `GET /api/selftest` | Exercise memory/shell/files/internet/desktop/vault without the model. |
+| `GET /api/selftest` | Exercise memory/shell/files/internet/desktop/vault without the model. With the workbench turned off, `workbench` and `desktop` come back as `{ skipped }`. |
+| `GET /api/workbench` | `{ enabled, container }` — whether the workbench is switched on (`workbench.enabled`) and what its container is doing: `running`, `stopped`, `missing` (never created) or `unknown` (Docker not reachable). |
 | `GET /healthz` | Liveness. |
 
 ### Memory

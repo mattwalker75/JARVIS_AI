@@ -473,6 +473,8 @@ html[data-theme="light"] .modal-ok { color: #fff; }
 .st-row .st-ic { font-weight: 700; }
 .st-row.ok .st-ic { color: #3ad07a; }
 .st-row.bad .st-ic { color: var(--danger); }
+.st-row.skip, .st-row.skip .st-ic { color: var(--muted); }
+.wb-status { margin: 6px 0 10px; }
 .st-row .st-detail { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 #selftest-results { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 

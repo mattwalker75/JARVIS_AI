@@ -69,11 +69,12 @@ async function runBackups() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const wb = (config.workbench && config.workbench.container) || "jarvis-workbench";
-  const jobs = [
-    ["jarvis-memory-auto-", "jarvis-memory", "tar czf - -C /data ."],
-    ["jarvis-workspace-auto-", wb, "tar czf - -C /LLM_WORKSPACE ."],
-  ];
+  const jobs = [["jarvis-memory-auto-", "jarvis-memory", "tar czf - -C /data ."]];
   const results = [];
+  // The workspace is archived from inside the workbench container, so with the workbench
+  // turned off (its container is stopped) that half is skipped rather than reported as a failure.
+  if (require("./config").workbenchEnabled()) jobs.push(["jarvis-workspace-auto-", wb, "tar czf - -C /LLM_WORKSPACE ."]);
+  else results.push("jarvis-workspace skipped (workbench is off)");
   for (const [prefix, containerName, cmd] of jobs) {
     const file = path.join(BACKUP_DIR, `${prefix}${ts}.tgz`);
     try {
