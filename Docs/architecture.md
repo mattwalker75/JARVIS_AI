@@ -130,8 +130,15 @@ them while the `/LLM_WORKSPACE` bind mount (a host folder) and the home **volume
 
 ## Security model
 
-- **Localhost only.** Every published port binds to `127.0.0.1`, including the 9101–9150
-  preview range (memory and piper aren't published at all).
+- **Localhost only by default.** Every published port binds to `127.0.0.1`, including the
+  9101–9150 preview range (memory and piper aren't published at all). *Allow other devices on
+  my network* (Config → Access & users, applied by `./JARVIS.sh --reload`) publishes **only the
+  chat UI's port** on every interface; the workbench desktop and previews never leave this
+  computer.
+- **Optional login** (`app/src/auth.js`, no dependencies): several users, one shared JARVIS.
+  Salted scrypt hashes in `data/.password`; a signed session cookie (per-boot key) checked on
+  every `/api` route, `/view` and the WebSocket handshake. The terminal client runs inside the
+  app container on its own loopback, which compose marks as trusted (`JARVIS_TRUST_LOOPBACK`).
 - **Cross-site request guard.** The REST API and the WebSocket both validate the
   `Host` and `Origin` headers against localhost names, so a malicious website can't
   fire requests at `127.0.0.1:8110` (CSRF) or reach it via DNS rebinding. Fronting
@@ -139,7 +146,8 @@ them while the `/LLM_WORKSPACE` bind mount (a host folder) and the home **volume
   `security.allowed_hosts` in `JARVIS_CONFIG.json`.
 - **Root is in a container**, not on your host — and the app reaches the Docker daemon
   only through the filtered `jarvis-docker-proxy` (containers + exec), never the raw
-  socket. Still: this is a single-user local tool; don't expose it to a network.
+  socket. Still: every signed-in user has the whole of JARVIS — never open it to a network
+  without the login on, and only on a network you trust.
 - **Untrusted content.** The system prompt instructs the model to treat web pages,
   files, and screenshots as data, never instructions, and never to send secrets to
   external tools.

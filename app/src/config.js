@@ -222,11 +222,32 @@ function _backup(file) {
   } catch (_) { return null; }
 }
 
+// Whether the login is on, and where its password file lives, change ONLY through the
+// dedicated actions (Config → Access & users → setProtected below). The full-config editor
+// works on a copy of the file that may be minutes old; letting it write these two keys
+// would let a stale Save silently switch the login off (or point it at another file).
+const PROTECTED = ["security.login_enabled", "security.password_file"];
+function _get(obj, dotted) { return dotted.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), obj); }
+function _put(obj, dotted, value) {
+  const parts = dotted.split("."); let o = obj;
+  for (let i = 0; i < parts.length - 1; i++) { if (!o[parts[i]] || typeof o[parts[i]] !== "object" || Array.isArray(o[parts[i]])) o[parts[i]] = {}; o = o[parts[i]]; }
+  if (value === undefined) delete o[parts[parts.length - 1]]; else o[parts[parts.length - 1]] = value;
+}
+/** Set one protected key (in memory + on disk, with a backup). Server-internal: never reachable with a caller-chosen path. */
+function setProtected(pathStr, value) {
+  if (!PROTECTED.includes(pathStr)) throw new Error("not a protected setting: " + pathStr);
+  _put(config, pathStr, value);
+  _backup(CONFIG_FILE);
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  return { path: pathStr, value };
+}
+
 function writeFullConfig({ config: newConfig, secrets: newSecrets }) {
   const result = { saved: [], backups: [] };
   if (newConfig !== undefined && newConfig !== null) {
     if (typeof newConfig !== "object" || Array.isArray(newConfig)) throw new Error("config must be a JSON object");
     if (!newConfig.llm || typeof newConfig.llm !== "object") throw new Error("config.llm must be present and be an object");
+    for (const k of PROTECTED) _put(newConfig, k, _get(config, k));   // keep the live values, whatever the editor sent
     const b = _backup(CONFIG_FILE); if (b) result.backups.push(b);
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
     // Mutate the SAME `config` object in place (not reassign) so every module that
@@ -274,4 +295,4 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, modelFor, modelMode, paramsFor, setSetting, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };
+module.exports = { config, loadError, publicConfig, modelFor, modelMode, paramsFor, setSetting, setProtected, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

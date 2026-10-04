@@ -24,6 +24,9 @@
 #   -r, --reload       Restart the app to re-read config files (JARVIS_CONFIG.json +
 #                      JARVIS_SECRETS.json). Memory + workbench keep running. Run this after
 #                      saving from the Config tab. (Local LLM runtimes: see ./JARVIS_LOCAL_LLM.sh.)
+#                      Also applies a change to "Allow other devices on my network" (Config →
+#                      Access & users): the app container is re-created with its port published
+#                      to the network, or to this computer only. A reload signs every user out.
 #       --update       Pull the latest JARVIS from git, show what changed, rebuild only the
 #                      images whose sources changed, and restart the stack.
 #   -t, --terminal     Chat with JARVIS in this terminal (no browser).
@@ -122,7 +125,42 @@ warn() { echo -e "${C_YEL}!! ${C_RESET} $*"; }
 err()  { echo -e "${C_RED}ERROR${C_RESET} $*" >&2; }
 lc()   { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 
-dc() { docker compose -f "$COMPOSE_FILE" "$@"; }
+# Network access (Config → Access & users → "Allow other devices on my network", i.e.
+# server.allow_network): the chat UI's port is published on every interface when it is on,
+# and on 127.0.0.1 only when it is off. The workbench desktop and the app-preview ports
+# always stay on 127.0.0.1 — they have no login of their own. net_env also tells the app this
+# computer's addresses and names, so it can say where to open it from and accept those names.
+net_allowed() { [[ "$(lc "$(read_cfg server.allow_network false)")" == "true" ]]; }
+login_enabled() { [[ "$(lc "$(read_cfg security.login_enabled false)")" == "true" ]]; }
+host_addrs() {
+  { ifconfig 2>/dev/null | awk '/inet /{print $2}' | sed 's/^addr://'; hostname -I 2>/dev/null | tr ' ' '\n'; } \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -v '^127\.' | sort -u | paste -sd, -
+}
+host_names() {
+  local h; h="$(lc "$(hostname 2>/dev/null)")"; [[ -z "$h" ]] && return 0
+  local short="${h%.local}"; echo "${short},${short}.local"
+}
+net_env() {
+  if net_allowed; then export APP_BIND="0.0.0.0"; else export APP_BIND="127.0.0.1"; fi
+  JARVIS_HOST_ADDRS="$(host_addrs)"; JARVIS_HOSTNAMES="$(host_names)"; export JARVIS_HOST_ADDRS JARVIS_HOSTNAMES
+}
+# Where the running app container's port is published right now ("127.0.0.1" / "0.0.0.0"; empty if not running).
+app_bind_now() { docker port "$APP_CONTAINER" 80/tcp 2>/dev/null | head -1 | sed 's/:[0-9]*$//'; }
+# Who can open the chat UI, for --start, --reload and --status.
+access_summary() {
+  if net_allowed; then
+    local a urls=""; a="$(host_addrs)"
+    for ip in ${a//,/ }; do urls="${urls} http://${ip}:${APP_PORT}/"; done
+    echo -e "${C_BOLD}  Network access:${C_RESET}     ON — other devices:${urls:- (no network connection right now)}"
+    login_enabled || warn "Network access is on and the login is OFF: anyone on your network can use JARVIS (shell, files, vault). Turn the login on in Config → Access & users."
+  else
+    echo -e "${C_BOLD}  Network access:${C_RESET}     off — only this computer can open the chat UI"
+  fi
+  if login_enabled; then echo -e "${C_BOLD}  Login:${C_RESET}              on (users in Config → Access & users; passwords in data/.password)"
+  else echo -e "${C_BOLD}  Login:${C_RESET}              off"; fi
+}
+
+dc() { net_env; docker compose -f "$COMPOSE_FILE" "$@"; }
 # Compose profiles derived from config: the OPTIONAL searxng sidecar joins the stack only
 # when search.provider is "searxng". Used by start (so it comes up) and stop/delete (so
 # it's included in teardown even after the config was switched back).
@@ -243,7 +281,8 @@ cmd_start() {
   echo
   ok "JARVIS is up."
   echo -e "${C_BOLD}  Chat UI:${C_RESET}            http://localhost:${APP_PORT}/"
-  echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in)"
+  access_summary
+  echo -e "${C_BOLD}  Workbench desktop:${C_RESET}  http://localhost:${WB_PORT}/   (the Linux the LLM works in — this computer only)"
   echo -e "${C_BOLD}  Semantic memory:${C_RESET}    internal-only (the app reaches it at jarvis-memory:8000)"
   echo "      Self-test the LLM's tools:  curl http://localhost:${APP_PORT}/api/selftest"
   echo -e "  ${C_BOLD}Model:${C_RESET} set an endpoint in the Config tab. Cloud → paste the provider URL; local → run  ${C_BOLD}./JARVIS_LOCAL_LLM.sh start${C_RESET}  and paste the URL it prints."
@@ -255,9 +294,19 @@ cmd_reload() {
   info "RELOAD: restarting the app to re-read JARVIS_CONFIG.json + JARVIS_SECRETS.json..."
   info "(The database, memory service, and workbench keep running; the LLM's memory and any browser session are preserved.)"
   info "(Local LLM runtimes are managed separately — see ./JARVIS_LOCAL_LLM.sh.)"
-  dc restart jarvis-app || { err "Reload failed."; return 1; }
+  # A change to network access is a change to the container's port binding, which a plain
+  # restart keeps — re-create just the app container in that case.
+  net_env
+  local now; now="$(app_bind_now)"
+  if [[ -n "$now" && "$now" != "$APP_BIND" ]]; then
+    info "Network access changed — re-creating the app container so its port is published on ${APP_BIND}."
+    dc up -d jarvis-app || { err "Reload failed."; return 1; }
+  else
+    dc restart jarvis-app || { err "Reload failed."; return 1; }
+  fi
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Configuration reloaded."
+  access_summary
 }
 
 # Pull the latest code, rebuild only what changed, restart. App source is bind-mounted,
@@ -341,7 +390,10 @@ cmd_status() {
   done
   if container_running "$APP_CONTAINER"; then
     echo -e "  app health (http://localhost:${APP_PORT}/healthz): HTTP $(curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/healthz 2>/dev/null)"
+    local now; now="$(app_bind_now)"; net_env
+    [[ -n "$now" && "$now" != "$APP_BIND" ]] && warn "Network access was changed in the config but is not applied yet (the port is published on ${now}). Run  ./JARVIS.sh --reload"
   fi
+  access_summary
 }
 
 # stop/down always include the search profile so the optional sidecar is covered even

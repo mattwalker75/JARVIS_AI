@@ -50,7 +50,8 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | `backups` | Config-backup retention + scheduled memory/workspace backups. |
 | `notifications` | External alert bridge (ntfy) for closed-browser notifications. |
 | `search` | Web-search backend: DuckDuckGo scrape or the SearXNG sidecar. |
-| `security` | Extra allowed `Host`/`Origin` hostnames. |
+| `security` | The optional login (on/off, session length) and extra allowed `Host`/`Origin` hostnames. |
+| `server` | Network access: this computer only, or other devices on your network too. |
 | `secret_access_notice` | Chat notice on every `get_secret` read. |
 | `memory_auto_recall` | Inject top memory hits into every chat turn (default off). |
 
@@ -384,15 +385,50 @@ scheduled-task / Autopilot notification is POSTed there with a mapped priority.
 `min_level` filters what leaves the machine (`info` = everything, `warning`, `error`).
 Empty URL = off.
 
-## `security` (optional)
+## `security` and `server` (optional) — who can open JARVIS
 
 ```jsonc
-"security": { "allowed_hosts": [] }   // e.g. ["jarvis.tail1234.ts.net"]
+"security": { "login_enabled": false, "session_hours": 12, "allowed_hosts": [] },
+"server":   { "allow_network": false }
 ```
-Every REST and WebSocket request must carry a localhost `Host` (and, when a browser
-sends one, `Origin`) or it's rejected with 403 — this blocks CSRF and DNS-rebinding
-attacks from websites you visit. If you front JARVIS with a reverse proxy or tunnel
-under a different hostname, list that hostname here.
+
+All of this is in **Config → Access & users**.
+
+| Key | Default | Applies | Meaning |
+| --- | --- | --- | --- |
+| `server.allow_network` | `false` | `./JARVIS.sh --reload` | `false`: the chat UI's port is published on `127.0.0.1` — only this computer can open it. `true`: published on every interface, so other devices on your network (or VPN) can. The workbench desktop (`:8111`) and the preview ports **always stay on this computer** — they have no login. |
+| `security.login_enabled` | `false` | at once | Everyone signs in. Change it with the buttons in the Config tab (not by hand, and the full-config editor never changes it): *Turn the login on…* then asks for the first login name and password; *Turn the login off…* removes every user and password. |
+| `security.session_hours` | `12` | new sign-ins | How long you stay signed in (1–720). |
+| `security.allowed_hosts` | `[]` | at once | Other names this computer is reached by that JARVIS should answer to, e.g. a Tailscale name `["jarvis.tail1234.ts.net"]`. |
+| `security.password_file` | `/data/.password` | at once | Where the passwords are kept, as a path **inside the app container** (`/data` is the `data/` folder next to `JARVIS.sh`). Only editable by hand. |
+
+**Users.** With the login on, *Access & users* lists the users. Every user can add a user,
+reset another user's password, change their own, and remove another user. **Everything in
+JARVIS is shared** — chats, memory, tasks, files, settings and the vault (the Config tab shows
+API keys and vault entries to any signed-in user). A login only decides who may open JARVIS,
+so only give one to someone you would trust with all of it.
+
+**Passwords** need at least 8 characters and are stored as salted scrypt hashes in
+`data/.password` (owner-only): `{"users": [{"loginName": "…", "passwordHash": "scrypt$…"}]}`.
+Forgot one? Another user resets it. If nobody can sign in, **delete `data/.password` and reload
+the page** — you create one login again and add the others back; nothing else is touched.
+A restart or `--reload` signs everyone out (the session key is new at every start), and removing
+a user or changing a password ends that user's sessions.
+
+**The terminal client** (`./JARVIS.sh --terminal`, `--prompt`) runs on this computer, inside the
+app container, and needs no login.
+
+**The Host/Origin guard** is always on: every REST and WebSocket request must carry a `Host`
+(and, when a browser sends one, a same-site `Origin`) that names this computer, or it is rejected
+with 403 — this blocks CSRF and DNS-rebinding attacks from websites you visit. Localhost names
+always pass. While network access is on, so do private-network IP addresses (10/8, 172.16/12,
+192.168/16, the 100.64/10 range Tailscale uses) and this computer's own name. Any other name —
+a Tailscale `…ts.net` name, a reverse proxy — goes in `security.allowed_hosts`.
+
+> **Network on, login off** means anyone on your network can use JARVIS: run commands in the
+> workbench, read your files and the vault, spend your model key. The Config tab and
+> `./JARVIS.sh --start` both warn about it. Traffic is plain HTTP either way — use a network you
+> trust (a VPN such as Tailscale encrypts it for you).
 
 ## `secret_access_notice` (optional)
 

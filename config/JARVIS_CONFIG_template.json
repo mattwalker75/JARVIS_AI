@@ -128,9 +128,15 @@
       "keep": 7
     }
   },
-  "_security_note": "allowed_hosts: extra hostnames the app accepts in the Host/Origin headers, e.g. a Tailscale name if you front JARVIS with a proxy ([\"jarvis.tail1234.ts.net\"]). Localhost names are always allowed; everything else is rejected (blocks CSRF + DNS rebinding). secret_access_notice: post a notice into the chat whenever the model reads a vault secret with get_secret (default true).",
+  "_security_note": "login_enabled: true = everyone signs in (Config → Access & users manages the users; passwords live in data/.password as scrypt hashes). Everything in JARVIS is shared between the users — a login only decides who may open it. Turn it on/off in the Config tab, not here. session_hours: how long a sign-in lasts. allowed_hosts: extra hostnames the app accepts in the Host/Origin headers, e.g. a Tailscale name ([\"jarvis.tail1234.ts.net\"]). Localhost names are always allowed (plus this computer's network addresses and own name while server.allow_network is on); everything else is rejected (blocks CSRF + DNS rebinding).",
   "security": {
+    "login_enabled": false,
+    "session_hours": 12,
     "allowed_hosts": []
+  },
+  "_server_note": "allow_network: false = only this computer can open the chat UI (its port is published on 127.0.0.1). true = other devices on your network can too. Applied by ./JARVIS.sh --reload (or --start), which re-creates the app container. The workbench desktop and preview ports always stay on this computer.",
+  "server": {
+    "allow_network": false
   },
   "secret_access_notice": true,
   "_memory_auto_recall_note": "When true, every chat turn silently searches long-term memory for the user's message and injects the top hits into the model's context — recall stops depending on the model choosing to call search_memory. Costs one embedding lookup per turn. Default false.",

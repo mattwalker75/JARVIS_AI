@@ -1,14 +1,35 @@
 # API
 
-The app (`:8110`, localhost only) exposes a WebSocket for the live UI and a REST API
-for everything else — including `POST /api/chat` for external automation. No auth
-(single-user, localhost); don't expose it to a network.
+The app (`:8110`, this computer only unless network access is switched on) exposes a
+WebSocket for the live UI and a REST API for everything else — including `POST /api/chat`
+for external automation. By default there is no login; with one on (Config → Access &
+users) every route below except `/healthz` and `/api/auth/me|setup|login|logout` answers
+**401** until you sign in, and the WebSocket handshake is refused with 401. A scripted client
+signs in with `POST /api/auth/login` and sends the `jarvis_session` cookie it gets back.
 
 Every request — REST and WebSocket alike — is validated against a **localhost
 `Host`/`Origin` allowlist**, which blocks CSRF and DNS-rebinding from websites you
 visit. Plain `curl`/scripts on the same machine pass automatically. If you front
 JARVIS with a proxy or tunnel under a different hostname, add that name to
 `security.allowed_hosts` in `JARVIS_CONFIG.json` or the app answers 403.
+
+## Login and users
+
+| Method & path | Purpose |
+| --- | --- |
+| `GET /api/auth/me` | `{ status: "disabled" \| "not_initialized" \| "unauthenticated" \| "authenticated", loginName? }` |
+| `POST /api/auth/setup` | `{ loginName, password }` — create the first login (only when no password file exists) and sign in. |
+| `POST /api/auth/login` / `logout` | `{ loginName, password }` / — . At most 10 attempts per address in 5 minutes. |
+| `POST /api/auth/password` | `{ currentPassword, newPassword }` — change your own password. |
+| `GET /api/access` | `{ auth, login_enabled, session_hours, password_file, network: { allow, published, restart_needed, urls } }` |
+| `POST /api/access/login` | `{ enabled: true }` turns the login on; `{ enabled: false, confirm: "DISABLE" }` turns it off and removes every user. |
+| `GET /api/users` | `[{ name, isYou }]` |
+| `POST /api/users` | `{ loginName, password }` — add a user. |
+| `PUT /api/users/:name/password` | `{ password }` — reset ANOTHER user's password. |
+| `DELETE /api/users/:name` | `{ confirm: "DELETE" }` — remove another user. |
+
+`POST /api/config/full` never changes `security.login_enabled` or `security.password_file`,
+whatever it is sent.
 
 ## WebSocket — `/ws`
 

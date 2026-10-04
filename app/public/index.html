@@ -13,6 +13,26 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <!-- Sign in / create your login — only when Config → Access & users has the login on. -->
+  <div class="auth-screen" id="auth-screen" hidden>
+    <form class="auth-card" id="auth-form" autocomplete="on">
+      <div class="auth-brand"><span class="arc"></span><span id="auth-brand-name">JARVIS</span></div>
+      <h1 id="auth-title"></h1>
+      <p id="auth-sub"></p>
+      <label for="auth-name">Login name</label>
+      <input id="auth-name" autocomplete="username" spellcheck="false">
+      <label for="auth-pw">Password</label>
+      <span class="pw"><input id="auth-pw" type="password"><button type="button" class="pw-eye" aria-label="Show password" title="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg></button></span>
+      <div class="auth-help" id="auth-pw-help">At least 8 characters.</div>
+      <div id="auth-again-wrap">
+        <label for="auth-pw2">Password again</label>
+        <span class="pw"><input id="auth-pw2" type="password" autocomplete="new-password"><button type="button" class="pw-eye" aria-label="Show password" title="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg></button></span>
+      </div>
+      <div class="auth-err" id="auth-error" role="alert" hidden></div>
+      <button type="submit" id="auth-submit" class="auth-go"></button>
+      <p class="auth-foot" id="auth-foot"></p>
+    </form>
+  </div>
   <header class="topbar">
     <div class="brand">
       <span class="arc"></span>
@@ -27,6 +47,7 @@
       </div>
     </div>
     <div class="controls">
+      <button id="signout-btn" class="ghost" title="Sign out" hidden></button>
       <button id="theme-toggle" class="ghost" title="Toggle light / dark theme">☀️</button>
       <button id="chat-search-btn" class="ghost" title="Search this conversation (Cmd/Ctrl-F)">🔍</button>
       <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
@@ -226,6 +247,7 @@
         </div>
       </div>
       <div class="panel" id="panel-workbench">
+        <div class="hint desktop-remote" id="desktop-remote" hidden>The Workbench desktop only opens on the computer that runs JARVIS — it has no login of its own, so it is never published to the network. Everything else (chat, tasks, memory, files, config) works from here.</div>
         <iframe id="desktop" title="JARVIS Workbench desktop" sandbox="allow-scripts allow-same-origin allow-forms allow-clipboard-write"></iframe>
         <div class="desktop-bar">
           <button id="desktop-reload" class="ghost" title="Reconnect the desktop in this window — use this after opening it in a new tab, or if it's frozen">↻ Reconnect here</button>
@@ -404,9 +426,23 @@
             <div class="hint">Switching to SearXNG needs a stack restart once (<code>./JARVIS.sh --start</code> brings the sidecar container up); after that it applies live.</div>
           </div>
 
+          <div class="cfg-section" id="cfg-sec-access">
+            <h5>Access &amp; users</h5>
+            <label class="cfg-check"><input type="checkbox" id="cfg-net-allow"> Allow other devices on my network <span class="cfg-badge">Save, then ./JARVIS.sh --reload</span></label>
+            <div class="hint" id="cfg-net-status">Off: only this computer can open JARVIS.</div>
+            <label>Other names for this computer <span class="cfg-hint-inline">comma-separated · applies live</span><input id="cfg-sec-hosts" autocomplete="off" placeholder="e.g. my-mac.tailnet-name.ts.net — a VPN (Tailscale), proxy or tunnel name; localhost is always allowed"></label>
+            <div class="hint">JARVIS only answers when it is opened by a name this computer really has. With network access on, its network addresses and its own name work by themselves; any other name you reach it by goes here.</div>
+            <div class="acc-login" id="cfg-login-box"><span class="acc-dot"></span><span id="cfg-login-text">…</span><button type="button" id="cfg-login-toggle" class="ghost"></button></div>
+            <label>Stay signed in for (hours) <span class="cfg-hint-inline">applies to new sign-ins</span><input id="cfg-session-hours" type="number" min="1" max="720" placeholder="12"></label>
+            <div id="cfg-users-wrap" hidden>
+              <div class="acc-users" id="cfg-users"></div>
+              <button type="button" id="cfg-user-add" class="ghost">＋ Add user</button>
+            </div>
+            <div class="hint" id="cfg-access-hint"></div>
+          </div>
+
           <div class="cfg-section">
             <h5>Security &amp; housekeeping</h5>
-            <label>Extra allowed hosts <span class="cfg-hint-inline">comma-separated</span><input id="cfg-sec-hosts" autocomplete="off" placeholder="e.g. jarvis.tail1234.ts.net — for a proxy/tunnel; localhost is always allowed"></label>
             <label>Config backups to keep<input id="cfg-backups-retain" type="number" min="0" title="Newest N config/secrets backups kept in data/ (each config backup contains the live API key). 0 = keep everything."></label>
             <label class="cfg-check"><input type="checkbox" id="cfg-auto-backup" title="Scheduled tarballs of the semantic-memory volume AND /LLM_WORKSPACE, written to data/backups/ (survive --delete)."> Automatic memory + workspace backups</label>
             <div class="cfg-grid">

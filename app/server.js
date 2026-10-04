@@ -5,7 +5,9 @@ const path = require("path");
 const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
-const { config, loadError, publicConfig, systemPrompt, setSetting, readFullConfig, writeFullConfig } = require("./src/config");
+const os = require("os");
+const { config, loadError, publicConfig, systemPrompt, setSetting, setProtected, readFullConfig, writeFullConfig } = require("./src/config");
+const auth = require("./src/auth");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
 const scheduler = require("./src/scheduler");
@@ -26,25 +28,49 @@ const app = express();
 //   Origin — when present (browsers always send it cross-site), its host must be allowed
 //            too. Absent on same-origin GETs and non-browser clients (curl/scripts) —
 //            those are vouched for by the Host check.
-// Exposing JARVIS via a proxy/tunnel under another hostname? Add it to
-// security.allowed_hosts in JARVIS_CONFIG.json, e.g. ["jarvis.tail1234.ts.net"].
+// Exposing JARVIS via a proxy/tunnel/VPN under another hostname? Add it to
+// security.allowed_hosts (Config → Access & users → Other names), e.g. ["jarvis.tail1234.ts.net"].
+//
+// Network access (Config → Access & users → "Allow other devices on my network"): the app
+// always listens on 0.0.0.0 inside its container; what decides who can reach it is the
+// Docker port binding, which ./JARVIS.sh sets from server.allow_network and reports here
+// as JARVIS_APP_BIND. While the port is published to the network the guard also accepts:
+//   - a private-network IP address as Host (10/8, 172.16/12, 192.168/16, the 100.64/10
+//     range VPNs such as Tailscale use, link-local) — a browser only sends an IP there when
+//     the user typed that IP, so this cannot be a rebound attacker hostname;
+//   - this computer's own names (JARVIS_HOSTNAMES, passed in by ./JARVIS.sh).
+const LOOPBACK_NAMES = ["localhost", "127.0.0.1", "::1", "host.docker.internal"];
+const APP_BIND = process.env.JARVIS_APP_BIND || "127.0.0.1";
+const networkPublished = () => !["127.0.0.1", "localhost", "::1"].includes(APP_BIND);
+const HOST_NAMES = String(process.env.JARVIS_HOSTNAMES || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+function privateAddress(h) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) { const [a, b] = [Number(m[1]), Number(m[2])]; return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254); }
+  return /^(fe80|f[cd][0-9a-f]{2}):/i.test(h);   // IPv6 link-local / unique-local
+}
+const cleanHost = (h) => String(h || "").toLowerCase().replace(/^\[|\]$/g, "");
+const isLoopbackName = (h) => LOOPBACK_NAMES.includes(cleanHost(h));
 function allowedHostname(h) {
   if (!h) return false;
-  h = String(h).toLowerCase().replace(/^\[|\]$/g, "");
-  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "host.docker.internal") return true;
+  h = cleanHost(h);
+  if (LOOPBACK_NAMES.includes(h)) return true;
+  if (networkPublished() && (privateAddress(h) || HOST_NAMES.includes(h))) return true;
   const extra = (config.security && config.security.allowed_hosts) || [];
   return extra.some((x) => String(x).toLowerCase() === h);
+}
+/** An Origin is acceptable when its host is one we answer to AND (off this computer) it is the very page host being asked — i.e. same-origin. */
+function originAllowed(origin, hostHeader) {
+  let o; try { o = new URL(origin); } catch (_) { return false; }
+  if (!allowedHostname(o.hostname)) return false;
+  if (isLoopbackName(o.hostname)) return true;   // local pages on other ports keep working, as before
+  return o.host.toLowerCase() === String(hostHeader || "").toLowerCase();
 }
 app.use((req, res, next) => {
   let hostOk = false;
   try { hostOk = allowedHostname(new URL("http://" + (req.headers.host || "")).hostname); } catch (_) {}
-  if (!hostOk) return res.status(403).json({ error: "forbidden: unrecognized Host header (add it to security.allowed_hosts in JARVIS_CONFIG.json if this is a host you trust)" });
+  if (!hostOk) return res.status(403).json({ error: "forbidden: unrecognized Host header (add the name under Config → Access & users → Other names, or to security.allowed_hosts in JARVIS_CONFIG.json, if this is a host you trust)" });
   const origin = req.headers.origin;
-  if (origin) {
-    let originOk = false;
-    try { originOk = allowedHostname(new URL(origin).hostname); } catch (_) {}
-    if (!originOk) return res.status(403).json({ error: "forbidden: cross-site requests are not allowed" });
-  }
+  if (origin && !originAllowed(origin, req.headers.host)) return res.status(403).json({ error: "forbidden: cross-site requests are not allowed" });
   next();
 });
 
@@ -52,6 +78,67 @@ app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uplo
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/healthz", (_req, res) => res.type("text").send("ok"));
+
+// ---- Login (optional — Config → Access & users) --------------------------------------
+// Open routes: the page must be able to ask "is there a login, am I signed in?" and to
+// sign in. Everything else under /api, the Markdown viewer and the chat WebSocket need a
+// signed-in user once the login is on (see the gate below and verifyClient further down).
+const say = (res, fn) => { try { const out = fn(); res.json(out === undefined ? { ok: true } : out); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } };
+// At most 10 password attempts per address in 5 minutes.
+const attempts = new Map();
+function limiter(req, res, next) {
+  if (process.env.JARVIS_NO_RATE_LIMIT) return next();
+  const now = Date.now(), key = (req.socket && req.socket.remoteAddress) || "?";
+  const recent = (attempts.get(key) || []).filter((t) => now - t < 5 * 60 * 1000);
+  if (recent.length >= 10) return res.status(429).json({ error: "Too many attempts. Wait five minutes and try again." });
+  recent.push(now); attempts.set(key, recent); next();
+}
+app.get("/api/auth/me", (req, res) => res.json(auth.state(req)));
+app.post("/api/auth/setup", limiter, (req, res) => say(res, () => { const b = req.body || {}; return { status: "authenticated", loginName: auth.setup(res, b.loginName, b.password) }; }));
+app.post("/api/auth/login", limiter, (req, res) => say(res, () => { const b = req.body || {}; return { status: "authenticated", loginName: auth.login(res, b.loginName, b.password) }; }));
+app.post("/api/auth/logout", (_req, res) => { auth.endSession(res); res.json({ ok: true }); });
+
+app.use(["/api", "/view"], (req, res, next) => {
+  if (auth.allowed(req)) return next();
+  res.status(401).json({ error: "Sign in first.", auth: auth.state(req) });
+});
+
+// ---- Access & users (every signed-in user may do all of this; nothing is per user) -----
+/** This computer's addresses on its network, for "open it from another device at…". */
+function networkUrls() {
+  const port = process.env.JARVIS_PUBLIC_PORT || process.env.PORT || 80;
+  let addrs = String(process.env.JARVIS_HOST_ADDRS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!addrs.length && !process.env.JARVIS_APP_BIND) return [];
+  if (!addrs.length) for (const list of Object.values(os.networkInterfaces())) for (const a of list || []) if (a.family === "IPv4" && !a.internal) addrs.push(a.address);
+  return addrs.map((a) => `http://${a}:${port}`);
+}
+app.get("/api/access", (req, res) => {
+  const want = !!(config.server && config.server.allow_network === true);
+  const f = auth.file();
+  res.json({
+    auth: auth.state(req), login_enabled: auth.enabled(), session_hours: auth.sessionHours(),
+    // /data inside the container is the data/ folder next to JARVIS.sh
+    password_file: f, password_file_on_host: f.startsWith("/data/") ? "data/" + f.slice(6) : f,
+    network: { allow: want, published: networkPublished(), restart_needed: want !== networkPublished(), urls: networkPublished() ? networkUrls() : [] },
+  });
+});
+// Turning the login ON just flips the switch: with no password file yet, the page then asks
+// for the first login name and password. Turning it OFF removes every user and password.
+app.post("/api/access/login", (req, res) => say(res, () => {
+  const b = req.body || {};
+  if (b.enabled === true) { setProtected("security.login_enabled", true); return { login_enabled: true }; }
+  if (b.confirm !== "DISABLE") throw auth.fail("Type DISABLE to confirm — every user and password is removed and JARVIS opens without a login.");
+  auth.removeFile(); setProtected("security.login_enabled", false); auth.endSession(res);
+  return { login_enabled: false };
+}));
+app.post("/api/auth/password", limiter, (req, res) => say(res, () => { const b = req.body || {}; auth.changeOwn(req, res, b.currentPassword, b.newPassword); }));
+app.get("/api/users", (req, res) => say(res, () => auth.list(req)));
+app.post("/api/users", (req, res) => say(res, () => { const b = req.body || {}; return { name: auth.add(b.loginName, b.password) }; }));
+app.put("/api/users/:name/password", (req, res) => say(res, () => auth.resetPassword(req, req.params.name, (req.body || {}).password)));
+app.delete("/api/users/:name", (req, res) => say(res, () => {
+  if ((req.body || {}).confirm !== "DELETE") throw auth.fail("Type DELETE to confirm removing this user.");
+  auth.remove(req, req.params.name);
+}));
 
 app.get("/api/config", (_req, res) => {
   if (loadError) return res.status(500).json({ error: loadError });
@@ -525,13 +612,20 @@ const server = http.createServer(app);
 // files, secrets, shell) — a drive-by RCE. Browsers always send Origin; non-browser clients (CLI)
 // send none and are allowed. Shares allowedHostname with the REST guard above, so
 // security.allowed_hosts covers both transports.
-function wsOriginAllowed(origin) {
+function wsOriginAllowed(origin, hostHeader) {
   if (!origin) return true;                       // non-browser client (no Origin header)
-  try { return allowedHostname(new URL(origin).hostname); } catch { return false; }
+  return originAllowed(origin, hostHeader);
 }
+// The chat socket drives the whole tool-calling loop, so with the login on it needs a signed-in
+// user exactly like the REST API (the session cookie rides on the upgrade request).
 const wss = new WebSocketServer({
   server, path: "/ws",
-  verifyClient: (info) => wsOriginAllowed(info.origin || (info.req && info.req.headers && info.req.headers.origin)),
+  verifyClient: (info, done) => {
+    const req = info.req || {}; const headers = req.headers || {};
+    if (!wsOriginAllowed(info.origin || headers.origin, headers.host)) return done(false, 403, "Forbidden");
+    if (!auth.allowed(req)) return done(false, 401, "Unauthorized");
+    done(true);
+  },
 });
 // NOTE: do NOT cache systemPrompt() here. The active prompt lives in Prompts/default_*.prompt and
 // can change at runtime (Config → Prompts → Load, or "Save as active"). systemPrompt() reads those
@@ -615,5 +709,5 @@ const PORT = process.env.PORT || 80;
 // running the app directly on a host (no container) to enforce localhost-only there too.
 const BIND_HOST = process.env.BIND_HOST || "0.0.0.0";
 server.listen(PORT, BIND_HOST, () => {
-  console.log(`JARVIS app listening on ${BIND_HOST}:${PORT}` + (loadError ? `  [CONFIG ERROR: ${loadError}]` : ""));
+  console.log(`JARVIS app listening on ${BIND_HOST}:${PORT} — login ${auth.enabled() ? "on" : "off"}, ${networkPublished() ? "open to other devices on the network" : "this computer only"}` + (loadError ? `  [CONFIG ERROR: ${loadError}]` : ""));
 });

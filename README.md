@@ -15,8 +15,10 @@ bigger one for hard reasoning, a vision model for screenshots).
 
 > ⚠️ **Powerful by design.** JARVIS runs arbitrary root commands in its workbench
 > container, drives a browser, and can use your saved accounts. That's intentional.
-> The stack is **localhost-only**, root is **inside a container** (not your host),
+> The stack is **localhost-only by default**, root is **inside a container** (not your host),
 > and keys live in the gitignored `JARVIS_CONFIG.json`. Run it on a machine you trust.
+> To use it from another device, turn on the **login** and **network access** in
+> Config → Access & users (never network access without the login).
 
 ## The stack
 

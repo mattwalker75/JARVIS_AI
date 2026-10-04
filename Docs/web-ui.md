@@ -57,6 +57,18 @@ tabbed side panel showing what JARVIS is doing.
 - **🗺 Plan** — plan-first mode: JARVIS clarifies, lays out a high-level plan, then executes.
 - **Session usage** — running token (and cost, if any) total for the conversation.
 - **Sessions ▾** — save / load / export / import / delete named conversations.
+- **👤 name · Sign out** — only with the login on (Config → Access & users).
+
+### Sign-in and users
+
+With the login on, JARVIS opens on a **Sign in** screen (or **Create your login** the first
+time, and after `data/.password` is deleted). Every password box has an eye button that shows
+what you typed. **Config → Access & users** has the rest: *Allow other devices on my network*,
+other names for this computer (a Tailscale name), turning the login on or off, how long you stay
+signed in, and the users — add, reset a password, change your own, remove. Everything in JARVIS
+is shared between users. Opened from another device, the **Workbench** tab explains that the
+desktop only opens on the computer that runs JARVIS. Details:
+[configuration](configuration.md#security-and-server-optional--who-can-open-jarvis).
 
 ## Side-panel drawer
 

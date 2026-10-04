@@ -43,10 +43,36 @@ function sendChatWS(extra) {
   if (t === "light") document.documentElement.dataset.theme = "light";
 })();
 
+// ---- Login plumbing (only matters when Config → Access & users has the login on) ------
+// The app calls fetch() in ~100 places; rather than touch each, one wrapper notices a 401
+// — the session ended underneath us (a restart, a removed user, a changed password) — and
+// starts the page over, which lands on the sign-in screen. Calls to /api/auth/ are left
+// alone: a wrong password there is an answer, not a lost session.
+let authState = { status: "disabled" };   // from GET /api/auth/me, set in init()
+let appBooted = false;
+const rawFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const r = await rawFetch(input, init);
+  if (r.status === 401 && appBooted && !String(input).startsWith("/api/auth/")) { appBooted = false; location.reload(); }
+  return r;
+};
+// Every password box has an eye button that shows what was typed (one handler for all of
+// them, wherever they are rendered).
+const EYE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/><path class="slash" d="M3 3l18 18"/></svg>';
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest(".pw-eye"); if (!b) return;
+  const input = b.parentElement.querySelector("input"); const show = input.type === "password";
+  input.type = show ? "text" : "password"; b.setAttribute("aria-pressed", String(show));
+  const label = show ? "Hide password" : "Show password"; b.setAttribute("aria-label", label); b.title = label;
+});
+
 // ---- Modal system — replaces every native prompt()/confirm()/alert() -----------------
 // uiModal resolves null on cancel/Esc/backdrop; with `input`/`textarea` it resolves the
 // entered string; with `fields` it resolves {id: value}; otherwise true on OK.
-function uiModal({ title, body, bodyHtml, input, textarea, value = "", placeholder = "", fields, okText = "OK", cancelText = "Cancel", danger = false, noCancel = false }) {
+// A field may be type "password" (a box with an eye button) or "radio" (options:
+// [{value, label, help}]). `onOk(values)` runs before the window closes: if it throws,
+// or returns a string, that message is shown inside the window and it stays open.
+function uiModal({ title, body, bodyHtml, input, textarea, value = "", placeholder = "", fields, okText = "OK", cancelText = "Cancel", danger = false, noCancel = false, onOk = null }) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div"); overlay.className = "modal-overlay";
     const card = document.createElement("div"); card.className = "modal-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
@@ -56,20 +82,35 @@ function uiModal({ title, body, bodyHtml, input, textarea, value = "", placehold
     if (input) h += `<input type="text" class="m-in" value="${esc(value)}" placeholder="${esc(placeholder)}">`;
     if (textarea) h += `<textarea class="m-in" placeholder="${esc(placeholder)}">${esc(value)}</textarea>`;
     if (fields) for (const f of fields) {
+      if (f.type === "radio") { h += f.options.map((o) => `<label class="modal-choice"><input type="radio" name="mf-${esc(f.id)}" data-radio="${esc(f.id)}" value="${esc(o.value)}"><span><b>${esc(o.label)}</b>${o.help ? `<br><span style="font-size:.74rem;color:var(--muted)">${esc(o.help)}</span>` : ""}</span></label>`).join(""); continue; }
       h += `<label style="display:block;font-size:.76rem;color:var(--muted);margin-bottom:2px">${esc(f.label)}</label>`;
       h += f.type === "textarea"
         ? `<textarea class="m-in" data-field="${esc(f.id)}">${esc(f.value == null ? "" : String(f.value))}</textarea>`
+        : f.type === "password"
+        ? `<span class="pw"><input type="password" class="m-in" data-field="${esc(f.id)}" autocomplete="${f.current ? "current-password" : "new-password"}"><button type="button" class="pw-eye" aria-label="Show password" title="Show password" aria-pressed="false">${EYE_SVG}</button></span>`
         : `<input type="text" class="m-in" data-field="${esc(f.id)}" value="${esc(f.value == null ? "" : String(f.value))}">`;
     }
+    h += `<div class="modal-err" role="alert" hidden></div>`;
     h += `<div class="modal-actions">${noCancel ? "" : `<button class="modal-cancel">${esc(cancelText)}</button>`}<button class="modal-ok${danger ? " danger" : ""}">${esc(okText)}</button></div>`;
     card.innerHTML = h;
     overlay.appendChild(card);
     document.body.appendChild(overlay);
     const done = (v) => { document.removeEventListener("keydown", onKey, true); overlay.remove(); resolve(v); };
-    const ok = () => {
-      if (fields) { const out = {}; card.querySelectorAll("[data-field]").forEach((el) => { out[el.dataset.field] = el.value; }); return done(out); }
-      if (input || textarea) return done(card.querySelector(".m-in").value);
-      done(true);
+    const ok = async () => {
+      let out = true;
+      if (fields) {
+        out = {}; card.querySelectorAll("[data-field]").forEach((el) => { out[el.dataset.field] = el.value; });
+        for (const f of fields) if (f.type === "radio") { const c = card.querySelector(`[data-radio="${f.id}"]:checked`); out[f.id] = c ? c.value : ""; }
+      } else if (input || textarea) out = card.querySelector(".m-in").value;
+      if (onOk) {
+        const errEl = card.querySelector(".modal-err"), btn = card.querySelector(".modal-ok");
+        errEl.hidden = true; btn.disabled = true;
+        let problem = null;
+        try { problem = await onOk(out); } catch (e) { problem = e.message || String(e); }
+        btn.disabled = false;
+        if (typeof problem === "string" && problem) { errEl.textContent = problem; errEl.hidden = false; return; }
+      }
+      done(out);
     };
     const onKey = (e) => {
       if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(null); }
@@ -110,8 +151,14 @@ const desktop = $("desktop"), desktopLink = $("desktop-link");
 // Re-establish the embedded desktop connection. Opening the desktop in a new tab (or
 // backgrounding this tab) can leave the iframe's VNC socket frozen; reloading the iframe
 // gets a fresh connection so the desktop works "here" again.
+// The Workbench desktop is published on this computer only (it has no login). Opened from
+// another device, "http://localhost:8111" would point at THAT device — say so instead.
+function workbenchReachable() {
+  const local = (h) => ["localhost", "127.0.0.1", "[::1]", "::1"].includes(h);
+  try { const u = new URL(cfg.workbench_url, location.href); return !(local(u.hostname) && !local(location.hostname)); } catch (_) { return true; }
+}
 function reloadDesktop() {
-  if (!cfg || !cfg.workbench_url || !desktop) return;
+  if (!cfg || !cfg.workbench_url || !desktop || !workbenchReachable()) return;
   desktop.src = "about:blank";
   setTimeout(() => { desktop.src = cfg.workbench_url; }, 60);
 }
@@ -1597,6 +1644,11 @@ function setupDropZone() {
 }
 
 async function init() {
+  // With the login on, nothing loads until someone is signed in (or the first login is created).
+  try { authState = await (await fetch("/api/auth/me")).json(); } catch (_) { authState = { status: "disabled" }; }
+  if (authState.status === "not_initialized" || authState.status === "unauthenticated") { showAuthScreen(authState.status); return; }
+  appBooted = true;
+  renderSignedIn();
   try { cfg = await (await fetch("/api/config")).json(); } catch { cfg = {}; }
   if (cfg.error) addMessage("assistant", "Config error: " + cfg.error, "error");
   if (Number(cfg.stall_seconds) > 0) STALL_MS = Number(cfg.stall_seconds) * 1000;   // "model is slow" warning delay
@@ -1611,7 +1663,8 @@ async function init() {
   try { renderAutopilot(await (await fetch("/api/autopilot")).json()); } catch (_) {}  // reflect an in-progress run
   modelBadge.textContent = (cfg.provider ? cfg.provider + " · " : "") + (cfg.model || "");
   if (cfg.title) { const bt = $("brand-title"); if (bt) bt.textContent = cfg.title; document.title = cfg.title; }
-  if (cfg.workbench_url) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }
+  if (cfg.workbench_url && workbenchReachable()) { desktop.src = cfg.workbench_url; desktopLink.href = cfg.workbench_url; }
+  else if (cfg.workbench_url) { desktop.hidden = true; const bar = document.querySelector("#panel-workbench .desktop-bar"); if (bar) bar.hidden = true; const note = $("desktop-remote"); if (note) note.hidden = false; }
   if (window.JarvisVoice && cfg.voice) {
     const ok = JarvisVoice.init(cfg.voice, {
       onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError,
@@ -1641,6 +1694,114 @@ async function init() {
   inputEl.focus();
 }
 init();
+
+// ===== Login screen + Config → Access & users =====
+// One JARVIS, several users: a login only decides who may open it. Chats, memory, tasks,
+// files, settings and the vault are shared by everyone who signs in, and every user may
+// add or remove users and reset passwords. Whenever who-is-signed-in changes the page
+// starts over (location.reload) so nothing stale is left on screen.
+function showAuthScreen(status) {
+  const setup = status === "not_initialized";
+  $("auth-title").textContent = setup ? "Create your login" : "Sign in";
+  $("auth-sub").textContent = setup
+    ? "The login is turned on, and no login exists yet. Choose a login name and password — they are saved (the password as a secure hash) in the password file, data/.password in the JARVIS folder. More users are added in Config → Access & users."
+    : "Enter your JARVIS login name and password.";
+  $("auth-again-wrap").hidden = !setup; $("auth-pw-help").hidden = !setup;
+  $("auth-pw").autocomplete = setup ? "new-password" : "current-password";
+  $("auth-submit").textContent = setup ? "Create login" : "Sign in";
+  $("auth-foot").textContent = setup ? "" : "Forgot it? Another user can set a new password for you in Config → Access & users. If nobody can sign in, delete data/.password in the JARVIS folder, then reload this page.";
+  $("auth-screen").hidden = false; $("auth-name").focus();
+  $("auth-form").onsubmit = async (e) => {
+    e.preventDefault(); const err = $("auth-error"); err.hidden = true;
+    const fail = (m) => { err.textContent = m; err.hidden = false; $("auth-submit").disabled = false; };
+    if (setup && $("auth-pw").value !== $("auth-pw2").value) return fail("The two passwords are not the same.");
+    $("auth-submit").disabled = true;
+    try {
+      const r = await fetch(setup ? "/api/auth/setup" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loginName: $("auth-name").value, password: $("auth-pw").value }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return fail(d.error || "Could not sign in (" + r.status + ").");
+      location.reload();
+    } catch (ex) { fail("Could not reach JARVIS: " + ex.message); }
+  };
+}
+/** The "who is signed in · Sign out" button in the header (only with the login on). */
+function renderSignedIn() {
+  const b = $("signout-btn"); if (!b) return;
+  const on = authState.status === "authenticated";
+  b.hidden = !on;
+  if (on) { b.textContent = "👤 " + authState.loginName + " · Sign out"; b.title = "Signed in as " + authState.loginName + " — click to sign out"; }
+  b.onclick = async () => { try { await fetch("/api/auth/logout", { method: "POST" }); } catch (_) {} appBooted = false; location.reload(); };
+}
+/** JSON call for the access actions: resolves the body, throws the server's plain message. */
+async function accessCall(method, url, body) {
+  const r = await rawFetch(url, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed (" + r.status + ")");
+  return d;
+}
+const twoPasswords = (label) => [{ id: "pw", label, type: "password" }, { id: "pw2", label: label + " again (at least 8 characters)", type: "password" }];
+const mustMatch = (v) => { if (v.pw !== v.pw2) throw new Error("The two passwords are not the same."); };
+
+async function renderAccess() {
+  const box = $("cfg-login-box"); if (!box) return;
+  let a; try { a = await accessCall("GET", "/api/access"); } catch (_) { return; }
+  // -- network
+  const net = a.network, ns = $("cfg-net-status");
+  let h = net.published ? "On: other devices on your network can open JARVIS at" + (net.urls.length ? ":<span class=\"acc-urls\">" + net.urls.map((u) => "<code>" + esc(u) + "</code>").join("") + "</span>" : " this computer's address.") : "Off: only this computer can open JARVIS.";
+  if (net.restart_needed) h += `<div class="acc-warn">Saved, not applied yet: run <code>./JARVIS.sh --reload</code> to turn network access ${net.allow ? "on" : "off"} (it re-creates the app container; everyone is signed out).</div>`;
+  if ((net.published || net.allow) && !a.login_enabled) h += `<div class="acc-warn">⚠ With network access on and the login off, anyone on your network can use JARVIS — run commands in the workbench, read your files and the vault, and spend your model key. Turn the login on below.</div>`;
+  ns.innerHTML = h;
+  // -- login
+  const on = a.login_enabled, me = a.auth && a.auth.loginName;
+  box.classList.toggle("on", on);
+  $("cfg-login-text").innerHTML = on ? "The login is on" + (me ? " — signed in as <b>" + esc(me) + "</b>" : "") + ". Everyone signs in; everything in JARVIS is shared between the users." : "The login is off: opening JARVIS takes you straight in, and there are no users.";
+  const tg = $("cfg-login-toggle");
+  tg.textContent = on ? "Turn the login off…" : "Turn the login on…";
+  tg.onclick = async () => {
+    if (!on) {
+      if (!(await uiConfirm("You will be asked to create a login name and password straight away. After that you can add more users here.\n\nEverything in JARVIS — chats, memory, tasks, files, settings and the vault — is shared by everyone who signs in. A login decides who may open it.", { title: "Turn the login on?", okText: "Turn it on" }))) return;
+      try { await accessCall("POST", "/api/access/login", { enabled: true }); appBooted = false; location.reload(); } catch (e) { uiModal({ title: "Could not turn the login on", body: e.message, noCancel: true }); }
+      return;
+    }
+    const v = await uiModal({ title: "Turn the login off?", danger: true, okText: "Turn the login off",
+      body: "Every user and password is removed, and JARVIS opens straight away for anyone who can reach it. Nothing else changes — chats, memory, files and settings stay as they are." + (net.published || net.allow ? "\n\n⚠ Network access is on: with the login off, anyone on your network can use JARVIS." : "") + "\n\nTurning the login on again later starts over with one new user.",
+      fields: [{ id: "word", label: "Type DISABLE to confirm" }],
+      onOk: async (f) => { if (f.word.trim() !== "DISABLE") return "Type DISABLE (in capitals) to confirm."; await accessCall("POST", "/api/access/login", { enabled: false, confirm: "DISABLE" }); } });
+    if (v) { appBooted = false; location.reload(); }
+  };
+  $("cfg-access-hint").innerHTML = on
+    ? `<b>Forgot a password?</b> Another user can set a new one here. If nobody can sign in, delete <code>${esc(a.password_file_on_host)}</code> in the JARVIS folder and reload: you create one login again and add the others back. Nothing else is touched. Restarting or reloading JARVIS signs everyone out. The terminal client (<code>./JARVIS.sh --terminal</code>, <code>--prompt</code>) runs on this computer and needs no login.`
+    : "";
+  // -- users
+  $("cfg-users-wrap").hidden = !on;
+  if (!on) return;
+  let users = []; try { users = await accessCall("GET", "/api/users"); } catch (e) { $("cfg-users").innerHTML = `<div class="acc-user">${esc(e.message)}</div>`; return; }
+  $("cfg-users").innerHTML = users.map((u) => `<div class="acc-user" data-user="${esc(u.name)}"><b>${esc(u.name)}${u.isYou ? '<span class="acc-tag">you</span>' : ""}</b>${u.isYou
+    ? `<button type="button" class="ghost" data-act="mine">Change my password</button>`
+    : `<button type="button" class="ghost" data-act="pw" aria-label="Reset password for ${esc(u.name)}">Reset password</button><button type="button" class="ghost" data-act="remove" aria-label="Remove ${esc(u.name)}">Remove</button>`}</div>`).join("");
+  $("cfg-users").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
+    const name = b.closest("[data-user]").dataset.user, act = b.dataset.act;
+    if (act === "mine") {
+      await uiModal({ title: "Change my password", okText: "Change password", body: "You stay signed in here; your other devices are signed out.",
+        fields: [{ id: "cur", label: "Current password", type: "password", current: true }, ...twoPasswords("New password")],
+        onOk: async (f) => { mustMatch(f); await accessCall("POST", "/api/auth/password", { currentPassword: f.cur, newPassword: f.pw }); } });
+    } else if (act === "pw") {
+      await uiModal({ title: "Reset the password for " + name, okText: "Save password", body: "They are signed out everywhere and use the new password from now on.",
+        fields: twoPasswords("New password"), onOk: async (f) => { mustMatch(f); await accessCall("PUT", "/api/users/" + encodeURIComponent(name) + "/password", { password: f.pw }); } });
+    } else if (act === "remove") {
+      const v = await uiModal({ title: "Remove " + name + "?", danger: true, okText: "Remove user", body: name + " can no longer sign in and is signed out everywhere. Nothing in JARVIS is deleted — everything is shared.",
+        fields: [{ id: "word", label: "Type DELETE to confirm" }],
+        onOk: async (f) => { if (f.word.trim() !== "DELETE") return "Type DELETE (in capitals) to confirm."; await accessCall("DELETE", "/api/users/" + encodeURIComponent(name), { confirm: "DELETE" }); } });
+      if (v) renderAccess();
+    }
+  }));
+  $("cfg-user-add").onclick = async () => {
+    const v = await uiModal({ title: "Add user", okText: "Add user", body: "They sign in with this name and password and share everything in JARVIS with you.",
+      fields: [{ id: "name", label: "Login name" }, ...twoPasswords("Password")],
+      onOk: async (f) => { mustMatch(f); await accessCall("POST", "/api/users", { loginName: f.name, password: f.pw }); } });
+    if (v) renderAccess();
+  };
+}
 
 // ===== Config tab: full JARVIS_CONFIG.json + JARVIS_SECRETS.json editor =====
 // Hybrid editor: friendly fields and the raw JSON stay in sync (JSON is canonical at
@@ -1720,6 +1881,8 @@ const CFG_FIELDS = [
   ["cfg-shared-ro", "shared.read_only_dir", "str"],
   ["cfg-shared-rw", "shared.read_write_dir", "str"],
   ["cfg-sec-hosts", "security.allowed_hosts", "csv"],
+  ["cfg-net-allow", "server.allow_network", "bool"],
+  ["cfg-session-hours", "security.session_hours", "num"],
   ["cfg-backups-retain", "backups.retain", "num"],
   ["cfg-auto-backup", "backups.auto.enabled", "bool"],
   ["cfg-auto-backup-hours", "backups.auto.every_hours", "num"],
@@ -2019,6 +2182,7 @@ async function loadConfig() {
   loadActivePrompts();     // fill the master/system editor from the active (default) set
   renderRawConfig();
   renderRawSecrets();
+  renderAccess();          // network + login status, users
 }
 
 async function saveConfig() {
@@ -2036,7 +2200,7 @@ async function saveConfig() {
     });
     const d = await r.json();
     if (!r.ok) { result.className = "cfg-result err"; result.textContent = "Save failed: " + (d.error || r.status); return; }
-    cfgObj = config; secretsObj = secrets; populateStructured();
+    cfgObj = config; secretsObj = secrets; populateStructured(); renderAccess();
     // Refresh the header badge from the canonical config so it reflects the just-saved model. In
     // multi mode publicConfig() reports the CHAT-tier model (always present), so the badge stays
     // accurate even though the header has no per-tier display. (Without this the badge kept its

@@ -414,7 +414,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .modal-card h4 { margin: 0 0 8px; }
 .modal-body { color: var(--muted); font-size: .88rem; white-space: pre-wrap; margin-bottom: 12px; }
 .modal-body .st-list { display: flex; flex-direction: column; gap: 6px; }
-.modal-card input[type="text"], .modal-card textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px; font: inherit; margin-bottom: 12px; }
+.modal-card input[type="text"], .modal-card input[type="password"], .modal-card textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 10px; font: inherit; margin-bottom: 12px; }
 .modal-card textarea { min-height: 90px; resize: vertical; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .modal-actions button { border-radius: 8px; padding: 7px 14px; cursor: pointer; font: inherit; }
@@ -483,3 +483,38 @@ html[data-theme="light"] .modal-ok { color: #fff; }
 /* --- Activity media previews (UI-11) --- */
 .entry img.e-media { display: block; max-width: 100%; max-height: 180px; border-radius: 8px; border: 1px solid var(--edge); margin-top: 6px; cursor: zoom-in; }
 .entry img.e-media.full { max-height: none; cursor: zoom-out; }
+
+/* ---------- login screen, password boxes with an eye button, Access & users ---------- */
+.auth-screen { position: fixed; inset: 0; z-index: 400; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 24px; overflow: auto; }
+.auth-card { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--edge); border-radius: 14px; padding: 26px 28px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 18px 48px rgba(0,0,0,.45); }
+.auth-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .04em; }
+.auth-card h1 { font-size: 1.35rem; margin: 10px 0 0; }
+.auth-card p { margin: 0 0 6px; color: var(--muted); font-size: .82rem; line-height: 1.5; }
+.auth-card label { font-size: .76rem; color: var(--muted); margin-top: 6px; }
+.auth-card input, .pw input { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--edge); border-radius: 8px; padding: 9px 10px; font: inherit; }
+.auth-card input:focus, .pw input:focus { outline: none; border-color: var(--accent); }
+.auth-help { font-size: .72rem; color: var(--muted); }
+.auth-err, .modal-err { border: 1px solid var(--danger); color: var(--danger); border-radius: 8px; padding: 7px 10px; font-size: .8rem; }
+.modal-err { margin-bottom: 12px; }
+.auth-go { margin-top: 10px; background: var(--accent); border: 1px solid var(--accent); color: #04222e; font-weight: 700; border-radius: 8px; padding: 9px 14px; cursor: pointer; font: inherit; font-weight: 700; }
+.auth-go:disabled { opacity: .5; cursor: default; }
+.auth-foot { font-size: .72rem !important; text-align: center; margin-top: 6px !important; }
+.pw { position: relative; display: block; }
+.pw input { padding-right: 40px; }
+.modal-card .pw { margin-bottom: 12px; }
+.modal-card .pw input { margin-bottom: 0; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 32px; height: 30px; display: inline-flex; align-items: center; justify-content: center; background: none; border: none; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.pw-eye:hover { color: var(--text); background: rgba(127,127,127,.15); }
+.pw-eye .slash { display: none; } .pw-eye[aria-pressed="true"] .slash { display: inline; }
+.modal-choice { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--edge); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; }
+.acc-login { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--edge); border-radius: 8px; padding: 9px 11px; margin: 4px 0 10px; font-size: .8rem; }
+.acc-login > span:nth-child(2) { flex: 1 1 200px; }
+.acc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--edge); flex: none; } .acc-login.on .acc-dot { background: #3ddc84; }
+.acc-users { border: 1px solid var(--edge); border-radius: 8px; margin: 4px 0 8px; }
+.acc-user { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 11px; border-top: 1px solid var(--edge); font-size: .82rem; } .acc-user:first-child { border-top: none; }
+.acc-user b { flex: 1 1 120px; font-weight: 600; }
+.acc-tag { font-size: .62rem; background: rgba(54,211,255,.14); color: var(--accent); border-radius: 20px; padding: 2px 8px; margin-left: 6px; font-weight: 500; }
+.acc-warn { border: 1px solid var(--gold); color: var(--gold); border-radius: 8px; padding: 7px 10px; font-size: .76rem; margin: 2px 0 10px; }
+.acc-urls code { display: block; }
+.desktop-remote { padding: 18px; max-width: 60ch; }
+

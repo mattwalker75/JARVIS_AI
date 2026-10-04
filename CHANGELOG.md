@@ -9,6 +9,35 @@ infrastructure, security, documentation, or test-policy changes.
 ## [Unreleased]
 
 ### Added
+- 2026-10-04: **Optional login with several users, and a network switch** — Config → Access &
+  users. Off by default; nothing changes for a single local user.
+  - **Login.** *Turn the login on…* asks for the first login name and password; after that
+    JARVIS opens on a sign-in screen. Every user can add a user, reset another user's
+    password, change their own and remove another user. **Everything in JARVIS stays shared**
+    (chats, memory, tasks, files, settings, the vault) — a login only decides who may open it.
+    *Turn the login off…* (type DISABLE) removes every user and password.
+  - Passwords need 8+ characters (an eye button on every password box) and are stored as salted
+    scrypt hashes in `data/.password`, owner-only. Delete that file to reset every password;
+    nothing else is touched. A restart or `--reload` signs everyone out; removing a user or
+    changing a password ends that user's sessions; sign-in attempts are limited to 10 per 5 minutes.
+  - The login covers every `/api` route, the Markdown viewer and the chat WebSocket. The
+    terminal client (`--terminal`, `--prompt`) runs on this computer and needs no login.
+  - **Network.** *Allow other devices on my network* (`server.allow_network`), applied by
+    `./JARVIS.sh --reload`, publishes the chat UI's port to your network; `--start`, `--reload`
+    and `--status` say where to open it and warn when it is on with the login off. The
+    workbench desktop and preview ports always stay on this computer, and the Workbench tab
+    says so when opened from another device. *Other names for this computer*
+    (`security.allowed_hosts`) is where a Tailscale `…ts.net` name goes.
+  - No new packages (Node's own crypto), so the app image does not need rebuilding.
+    New: `app/src/auth.js`, `app/test/auth.test.js` (79 checks), `/api/auth/*`, `/api/access`,
+    `/api/users`; `docker-compose.yml` publishes the app port on `${APP_BIND}`.
+
+### Changed
+- 2026-10-04: The Host/Origin guard now requires a browser's `Origin` to be the same site as
+  the page it calls (localhost pages on other ports still pass, as before), and the full-config
+  editor can no longer change `security.login_enabled` or `security.password_file`.
+
+### Added
 - 2026-08-31: **MLX vision-language support via mlx-vlm, routed automatically.** `mlx-lm` is
   text-only and implements a fixed architecture list; vision-language models
   (`image-text-to-text`) are implemented in [`mlx-vlm`](https://github.com/Blaizzy/mlx-vlm), which

@@ -152,8 +152,19 @@ services:
       # the direct socket: delete these two vars and re-add the docker.sock mount below.
       DOCKER_PROXY_HOST: jarvis-docker-proxy
       DOCKER_PROXY_PORT: "2375"
+      # Network access + login (Config → Access & users). ./JARVIS.sh sets APP_BIND from
+      # server.allow_network and tells the app this computer's addresses and names.
+      JARVIS_APP_BIND: ${APP_BIND:-127.0.0.1}
+      JARVIS_PUBLIC_PORT: ${APP_PORT:-8110}
+      JARVIS_HOST_ADDRS: ${JARVIS_HOST_ADDRS:-}
+      JARVIS_HOSTNAMES: ${JARVIS_HOSTNAMES:-}
+      # The terminal client (--terminal / --prompt) runs inside this container and reaches the
+      # app on the container's own loopback, which nothing outside can use — so it needs no login.
+      JARVIS_TRUST_LOOPBACK: "1"
     ports:
-      - "127.0.0.1:${APP_PORT:-8110}:80"
+      # 127.0.0.1 = this computer only (default); 0.0.0.0 when "Allow other devices on my
+      # network" is on. The workbench desktop and preview ports above stay on 127.0.0.1.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8110}:80"
     volumes:
       - ./app:/usr/src/app:ro   # app can't rewrite its own code; host edits still live-reload (container reads them)
       - /usr/src/app/node_modules

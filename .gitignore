@@ -17,6 +17,9 @@ backups/*.sql
 
 # Scheduler task/notification state + automatic memory/workspace backup tarballs
 data/*.json
+# the login's password hashes (Config → Access & users) — never commit
+data/.password
+data/.password.tmp
 data/sessions/
 data/backups/
 
