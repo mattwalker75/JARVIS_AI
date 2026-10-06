@@ -3,15 +3,17 @@
 // tool servers can be plugged into JARVIS without writing integration code. Configure:
 //   "mcp": { "servers": [ { "name": "github", "url": "http://host:port/mcp",
 //                           "headers": {"Authorization": "Bearer ..."} } ] }
-// Each server's tools are registered as mcp_<server>_<tool> at startup (restart to
-// pick up config changes). HTTP transport only — stdio servers are out of scope.
+// Each server's tools are registered as mcp_<server>_<tool> at startup; saving the config
+// (or POST /api/tools/reload) re-handshakes the server list, so no restart is needed. An
+// expired session is re-initialized automatically. HTTP transport only — stdio servers are
+// out of scope.
 const { config } = require("./config");
 
 const ext = [];          // [{server, tool, def}]
 const sessions = {};     // server name -> Mcp-Session-Id
 let rpcId = 1;
 
-async function rpc(server, method, params) {
+async function rpc(server, method, params, retried) {
   const headers = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
@@ -25,6 +27,14 @@ async function rpc(server, method, params) {
   });
   const sid = r.headers.get("mcp-session-id");
   if (sid) sessions[server.name] = sid;
+  // 404 with a session id = the server forgot our session (it restarted, or the session
+  // expired). Per the MCP spec: start a new session and send the request once more.
+  if (r.status === 404 && headers["Mcp-Session-Id"] && !retried && method !== "initialize") {
+    try { await r.body?.cancel(); } catch (_) {}
+    delete sessions[server.name];
+    await handshake(server);
+    return await rpc(server, method, params, true);
+  }
   const ct = r.headers.get("content-type") || "";
   let msg;
   if (ct.includes("text/event-stream")) {
@@ -52,23 +62,34 @@ async function notify(server, method) {
   }).catch(() => {});
 }
 
+async function handshake(s) {
+  await rpc(s, "initialize", {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "jarvis", version: "1.0" },
+  });
+  await notify(s, "notifications/initialized");
+}
+
 // Connect to each configured server and collect its tools. Failures are logged and
 // skipped — a dead MCP server must never block JARVIS from starting.
+// Each init/reload is a numbered generation: the startup handshake and a reload (config
+// save) can overlap, and only the NEWEST one may publish its tools — an older one returns
+// null instead of adding a second copy of every tool.
+let generation = 0;
 async function init() {
+  const gen = ++generation;
   const servers = (config.mcp && config.mcp.servers) || [];
+  const found = [];
   for (const s of servers) {
     if (!s || !s.name || !s.url) continue;
     try {
-      await rpc(s, "initialize", {
-        protocolVersion: "2025-03-26",
-        capabilities: {},
-        clientInfo: { name: "jarvis", version: "1.0" },
-      });
-      await notify(s, "notifications/initialized");
+      await handshake(s);
       const res = await rpc(s, "tools/list");
       for (const t of (res && res.tools) || []) {
         const name = `mcp_${s.name}_${t.name}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-        ext.push({ server: s, tool: t.name, def: { type: "function", function: {
+        if (found.some((x) => x.def.function.name === name)) { console.log(`MCP: skipped '${s.name}' tool '${t.name}' — the name ${name} is already taken`); continue; }
+        found.push({ server: s, tool: t.name, def: { type: "function", function: {
           name,
           description: `[external: ${s.name}] ${(t.description || t.name).slice(0, 900)}`,
           parameters: t.inputSchema || { type: "object", properties: {} },
@@ -78,7 +99,11 @@ async function init() {
     } catch (e) {
       console.log(`MCP: server '${s.name}' unavailable: ${e.message}`);
     }
+    if (gen !== generation) return null;   // a newer reload started — let it publish
   }
+  if (gen !== generation) return null;
+  ext.length = 0;
+  ext.push(...found);
   return ext.map((t) => t.def);
 }
 
@@ -86,7 +111,6 @@ async function init() {
 // rebuild the tool list. Used by the hot-reload path — a config save no longer needs an
 // app restart to pick up added/removed MCP servers.
 async function reload() {
-  ext.length = 0;
   for (const k of Object.keys(sessions)) delete sessions[k];
   return await init();
 }

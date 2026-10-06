@@ -2,7 +2,8 @@
 // Email tools: read + send using the USER'S OWN account, with credentials from the
 // secrets vault. Save a secret named "email" with fields:
 //   username, password, imap_host, smtp_host  (optional: imap_port, smtp_port, from)
-// For Gmail/Outlook use an app password. Nothing here creates accounts.
+// — in chat the model does this with set_secret (it accepts all of these fields), or edit
+// JARVIS_SECRETS.json. For Gmail/Outlook use an app password. Nothing here creates accounts.
 const { ImapFlow } = require("imapflow");
 const { simpleParser } = require("mailparser");
 const nodemailer = require("nodemailer");
@@ -11,15 +12,18 @@ const { getSecrets } = require("./config");
 function creds() {
   const s = getSecrets().email;
   if (!s || !s.username || !s.password || !s.imap_host) {
-    throw new Error("no 'email' secret configured — save one with set_secret name='email' and fields {username, password, imap_host, smtp_host} (use an app password for Gmail/Outlook)");
+    throw new Error("no 'email' secret configured — save one with set_secret name='email' and fields {username, password, imap_host, smtp_host} and optionally imap_port, smtp_port, from (use an app password for Gmail/Outlook)");
   }
   return s;
 }
 
 async function withImap(fn) {
   const c = creds();
+  const port = Number(c.imap_port) || 993;
+  // Port 993 speaks TLS from the first byte; any other port (usually 143) starts plain and
+  // MUST upgrade with STARTTLS — the password is never sent unencrypted.
   const client = new ImapFlow({
-    host: c.imap_host, port: Number(c.imap_port) || 993, secure: true,
+    host: c.imap_host, port, secure: port === 993, doSTARTTLS: port === 993 ? undefined : true,
     auth: { user: c.username, pass: c.password }, logger: false,
   });
   await client.connect();
@@ -89,8 +93,10 @@ async function sendEmail(args = {}) {
   const c = creds();
   if (!c.smtp_host) throw new Error("the 'email' secret has no smtp_host — add it with set_secret to enable sending");
   const port = Number(c.smtp_port) || 465;
+  // 465 = TLS from the start; any other port (587/25) must upgrade with STARTTLS (requireTLS)
+  // or the send fails — never fall back to sending the password in the clear.
   const transport = nodemailer.createTransport({
-    host: c.smtp_host, port, secure: port === 465,
+    host: c.smtp_host, port, secure: port === 465, requireTLS: port !== 465,
     auth: { user: c.username, pass: c.password },
   });
   const info = await transport.sendMail({ from: c.from || c.username, to, subject, text: String(body) });

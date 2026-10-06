@@ -1,6 +1,7 @@
 name: jarvis
 
-# JARVIS multi-container stack. Everything binds to 127.0.0.1 (localhost only).
+# JARVIS multi-container stack. Host ports bind to 127.0.0.1 (this computer only), except the
+# app's own port, which binds to 0.0.0.0 when "Allow other devices on my network" is on.
 #
 #   jarvis-app        Node.js backend + JS frontend (the orchestrator)        :8110
 #   jarvis-memory     Mem0 semantic long-term memory (vector store)           internal-only
@@ -47,6 +48,11 @@ services:
       PGID: "1000"
       TZ: ${TZ:-America/Los_Angeles}
       TITLE: JARVIS Workbench
+    # ONLY the workbench network: the LLM has a root shell in here, so it must not be able to
+    # reach the Docker API proxy (which can create/exec containers) or the auth-less memory store
+    # on the backend network. jarvis-app is on both networks and reaches the workbench's preview
+    # ports by name (fetch_url self-check).
+    networks: [workbench]
     ports:
       - "127.0.0.1:${WORKBENCH_PORT:-8111}:3000"
       - "127.0.0.1:9101-9150:9101-9150"   # web-app preview ports (serve_app tool)
@@ -73,6 +79,7 @@ services:
     # Uncomment below to poke it directly for debugging.
     # ports:
     #   - "127.0.0.1:${MEMORY_PORT:-8120}:8000"
+    networks: [backend]
     expose:
       - "8000"
     volumes:
@@ -89,6 +96,8 @@ services:
   # path-allowlisting proxy (e.g. wollomatic/socket-proxy) restricted to the workbench exec routes.
   jarvis-docker-proxy:
     image: tecnativa/docker-socket-proxy:latest
+    # Backend network only — never reachable from the workbench (see jarvis-workbench).
+    networks: [backend]
     container_name: jarvis-docker-proxy
     restart: unless-stopped
     environment:
@@ -116,6 +125,7 @@ services:
     container_name: jarvis-searxng
     restart: unless-stopped
     profiles: ["search"]
+    networks: [backend]
     volumes:
       - ./searxng:/etc/searxng
     expose:
@@ -134,6 +144,7 @@ services:
     # No host port is published (uncomment below to poke it directly for debugging).
     # ports:
     #   - "127.0.0.1:5111:5000"
+    networks: [backend]
     expose:
       - "5000"
 
@@ -143,6 +154,8 @@ services:
       dockerfile: Dockerfile
     container_name: jarvis-app
     restart: unless-stopped
+    # A tiny init as PID 1 forwards stop signals, so `docker stop` / --reload don't wait 10 s.
+    init: true
     depends_on:
       jarvis-piper:
         condition: service_started
@@ -153,10 +166,16 @@ services:
     # don't need it.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # The only service on both networks: it talks to the sidecars on "backend" and to the
+    # workbench's preview ports on "workbench".
+    networks: [backend, workbench]
     environment:
       JARVIS_CONFIG_FILE: /cfg/JARVIS_CONFIG.json
       JARVIS_TASKS_FILE: /data/tasks.json
       PORT: "80"
+      # This computer's time zone (./JARVIS.sh passes it in), so "remind me at 5pm" means 5pm here
+      # and the model is told the local time — without it the app ran on UTC.
+      TZ: ${TZ:-America/Los_Angeles}
       # Reach the Docker daemon ONLY through the filtered proxy (not the raw socket). To revert to
       # the direct socket: delete these two vars and re-add the docker.sock mount below.
       DOCKER_PROXY_HOST: jarvis-docker-proxy
@@ -186,6 +205,12 @@ services:
       - ./Prompts:/Prompts   # active + saved system/master prompt files (editable outside the app)
       - ./LLM_WORKSPACE:/LLM_WORKSPACE   # so file tools (list_dir/read_file/analyze_image/write_file) can reach the AI's workbench build area
       # Raw docker.sock mount removed — the app now uses jarvis-docker-proxy (see env above).
+
+networks:
+  # Sidecars the app uses (Docker API proxy, memory, voice, search). The workbench is NOT on it.
+  backend:
+  # The app <-> the workbench (preview ports). Nothing else is on it.
+  workbench:
 
 volumes:
   jarvis_workbench_home:

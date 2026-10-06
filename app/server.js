@@ -6,7 +6,7 @@ const fs = require("fs");
 const { WebSocketServer } = require("ws");
 
 const os = require("os");
-const { config, loadError, publicConfig, systemPrompt, setSetting, setProtected, readFullConfig, writeFullConfig, workbenchEnabled } = require("./src/config");
+const { config, loadError, configProblem, DEFAULT_CONTEXT_WINDOW, publicConfig, systemPrompt, setSetting, setProtected, readFullConfig, writeFullConfig, workbenchEnabled } = require("./src/config");
 const auth = require("./src/auth");
 const llm = require("./src/llm");
 const tools = require("./src/tools");
@@ -14,6 +14,7 @@ const scheduler = require("./src/scheduler");
 const chatlog = require("./src/chatlog");
 const tts = require("./src/tts");
 const mdview = require("./src/mdview");
+const log = require("./src/logger");
 
 const app = express();
 
@@ -74,7 +75,15 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "25mb" }));   // roomy enough for base64 file uploads
+// Roomy enough for a 20MB file upload once base64 (+33%) and JSON-wrapped; /api/upload itself
+// enforces the 20MB file limit. Body errors answer in JSON (not Express's HTML error page), so
+// the page can show a plain sentence.
+app.use(express.json({ limit: "34mb" }));
+app.use((err, _req, res, next) => {
+  if (err && (err.type === "entity.too.large" || err.status === 413)) return res.status(413).json({ error: "File too large (20MB max)" });
+  if (err && err.type === "entity.parse.failed") return res.status(400).json({ error: "Request body is not valid JSON" });
+  next(err);
+});
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/healthz", (_req, res) => res.type("text").send("ok"));
@@ -83,17 +92,53 @@ app.get("/healthz", (_req, res) => res.type("text").send("ok"));
 // Open routes: the page must be able to ask "is there a login, am I signed in?" and to
 // sign in. Everything else under /api, the Markdown viewer and the chat WebSocket need a
 // signed-in user once the login is on (see the gate below and verifyClient further down).
+// A config file that can't be read means the login settings are unknown too — fail CLOSED:
+// every API (and the chat socket, see verifyClient) answers with the plain problem sentence
+// until the file is fixed and the app reloaded. /api/auth/me stays open so the page can say why.
+app.use(["/api", "/view"], (req, res, next) => {
+  if (!loadError || (req.baseUrl === "/api" && req.path === "/auth/me")) return next();
+  res.status(503).json({ error: configProblem() });
+});
 const say = (res, fn) => { try { const out = fn(); res.json(out === undefined ? { ok: true } : out); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } };
-// At most 10 password attempts per address in 5 minutes.
-const attempts = new Map();
+// At most 10 FAILED password attempts per address + login name in 5 minutes (and 50 per
+// address across all names, so cycling names doesn't help a guesser). Successful sign-ins
+// don't count: each attempt is noted up front and taken back when it succeeds, so a burst of
+// parallel guesses is still held to the limit. Old entries are pruned.
+const attempts = new Map();   // "address|login name" (and "address|*") -> times of failed attempts
+const ATTEMPT_WINDOW_MS = 5 * 60 * 1000;
+let attemptsPrunedAt = 0;
+function pruneAttempts(now) {
+  attemptsPrunedAt = now;
+  for (const [k, list] of attempts) {
+    const keep = list.filter((t) => now - t < ATTEMPT_WINDOW_MS);
+    if (keep.length) attempts.set(k, keep); else attempts.delete(k);
+  }
+}
 function limiter(req, res, next) {
   if (process.env.JARVIS_NO_RATE_LIMIT) return next();
-  const now = Date.now(), key = (req.socket && req.socket.remoteAddress) || "?";
-  const recent = (attempts.get(key) || []).filter((t) => now - t < 5 * 60 * 1000);
-  if (recent.length >= 10) return res.status(429).json({ error: "Too many attempts. Wait five minutes and try again." });
-  recent.push(now); attempts.set(key, recent); next();
+  const now = Date.now();
+  if (now - attemptsPrunedAt > 60 * 1000 || attempts.size > 5000) pruneAttempts(now);
+  const addr = (req.socket && req.socket.remoteAddress) || "?";
+  const b = req.body || {};
+  const who = String(b.loginName || auth.current(req) || "").trim().toLowerCase().slice(0, 64);
+  const keys = [addr + "|" + who, addr + "|*"], caps = [10, 50];
+  const lists = keys.map((k) => (attempts.get(k) || []).filter((t) => now - t < ATTEMPT_WINDOW_MS));
+  if (lists.some((l, i) => l.length >= caps[i])) return res.status(429).json({ error: "Too many attempts. Wait five minutes and try again." });
+  lists.forEach((l, i) => { l.push(now); attempts.set(keys[i], l); });
+  res.on("finish", () => {
+    if (res.statusCode >= 400) return;   // a failure stays counted
+    for (const k of keys) {
+      const l = attempts.get(k); if (!l) continue;
+      const at = l.lastIndexOf(now); if (at >= 0) l.splice(at, 1);
+      if (!l.length) attempts.delete(k);
+    }
+  });
+  next();
 }
-app.get("/api/auth/me", (req, res) => res.json(auth.state(req)));
+app.get("/api/auth/me", (req, res) => {
+  if (loadError) return res.json({ status: "config_error", error: configProblem() });
+  res.json(auth.state(req));
+});
 app.post("/api/auth/setup", limiter, (req, res) => say(res, () => { const b = req.body || {}; return { status: "authenticated", loginName: auth.setup(res, b.loginName, b.password) }; }));
 app.post("/api/auth/login", limiter, (req, res) => say(res, () => { const b = req.body || {}; return { status: "authenticated", loginName: auth.login(res, b.loginName, b.password) }; }));
 app.post("/api/auth/logout", (_req, res) => { auth.endSession(res); res.json({ ok: true }); });
@@ -156,10 +201,14 @@ app.get("/api/context-window", async (_req, res) => {
   const provider = String(llm.provider || "").toLowerCase();
   const base = (llm.base_url || "").replace(/\/+$/, "");
   const numCtx = Number((cfg.ollama || {}).context_length);
-  const isLocal = provider === "ollama" || provider === "local" || /ollama|litellm|11434|localhost|127\.0\.0\.1|host\.docker/.test(base);
-  if (isLocal && numCtx > 0) return res.json({ context_window: numCtx, source: "ollama num_ctx" });
-  // Cloud (e.g. via the LiteLLM gateway): ask the endpoint for the model's real window.
-  try {
+  // ollama.context_length is Ollama's num_ctx, so it only describes a model JARVIS talks to
+  // directly on Ollama (provider ollama/local, or an Ollama :11434 URL). Behind a gateway
+  // (LiteLLM, a cloud provider) the model may be anything — ask the gateway instead.
+  let port = ""; try { port = new URL(base).port; } catch (_) {}
+  const isOllama = provider === "ollama" || provider === "local" || port === "11434";
+  if (isOllama && numCtx > 0) return res.json({ context_window: numCtx, source: "ollama num_ctx" });
+  // Gateway / cloud (e.g. LiteLLM): ask the endpoint for the model's real window.
+  if (!isOllama && base) try {
     const headers = llm.api_key && !["ollama", "local"].includes(provider) ? { Authorization: "Bearer " + llm.api_key } : {};
     const r = await fetch(base.replace(/\/v1$/, "") + "/model/info", { headers, signal: AbortSignal.timeout(4000) });
     if (r.ok) {
@@ -172,7 +221,7 @@ app.get("/api/context-window", async (_req, res) => {
       if (Number(cw) > 0) return res.json({ context_window: Number(cw), source: "model/info" });
     }
   } catch (_) {}
-  res.json({ context_window: numCtx > 0 ? numCtx : 8192, source: "default" });
+  res.json({ context_window: DEFAULT_CONTEXT_WINDOW, source: "default" });
 });
 
 // Exercises the LLM's three capabilities without needing a model (offline check).
@@ -254,7 +303,7 @@ app.post("/api/summarize", async (req, res) => {
   if (all.length < 2) return res.json({ summary: "" });
   const messages = [
     { role: "system", content: "You compress a conversation so it can CONTINUE with less context. Write a concise but COMPLETE summary: the user's goal(s), key decisions and facts established, files/code created or changed and their paths, what is done, and what remains to do. Use terse bullet points grouped under short headings. This summary REPLACES the earlier messages, so include everything needed to continue seamlessly — omit nothing important. No preamble, no sign-off, no commentary." },
-    ...all.slice(-40),
+    ...budgetHistory(all),   // the same token budget a chat turn gets — a long chat must not overflow the model
     { role: "user", content: "Summarize the conversation so far per your instructions, so we can continue with a smaller context." },
   ];
   try { res.json({ summary: await llm.chat({ messages, tier: "smart", noTools: true }) }); }
@@ -278,12 +327,13 @@ app.get("/api/prompts/:name", (req, res) => {
 });
 app.post("/api/prompts/:name", (req, res) => {
   const n = prompts.safeName(req.params.name); if (!n) return res.status(400).json({ error: "invalid name" });
+  if (n.toLowerCase() === "stock") return res.status(400).json({ error: "The 'stock' set is the reference copy and can't be overwritten. Save under another name." });
   const b = req.body || {};
   try { prompts.writeSet(n, b.master, b.system); res.json({ saved: n, files: [`${n}_master.prompt`, `${n}_system.prompt`] }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete("/api/prompts/:name", (req, res) => {
-  const n = prompts.safeName(req.params.name); if (!n || n === "default" || n === "stock") return res.status(400).json({ error: "the active 'default' and reference 'stock' sets can't be deleted" });
+  const n = prompts.safeName(req.params.name); if (!n || ["default", "stock"].includes(n.toLowerCase())) return res.status(400).json({ error: "the active 'default' and reference 'stock' sets can't be deleted" });
   try { prompts.deleteSet(n); res.json({ deleted: n }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -311,7 +361,7 @@ app.post("/api/autopilot/dismiss", (_req, res) => res.json(autopilot.dismiss()))
 // ask the questions it needs (scope, architecture, storage, output, edge cases). No tools.
 app.post("/api/autopilot/clarify", async (req, res) => {
   const objective = String((req.body || {}).objective || "").trim();
-  if (!objective) return res.json({ ready: true, questions: "" });
+  if (!objective) return res.json({ ready: true, questions: [], questionsText: "" });
   const messages = [
     { role: "system", content: "You are about to carry out a task AUTONOMOUSLY and UNATTENDED — the user cannot answer questions once you start. FIRST, review the request and ask the clarifying questions you need to build the RIGHT thing: scope and must-have features; tech stack / ARCHITECTURE (e.g. a single self-contained HTML file vs. a client + backend server, what persistence/storage, any frameworks); where the finished output should go; constraints, preferences, and important edge cases. Ask them as a CONCISE numbered list — group related questions, and don't over-ask about trivia. For almost ANY build/creation task there is at least one decision worth confirming (usually the ARCHITECTURE and WHERE the output should be saved) — ask it rather than assuming. Reply with EXACTLY the word READY and nothing else ONLY if the request is genuinely trivial or so fully specified that you would make no notable assumptions." },
     { role: "user", content: objective },
@@ -367,13 +417,17 @@ app.post("/api/memories/consolidate", async (_req, res) => {
 // Run the memory+workspace backup pair NOW (the scheduled auto-backup's engine).
 app.post("/api/backup/run", async (_req, res) => {
   try { res.json({ results: await require("./src/autobackup").runBackups() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { res.status(e.status || 500).json({ error: e.message }); }
 });
 
 // REST chat for external automation (scripts, cron, Shortcuts, other machines via a
 // tunnel): same brain as the WS chat, one request/response. Body:
 //   { "message": "...", "messages": [...optional history...], "tier": "chat", "persona": "work" }
 app.post("/api/chat", async (req, res) => {
+  // The caller hanging up (Ctrl-C, a timeout) stops the turn — tools included. res "close" (not
+  // req "close", which fires as soon as the body has been read) with the reply not yet sent.
+  const ac = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) ac.abort(); });
   try {
     const b = req.body || {};
     const hist = (Array.isArray(b.messages) ? b.messages : [])
@@ -383,10 +437,11 @@ app.post("/api/chat", async (req, res) => {
     if (!hist.length || hist[hist.length - 1].role !== "user") return res.status(400).json({ error: "provide 'message' (string) and/or 'messages' ending with a user turn" });
     chatlog.record("user", hist[hist.length - 1].content);
     const planKey = b.chatId ? "chat_" + require("./src/planner").safeKey(b.chatId) : "default";
-    const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt(b.persona) }, ...budgetHistory(hist)], tier: b.tier, planKey });
+    const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt(b.persona) }, ...budgetHistory(hist)], tier: b.tier, planKey, signal: ac.signal });
+    if (ac.signal.aborted) return;   // the caller is gone — nothing to answer
     chatlog.record("assistant", reply);
     res.json({ reply });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { if (!ac.signal.aborted) res.status(500).json({ error: e.message }); }
 });
 
 // Token-budgeted history: the fixed 40-message cap ignores SIZE — a few huge pastes can
@@ -425,10 +480,16 @@ app.get("/api/config/full", (_req, res) => {
 });
 app.post("/api/config/full", (req, res) => {
   try {
-    const { config: c, secrets: s } = req.body || {};
+    const { config: c, secrets: s, version } = req.body || {};
     if (c === undefined && s === undefined) return res.status(400).json({ error: "nothing to save" });
     const wbWas = workbenchEnabled();
-    const r = writeFullConfig({ config: c, secrets: s });
+    let r;
+    try { r = { ...writeFullConfig({ config: c, secrets: s, version }) }; }
+    catch (e) {
+      if (e.code === "stale") return res.status(409).json({ error: e.message, code: "stale" });
+      throw e;
+    }
+    r.version = require("./src/config").fullConfigVersion();
     // writeFullConfig mutates the in-memory config in place, so changes apply on the next turn —
     // no --reload for ordinary settings (base_url/model/tiers/params/prompts/log level, etc.).
     // Hot-reload the runtime-added tools too, so added/removed MCP servers and custom tools
@@ -484,7 +545,7 @@ app.post("/api/stt", async (req, res) => {
   if (!workbenchEnabled()) return res.status(409).json({ error: "Local speech input uses the Linux workbench, which is turned off (Config → Workbench & shared folders). Switch the speech engine to Browser." });
   if (sttInFlight) return res.status(409).json({ error: "a transcription is already running — try again in a moment" });
   const { dataUrl, language } = req.body || {};
-  const m = /^data:(audio|video)\/[\w.+-]+;base64,(.+)$/s.exec(String(dataUrl || ""));
+  const m = /^data:(audio|video)\/[\w.+-]+(?:;[^;,]*)*?;base64,(.+)$/s.exec(String(dataUrl || ""));   // allows ;codecs=… parameters
   if (!m) return res.status(400).json({ error: "expected a base64 audio data URL" });
   const buf = Buffer.from(m[2], "base64");
   if (buf.length > 25 * 1024 * 1024) return res.status(413).json({ error: "audio too large (25MB max)" });
@@ -505,8 +566,11 @@ app.get("/api/models", async (_req, res) => {
   try {
     const base = ((config.llm && config.llm.base_url) || "").replace(/\/+$/, "");
     if (!base) return res.json({ models: [], current: publicConfig().model });
+    // The saved endpoint with its saved key — sent exactly as llm.js sends it for a chat turn.
+    const llmCfg = config.llm || {};
+    const headers = llmCfg.api_key && !["ollama", "local"].includes(String(llmCfg.provider || "").toLowerCase()) ? { Authorization: "Bearer " + llmCfg.api_key } : {};
     try {
-      const r = await fetch(base + "/models", { signal: AbortSignal.timeout(5000) });
+      const r = await fetch(base + "/models", { headers, signal: AbortSignal.timeout(5000) });
       if (r.ok) {
         const d = await r.json();
         const names = (d.data || []).map((m) => m.id).filter(Boolean).sort();
@@ -596,11 +660,12 @@ app.post("/api/upload", (req, res) => {
   try {
     const { name, dataUrl } = req.body || {};
     if (!name || !dataUrl) return res.status(400).json({ error: "name and dataUrl are required" });
-    const m = /^data:[^;,]*;base64,(.*)$/s.exec(String(dataUrl));
+    const m = /^data:[^,]*?;base64,(.*)$/s.exec(String(dataUrl));   // allows ;charset=… and other parameters
     if (!m) return res.status(400).json({ error: "expected a base64 data URL" });
     const buf = Buffer.from(m[1], "base64");
     if (buf.length > 20 * 1024 * 1024) return res.status(413).json({ error: "file too large (20MB max)" });
-    const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, "_") || "file";
+    const safe = path.basename(String(name)).replace(/[^\w.\- ]+/g, "_").trim();
+    if (!safe || /^\.+$/.test(safe)) return res.status(400).json({ error: "That file name can't be used. Rename the file and try again." });
     const rw = (config.shared && config.shared.read_write_dir) || "/LLM_READ_WRITE_FILES";
     const dir = path.join(rw, "uploads");
     fs.mkdirSync(dir, { recursive: true });
@@ -611,8 +676,16 @@ app.post("/api/upload", (req, res) => {
     let used = 0;
     try { for (const f of fs.readdirSync(dir)) { try { used += fs.statSync(path.join(dir, f)).size; } catch (_) {} } } catch (_) {}
     if (used + buf.length > cap) return res.status(413).json({ error: `uploads folder is over its ${Math.round(cap / 1073741824)}GB budget — delete some uploads in the Files tab first` });
-    fs.writeFileSync(path.join(dir, safe), buf);
-    res.json({ path: "/LLM_READ_WRITE_FILES/uploads/" + safe, bytes: buf.length });
+    // Never overwrite an earlier upload: report.pdf, then report-1.pdf, report-2.pdf …
+    const ext = path.extname(safe), stem = ext && ext !== safe ? safe.slice(0, -ext.length) : safe;
+    let saved = null;
+    for (let n = 0; n < 1000 && !saved; n++) {
+      const candidate = n ? `${stem}-${n}${ext && ext !== safe ? ext : ""}` : safe;
+      try { fs.writeFileSync(path.join(dir, candidate), buf, { flag: "wx" }); saved = candidate; }
+      catch (e) { if (e.code !== "EEXIST") throw e; }
+    }
+    if (!saved) return res.status(409).json({ error: "Too many files with that name in uploads. Rename the file and try again." });
+    res.json({ path: "/LLM_READ_WRITE_FILES/uploads/" + saved, bytes: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -644,6 +717,7 @@ const wss = new WebSocketServer({
   verifyClient: (info, done) => {
     const req = info.req || {}; const headers = req.headers || {};
     if (!wsOriginAllowed(info.origin || headers.origin, headers.host)) return done(false, 403, "Forbidden");
+    if (loadError) return done(false, 503, "Service Unavailable");   // fail closed, like the REST API
     if (!auth.allowed(req)) return done(false, 401, "Unauthorized");
     done(true);
   },
@@ -667,13 +741,32 @@ autopilot.restore();                 // resume an Autopilot run that was in flig
 scheduler.start();
 require("./src/autobackup").start(); // scheduled memory/workspace backups (backups.auto, off by default)
 
-wss.on("connection", (ws) => {
+// A server-level socket error (e.g. the port) is logged, never left unhandled.
+wss.on("error", (e) => { console.error("WebSocket server error: " + e.message); log.error("ws", "server error: " + e.message); });
+wss.on("connection", (ws, upgradeReq) => {
+  // The upgrade request carries the session cookie; it is re-checked on every chat message, so a
+  // signed-out / removed user's open tab can't keep driving the tool loop.
+  ws._req = upgradeReq;
+  // A bad frame (invalid UTF-8, oversized, protocol error) emits "error" on the socket — without a
+  // listener that would crash the whole process. Stop this connection's turn instead.
+  ws.on("error", (e) => {
+    log.warn("ws", "connection error: " + (e && e.message));
+    try { ws._abort?.abort(); } catch (_) {}
+  });
+  // The tab closed / the network dropped: nobody is listening — stop the turn (and its tools).
+  ws.on("close", () => { try { ws._abort?.abort(); } catch (_) {} });
   ws.on("message", async (raw) => {
     let data;
     try { data = JSON.parse(raw); } catch { return; }
+    if (!data || typeof data !== "object") return;
     // Interrupt the in-flight request for this connection (Stop button / Escape key).
     if (data.type === "cancel") { if (ws._abort) { try { ws._abort.abort(); } catch (_) {} } return; }
     if (data.type !== "chat") return;
+    if (!auth.allowed(ws._req)) {
+      try { ws.send(JSON.stringify({ type: "error", error: "Your sign-in has ended. Reload the page and sign in again." })); } catch (_) {}
+      try { ws.close(4401, "Sign in again"); } catch (_) {}
+      return;
+    }
 
     // "Just stop." — if the user types a bare stop command while something is running,
     // treat it as an interrupt instead of rejecting it with the "still working" error.
@@ -683,8 +776,8 @@ wss.on("connection", (ws) => {
       const lastMsg = Array.isArray(data.messages) ? data.messages[data.messages.length - 1] : null;
       const txt = (lastMsg && typeof lastMsg.content === "string" ? lastMsg.content : "").trim();
       if (/^(stop|stop\s*it|just\s*stop|stop\s*everything|halt|abort|cancel|quit\s*it|nevermind|never\s*mind|enough)[\s.!]*$/i.test(txt)) {
+        // The running turn answers "⏹ Stopped." itself when it ends — one reply, not two.
         try { ws._abort.abort(); } catch (_) {}
-        try { ws.send(JSON.stringify({ type: "reply", text: "⏹ Stopping everything." })); } catch (_) {}
         return;
       }
     }
@@ -695,11 +788,15 @@ wss.on("connection", (ws) => {
       : [];
     const history = budgetHistory(all);   // token-budgeted cap on the context sent to the model (see budgetHistory)
     const messages = [{ role: "system", content: systemPrompt(data.persona) }, ...history];   // read live so prompt switches apply on the next turn (no restart)
-    const emit = (ev) => { try { ws.send(JSON.stringify(ev)); } catch (_) {} };
+    // Every event carries the chat tab it belongs to, so a reply still streaming when the user
+    // switches tabs lands in ITS conversation, not whichever tab is showing.
+    const chatId = typeof data.chatId === "string" && data.chatId ? data.chatId.slice(0, 120) : undefined;
+    const emit = (ev) => { try { ws.send(JSON.stringify(chatId ? { ...ev, chatId } : ev)); } catch (_) {} };
 
     // One in-flight request per connection: don't overwrite an active AbortController
     // (that would make the first request uncancelable and interleave tokens on the socket).
-    if (ws._abort) { emit({ type: "error", error: "I'm still working on your previous message — press Stop (Esc) to interrupt it first." }); return; }
+    // A "busy" event (not "error"), so the page can say so without ending the running turn.
+    if (ws._abort) { emit({ type: "busy", text: "I'm still working on your previous message — wait for it, or press Stop (Esc) to interrupt it." }); return; }
 
     // Record the new user turn so background tasks can tell whether the user is active.
     const lastUser = [...history].reverse().find((m) => m.role === "user");
@@ -729,6 +826,26 @@ const PORT = process.env.PORT || 80;
 // compose port mapping (127.0.0.1:8110:80), NOT by this bind. Set BIND_HOST=127.0.0.1 only when
 // running the app directly on a host (no container) to enforce localhost-only there too.
 const BIND_HOST = process.env.BIND_HOST || "0.0.0.0";
+// ONE shutdown path (docker stop / Ctrl-C): save what's pending, stop listening, exit. Modules
+// that keep state in memory save it on "jarvis:shutdown" (the scheduler) or are flushed here.
+// They must not install SIGTERM/SIGINT handlers themselves — any handler replaces Node's
+// default exit, which used to leave the process running until Docker killed it.
+let shuttingDown = false;
+function shutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`JARVIS app: ${sig} — saving and shutting down`);
+  try { chatlog.flush(); } catch (_) {}
+  try { process.emit("jarvis:shutdown"); } catch (_) {}
+  for (const c of wss.clients) { try { c._abort?.abort(); c.terminate(); } catch (_) {} }
+  try { wss.close(); } catch (_) {}
+  server.close(() => process.exit(0));
+  try { server.closeIdleConnections(); } catch (_) {}
+  setTimeout(() => process.exit(0), 3000).unref();   // in-flight HTTP requests get a short grace period
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 server.listen(PORT, BIND_HOST, () => {
   console.log(`JARVIS app listening on ${BIND_HOST}:${PORT} — login ${auth.enabled() ? "on" : "off"}, ${networkPublished() ? "open to other devices on the network" : "this computer only"}` + (loadError ? `  [CONFIG ERROR: ${loadError}]` : ""));
 });

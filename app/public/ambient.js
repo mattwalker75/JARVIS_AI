@@ -34,7 +34,7 @@
       '<canvas id="ambient-canvas"></canvas>' +
       '<div class="ambient-caption" id="ambient-caption"></div>' +
       '<button class="ambient-style" id="ambient-style" title="Switch between the face and the orb"></button>' +
-      '<button class="ambient-exit" id="ambient-exit" title="Exit ambient mode">✕ Exit</button>';
+      '<button class="ambient-exit" id="ambient-exit" title="Exit ambient mode (Esc)">✕ Exit</button>';
     document.body.appendChild(overlay);
     canvas = overlay.querySelector("#ambient-canvas");
     ctx = canvas.getContext("2d");
@@ -43,6 +43,11 @@
     styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setStyle(style === "face" ? "orb" : "face"); if (styleFn) styleFn(style); });
     refreshStyleBtn();
     canvas.addEventListener("click", () => { if (tapFn) tapFn(); });
+    // Escape leaves the ambient view. Capture phase + preventDefault, so the page's own
+    // Escape handling (which would also stop the running request) leaves it alone.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && active) { e.preventDefault(); exit(); }
+    }, true);
     resize();
     window.addEventListener("resize", resize);
   }
@@ -190,9 +195,15 @@
     }
   }
 
+  let micGen = 0;   // bumps on every exit, so a permission prompt answered after exit is undone
   async function startMic() {
+    const gen = ++micGen;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Exited (or re-entered) while the browser was still asking for the microphone:
+      // release this stream at once instead of leaving the mic on with no view.
+      if (gen !== micGen || !active) { stream.getTracks().forEach((tr) => tr.stop()); return; }
+      micStream = stream;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const src = audioCtx.createMediaStreamSource(micStream);
       analyser = audioCtx.createAnalyser();
@@ -202,6 +213,7 @@
     } catch (_) { analyser = null; }   // graceful: fall back to a gentle animation
   }
   function stopMic() {
+    micGen++;
     if (micStream) { micStream.getTracks().forEach((tr) => tr.stop()); micStream = null; }
     if (audioCtx) { try { audioCtx.close(); } catch (_) {} audioCtx = null; }
     analyser = null;

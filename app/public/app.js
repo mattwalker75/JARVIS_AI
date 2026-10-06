@@ -3,7 +3,7 @@
 //
 //   Chat basics ......... scroll/stick-to-bottom, code-copy, history persistence (top of file)
 //   Context & usage ..... session token/cost totals, context meter, summarizeAndContinue
-//   Working indicator ... showWorking/hideWorking, stall detection, header status pill
+//   Working indicator ... startRun/endRun (per chat tab), stall detection, header status pill
 //   Rendering ........... fmt() safe-markdown renderer, importance flags, addMessage
 //   WebSocket ........... connectWS — the full server-event switch (tokens/tools/plan/…)
 //   Memory viewer ....... refreshMemories/renderMemories
@@ -167,7 +167,7 @@ function applyWorkbenchUi() {
   const bar = document.querySelector("#panel-workbench .desktop-bar"), note = $("desktop-remote");
   if (tab) {
     tab.hidden = !on;
-    if (!on && tab.classList.contains("active")) { const a = document.querySelector('.tab[data-tab="activity"]'); if (a) a.click(); }
+    if (!on && tab.classList.contains("active")) selectSideTab("activity", false);
   }
   if (desktop) {
     if (!on || !cfg || !cfg.workbench_url) { if (desktop.getAttribute("src") && desktop.getAttribute("src") !== "about:blank") desktop.src = "about:blank"; }
@@ -242,11 +242,10 @@ function saveHistory() {
 // survive a cleared browser profile and appear in any browser pointed at this JARVIS.
 // A fresh browser (no local tabs) restores them automatically on load.
 const chatSyncTimers = {};
-function scheduleChatSync() {
+function scheduleChatSync(id = chatsMeta.active) {
   // Debounce PER CHAT: capture which chat changed now — by the time the timer fires the
   // user may have switched tabs, and a single shared timer would drop the outgoing
   // chat's pending sync the moment the new tab schedules one.
-  const id = chatsMeta.active;
   if (chatSyncTimers[id]) clearTimeout(chatSyncTimers[id]);
   chatSyncTimers[id] = setTimeout(() => { delete chatSyncTimers[id]; syncChat(id).catch(() => {}); }, 2500);
 }
@@ -322,7 +321,7 @@ function updateContextMeter(tok) {
 let autoCompactBusy = false;
 function maybeAutoCompact(pct) {
   const threshold = Number(cfg && cfg.auto_compact_pct);
-  if (!(threshold > 0) || pct < threshold || autoCompactBusy || workingEl || history.length < 6) return;
+  if (!(threshold > 0) || pct < threshold || autoCompactBusy || run || history.length < 6) return;
   autoCompactBusy = true;
   addMessage("assistant", `🗜 Context is ${pct}% full — auto-compacting so we can keep going (set ui.auto_compact_pct to 0 to disable).`, "notice");
   summarizeAndContinue().finally(() => { autoCompactBusy = false; });
@@ -336,11 +335,12 @@ async function summarizeAndContinue() {
   try {
     const d = await (await fetch("/api/summarize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messages: history }) })).json();
     if (d.error || !d.summary) { addMessage("assistant", "Couldn't summarize: " + (d.error || "empty result"), "error"); return; }
-    messagesEl.innerHTML = "";                       // replace the transcript with the compact summary
+    clearTranscript();                               // replace the transcript with the compact summary
     history.length = 0;
     const msg = { role: "assistant", content: "📋 **Context compacted to continue.** Summary of the conversation so far:\n\n" + d.summary };
     history.push(msg); saveHistory();
     addMessage(msg.role, msg.content);
+    attachRunView();
     const m = $("ctx-meter"); if (m) m.classList.remove("warn", "high");   // meter recomputes on the next turn
     if (btn) btn.hidden = true;
   } catch (e) { addMessage("assistant", "Summarize failed: " + e.message, "error"); }
@@ -351,9 +351,26 @@ async function summarizeAndContinue() {
 // exact usage arrives (0 on a fresh chat; ~4 chars/token + the fixed system+tools prefix otherwise).
 function estimateContextTokens() { return history.length ? Math.round(history.reduce((n, m) => n + ((m.content || "").length), 0) / 4) + 8000 : 0; }
 function refreshContextMeter() { updateContextMeter(estimateContextTokens()); }
-let workingEl = null, workingTimer = null, workingStart = 0;   // persistent "still working" indicator
-let lastActivityAt = 0, stalled = false;                       // stall detection: when the model goes quiet
-let STALL_MS = 25000;                                          // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
+// ---- The request in flight + streamed replies, per chat tab ---------------------------
+// The server runs ONE chat request per connection at a time. `run` describes it: which chat
+// tab started it (server events carry that tab's chatId; an event without one belongs to the
+// tab that started the request), its working-indicator state, and the reply being streamed.
+// The on-screen parts (indicator, thinking panel, streamed bubble) exist only while that tab
+// is showing: switching tabs drops them, switching back rebuilds them from the state, and the
+// finished reply is saved into the chat that asked — never into whichever tab is open.
+let run = null;           // { chatId, startedAt, lastActivityAt, stalled, label, el }
+let workingTimer = null;
+let STALL_MS = 25000;     // no streamed progress for this long ⇒ "seems stuck" (configurable: ui.stall_seconds)
+const BG_KEY = "~bg";     // a stream that belongs to no chat of this page (Autopilot's verbose output)
+const streams = {};       // chat id | BG_KEY -> { key, text, started, spoken, think, thinkDone, bubble, thinkPre }
+const chatNotes = {};     // chat id -> notices that arrived while that tab was not showing
+const unreadChats = new Set();
+function getStream(key) {
+  return streams[key] || (streams[key] = { key, text: "", started: false, spoken: 0, think: "", thinkDone: false, bubble: null, thinkPre: null });
+}
+function streamShown(s) { return s.key === BG_KEY || s.key === chatsMeta.active; }
+function chatName(id) { const c = chatsMeta.list.find((x) => x.id === id); return c ? c.name : "another chat"; }
+function runShown() { return !!run && run.chatId === chatsMeta.active; }
 // Update the always-visible header pill. state: "idle" | "working" | "stalled" | "autopilot".
 function setStatus(state, text) {
   if (!statusEl) return;
@@ -366,54 +383,59 @@ let apRunning = false;   // an Autopilot run is actively working server-side (se
 function restStatus() { setStatus(apRunning ? "autopilot" : "idle"); }
 // Any streamed progress event resets the stall clock and confirms JARVIS is alive.
 function markActivity() {
-  lastActivityAt = Date.now();
-  if (stalled) { stalled = false; if (workingEl) { const b = workingEl.querySelector(".bubble"); if (b) b.classList.remove("stalled"); } }
-  if (workingEl) setStatus("working", "Working");
+  if (!run) return;
+  run.lastActivityAt = Date.now();
+  if (run.stalled) { run.stalled = false; paintRunView(); }
+  paintRunState();
 }
-let streamBubble = null, streamText = "";   // the assistant bubble being streamed into
-let streamThink = null;                      // the <pre> of the live "Thinking" panel, if any
-let ttsSpokenLen = 0;                        // chars of the current reply already sent to TTS
 // Speak complete sentences AS they stream in (ChatGPT-style), not after the whole reply.
-function speakStreaming() {
+function speakStreaming(s) {
   if (!window.JarvisVoice || !JarvisVoice.ttsEnabled()) return;
-  const pending = streamText.slice(ttsSpokenLen);
+  const pending = s.text.slice(s.spoken);
   const m = pending.match(/^[\s\S]*[.!?\n]/);   // everything up to the LAST sentence end
-  if (m && m[0].trim().length > 1) { JarvisVoice.speak(m[0]); ttsSpokenLen += m[0].length; }
+  if (m && m[0].trim().length > 1) { JarvisVoice.speak(m[0]); s.spoken += m[0].length; }
 }
 
 // Reasoning models stream their thoughts before the answer. Show them in a collapsible
 // panel ABOVE the answer bubble (kept separate so re-rendering the bubble never wipes it).
-function ensureThink() {
-  if (!streamThink) {
+function ensureThink(s) {
+  if (!s.thinkPre) {
     // Its OWN message row, appended before the answer bubble is created — so thinking
     // always sits ABOVE the answer (not beside it, since .msg is a flex row).
     const wrap = document.createElement("div"); wrap.className = "msg assistant think-msg";
     const det = document.createElement("details");
-    det.className = "think"; det.open = true;
-    det.innerHTML = '<summary>💭 Thinking…</summary><pre></pre>';
+    det.className = "think"; det.open = !s.thinkDone;
+    det.innerHTML = '<summary></summary><pre></pre>';
+    det.querySelector("summary").textContent = s.thinkDone ? "💭 Thoughts" : "💭 Thinking…";
     wrap.appendChild(det);
     messagesEl.appendChild(wrap);
-    streamThink = det.querySelector("pre"); streamThink._det = det;
+    s.thinkPre = det.querySelector("pre"); s.thinkPre._det = det;
+    s.thinkPre.textContent = s.think;
   }
-  return streamThink;
+  return s.thinkPre;
 }
 // Once the real answer starts (or the turn ends), collapse the panel and relabel it.
-function finalizeThink() {
-  if (streamThink && streamThink._det) {
-    streamThink._det.open = false;
-    const s = streamThink._det.querySelector("summary"); if (s) s.textContent = "💭 Thoughts";
+function finalizeThink(s) {
+  if (!s) return;
+  s.thinkDone = true;
+  if (s.thinkPre && s.thinkPre._det) {
+    s.thinkPre._det.open = false;
+    const sum = s.thinkPre._det.querySelector("summary"); if (sum) sum.textContent = "💭 Thoughts";
   }
-  streamThink = null;
 }
 // Coalesce streaming re-renders to one per animation frame — avoids O(n^2) DOM rebuilds
 // when tokens arrive faster than the screen refreshes.
 let renderScheduled = false;
-function scheduleRender() {
+const renderQueue = new Set();
+function scheduleRender(s) {
+  renderQueue.add(s);
   if (renderScheduled) return;
   renderScheduled = true;
   requestAnimationFrame(() => {
     renderScheduled = false;
-    if (streamBubble) { renderAssistant(streamBubble, streamText); scrollDown(); }
+    for (const x of renderQueue) if (x.bubble && streamShown(x)) renderAssistant(x.bubble, x.text);
+    renderQueue.clear();
+    scrollDown();
   });
 }
 
@@ -445,23 +467,30 @@ function fmt(s) {
   s = s.replace(/```[a-zA-Z0-9_+-]*\n?([\s\S]*)$/g, (m, code) => { blocks.push(code); return `\u0000C${blocks.length - 1}\u0000`; });
   // 2) Escape, then apply the safe inline + link subset (only known tags get injected).
   s = esc(s);
-  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>");
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/[^\s)]*|mailto:[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Inline code and [links](…) become protected spans, so the emphasis rules below never
+  // reach inside them (a `snake__case__name` or a URL with * or __ stays intact) and the
+  // bare-URL auto-linker never double-links.
+  const prot = [];
+  const keep = (html) => { prot.push(html); return "\u0000L" + (prot.length - 1) + "\u0000"; };
+  s = s.replace(/`([^`\n]+)`/g, (m, code) => keep("<code>" + code + "</code>"));
+  // Links: http(s), mailto, and same-site paths ("/api/files/…"). A "//host/…" link is a link
+  // to ANOTHER site (protocol-relative), so it is treated as external, not as a local path.
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|\/\/[^\s)]+|\/[^\s)]*|mailto:[^\s)]+)\)/g, (m, text, url) => {
+    const external = /^(https?:)?\/\//i.test(url);
+    const href = url.startsWith("//") ? (location.protocol === "http:" ? "http:" : "https:") + url : url;
+    return keep(`<a href="${href}" target="_blank" rel="${external ? "noopener noreferrer" : "noopener"}">${text}</a>`);
+  });
+  // Auto-link BARE URLs (e.g. a http://localhost:9101 the model posts) so they are clickable.
+  s = s.replace(/(^|[\s(>*_~])((?:https?:\/\/|www\.)[^\s<)]+[a-zA-Z0-9\/#=_&-])/g, (m, pre, url) =>
+    pre + keep('<a href="' + (url.indexOf("http") === 0 ? url : "https://" + url) + '" target="_blank" rel="noopener noreferrer">' + url + "</a>"));
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<u>$1</u>");
   s = s.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
   s = s.replace(/~~([^~]+)~~/g, "<s>$1</s>");
-  // Auto-link BARE URLs (e.g. a http://localhost:9101 the model posts) so they are clickable.
-  // Protect existing <a>/<code> spans first so we do not double-link or link inside code.
-  {
-    const prot = [];
-    s = s.replace(/<a [^>]*>[\s\S]*?<\/a>|<code>[\s\S]*?<\/code>/g, function (m) { prot.push(m); return "\u0000L" + (prot.length - 1) + "\u0000"; });
-    s = s.replace(/(^|[\s(>])((?:https?:\/\/|www\.)[^\s<)]+[a-zA-Z0-9\/#=_&-])/g, function (m, pre, url) { return pre + '<a href="' + (url.indexOf("http") === 0 ? url : "https://" + url) + '" target="_blank" rel="noopener">' + url + "</a>"; });
-    s = s.replace(/\u0000L(\d+)\u0000/g, function (m, i) { return prot[Number(i)] || ""; });
-  }
+  s = s.replace(/\u0000L(\d+)\u0000/g, (m, i) => prot[Number(i)] || "");
   s = renderLists(s);
   // 3) Restore code blocks (content re-escaped) with a copy button.
-  s = s.replace(/\u0000C(\d+)\u0000/g, (m, i) => `<div class="code-wrap"><button class="code-copy" title="Copy code">⧉</button><pre><code>${esc(blocks[Number(i)] || "")}</code></pre></div>`);
+  s = s.replace(/\u0000C(\d+)\u0000/g, (m, i) => `<div class="code-wrap"><button class="code-copy" title="Copy code" aria-label="Copy code">⧉</button><pre><code>${esc(blocks[Number(i)] || "")}</code></pre></div>`);
   return s;
 }
 const IMP = ["attention", "emergency", "info", "success"];
@@ -495,8 +524,10 @@ function addMessage(role, text, cls, silent) {
   if (role === "assistant" && !cls) {            // rich-render normal assistant messages
     const level = renderAssistant(b, text);
     if (level && !silent) flashChat(level);      // don't re-flash the screen when REPLAYING history
+  } else if (cls === "notice") {
+    b.innerHTML = fmt(text);                       // app notices use **bold** / `code` — the same safe renderer
   } else {
-    b.innerHTML = esc(text);                       // user / error / notice stay plain
+    b.innerHTML = esc(text);                       // user / error stay plain
   }
   wrap.appendChild(b);
   if (role === "assistant") {   // hover-to-copy on assistant replies
@@ -518,55 +549,104 @@ function addMessage(role, text, cls, silent) {
 // Persistent "JARVIS is still working" indicator: animated dots + what it's doing +
 // a live elapsed timer. Stays pinned at the bottom of the chat until the reply
 // completes (or errors), so you can always tell whether it's still going.
-function showWorking(label) {
+// The indicator belongs to the chat tab that sent the request (see `run` above).
+function startRun(label) {
   if (window.JarvisVoice) JarvisVoice.stopSpeaking();   // new turn — interrupt any prior speech (barge-in)
-  ttsSpokenLen = 0;
   amb("thinking");
-  if (!workingEl) {
+  const chatId = chatsMeta.active;
+  delete streams[chatId];
+  run = { chatId, startedAt: Date.now(), lastActivityAt: Date.now(), stalled: false, label: label || "working…", el: null };
+  if (workingTimer) clearInterval(workingTimer);
+  workingTimer = setInterval(() => {
+    if (!run) return;
+    // Stall detection: no streamed progress for STALL_MS ⇒ warn it may be stuck (Esc to stop).
+    if (!run.stalled && Date.now() - run.lastActivityAt > STALL_MS) { run.stalled = true; run.label = "still working — model is slow (press Esc to stop)"; paintRunState(); }
+    paintRunView();
+  }, 1000);
+  attachRunView();
+  paintRunState();
+}
+// Draw the indicator's label / elapsed time / stalled colour (only when it is on screen).
+function paintRunView() {
+  if (!run || !run.el) return;
+  const b = run.el.querySelector(".bubble"); if (b) b.classList.toggle("stalled", run.stalled);
+  const l = run.el.querySelector(".wlabel"); if (l) l.textContent = run.label;
+  const t = run.el.querySelector(".wtime"); if (t) t.textContent = Math.round((Date.now() - run.startedAt) / 1000) + "s";
+}
+// Header pill, the Stop button (only in the tab that is working) and the tab badges.
+function paintRunState() {
+  if (stopBtn) stopBtn.hidden = !runShown();
+  if (!run) restStatus();
+  else if (run.stalled) setStatus("stalled", "Stalled?");
+  else setStatus("working", runShown() ? "Working" : "Working · " + chatName(run.chatId));
+  paintChatTabBadges();
+}
+// (Re)build the running tab's on-screen parts: the partial thinking + reply, then the indicator.
+function attachRunView() {
+  if (!runShown()) return;
+  const s = streams[run.chatId];
+  if (s) {
+    if (s.think && !s.thinkPre) ensureThink(s);
+    if (s.started && !s.bubble) { s.bubble = addMessage("assistant", ""); renderAssistant(s.bubble, s.text); }
+  }
+  if (!run.el) {
     const w = document.createElement("div"); w.className = "msg assistant working-msg";
     w.innerHTML = '<div class="bubble working"><span class="dots"><span></span><span></span><span></span></span>' +
       '<span class="wlabel"></span><span class="wtime"></span></div>';
-    messagesEl.appendChild(w);
-    workingEl = w; workingStart = Date.now(); lastActivityAt = Date.now(); stalled = false;
-    workingTimer = setInterval(() => {
-      if (!workingEl) return;
-      const t = workingEl.querySelector(".wtime");
-      if (t) t.textContent = Math.round((Date.now() - workingStart) / 1000) + "s";
-      // Stall detection: no streamed progress for STALL_MS ⇒ warn it may be stuck (Esc to stop).
-      if (!stalled && Date.now() - lastActivityAt > STALL_MS) {
-        stalled = true;
-        const b = workingEl.querySelector(".bubble"); if (b) b.classList.add("stalled");
-        const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = "still working — model is slow (press Esc to stop)";
-        setStatus("stalled", "Stalled?");
-      }
-    }, 1000);
+    run.el = w;
   }
-  if (label != null) { const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = label; }
-  messagesEl.appendChild(workingEl);                 // keep it pinned to the bottom
-  if (stopBtn) stopBtn.hidden = false;
-  setStatus("working", "Working");
-  scrollDown();
+  messagesEl.appendChild(run.el);
+  paintRunView(); scrollDown();
 }
-function labelWorking(text) {
-  if (!workingEl) return;
-  const l = workingEl.querySelector(".wlabel"); if (l) l.textContent = text;
+// The transcript is about to be cleared or replaced: forget the on-screen parts (state is kept).
+function detachViews() {
+  if (run && run.el) { run.el.remove(); run.el = null; }
+  for (const k of Object.keys(streams)) { streams[k].bubble = null; streams[k].thinkPre = null; }
 }
-function pinWorking() { if (workingEl) messagesEl.appendChild(workingEl); } // keep below streamed text
-function hideWorking() {
+function clearTranscript() { detachViews(); messagesEl.innerHTML = ""; }
+function labelRun(text) { if (!run) return; run.label = text; paintRunView(); pinWorking(); }
+function pinWorking() { if (run && run.el) messagesEl.appendChild(run.el); } // keep below streamed text
+function endRun() {
   if (workingTimer) { clearInterval(workingTimer); workingTimer = null; }
-  if (workingEl) { workingEl.remove(); workingEl = null; }
-  if (stopBtn) stopBtn.hidden = true;
-  stalled = false;
-  restStatus();   // "Autopilot" if a run is active, else "Idle"
+  if (run && run.el) run.el.remove();
+  run = null;
+  paintRunState();
   if (!ambSpeaking) amb(ambIdle());   // done thinking; orb rests (or listens)
 }
 // Ask the server to abort the in-flight request (Stop button or Escape key).
 function sendCancel() {
   if (window.JarvisVoice) JarvisVoice.stopSpeaking();   // Stop/Esc also silences speech
-  if (!workingEl) return;                 // nothing is running
-  if (!ws || ws.readyState !== 1) { hideWorking(); finalizeThink(); return; }  // socket gone — just clear the UI
+  if (!run) return;                       // nothing is running
+  if (!ws || ws.readyState !== 1) { const id = run.chatId; endRun(); finalizeThink(streams[id]); delete streams[id]; return; }  // socket gone — just clear the UI
   try { ws.send(JSON.stringify({ type: "cancel" })); } catch (_) {}
-  labelWorking("stopping…");
+  labelRun("stopping…");
+}
+// Save a message into a chat's history — the open tab's in memory, any other tab's slot.
+function appendToChat(id, msg) {
+  if (id === chatsMeta.active) { history.push(msg); saveHistory(); return; }
+  if (!chatsMeta.list.some((c) => c.id === id)) return;   // that tab was closed meanwhile
+  let arr; try { arr = JSON.parse(localStorage.getItem(chatSlotKey(id)) || "[]"); } catch (_) { arr = []; }
+  if (!Array.isArray(arr)) arr = [];
+  arr.push(msg);
+  try { localStorage.setItem(chatSlotKey(id), JSON.stringify(arr.slice(-100))); } catch (_) {}
+  scheduleChatSync(id);
+}
+// Show a notice/error in a chat: now if it is open, else when the user switches to it.
+function noteFor(id, text, cls, retry) {
+  if (!id || id === chatsMeta.active) { addMessage("assistant", text, cls); if (retry) addRetry(); return; }
+  if (!chatsMeta.list.some((c) => c.id === id)) return;
+  (chatNotes[id] = chatNotes[id] || []).push({ text, cls, retry });
+  markUnread(id);
+}
+function markUnread(id) { if (id && id !== chatsMeta.active) { unreadChats.add(id); paintChatTabBadges(); } }
+// "Still working" — said plainly instead of sending (a second request would be refused).
+let busyNoteEl = null;
+function busyNotice() {
+  const text = runShown()
+    ? "JARVIS is still working on the last message — wait, or press Stop."
+    : `JARVIS is still working on a message in “${chatName(run.chatId)}” — wait for it to finish, or open that tab and press Stop.`;
+  if (busyNoteEl) busyNoteEl.closest(".msg").remove();
+  busyNoteEl = addMessage("assistant", text + " Your message is still in the box.", "notice");
 }
 
 function addActivity(tool, input, output) {
@@ -575,7 +655,7 @@ function addActivity(tool, input, output) {
   e.dataset.tool = String(tool || "").toLowerCase();   // for the filter box
   let html = `<span class="tname">${esc(tool)}</span>`;
   if (input !== undefined) html += ` <span class="tin">${esc(typeof input === "string" ? input : JSON.stringify(input))}</span>`;
-  if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre><button class="e-copy" title="Copy output">⧉</button>`;
+  if (output !== undefined) html += `<pre>${esc(typeof output === "string" ? output : JSON.stringify(output, null, 2))}</pre><button class="e-copy" title="Copy output" aria-label="Copy output">⧉</button>`;
   e.innerHTML = html;
   applyActFilter(e);
   activityEl.appendChild(e); activityEl.scrollTop = activityEl.scrollHeight;
@@ -638,58 +718,8 @@ function connectWS() {
   ws.onerror = () => { try { ws.close(); } catch (_) {} };   // let onclose drive the reconnect
   ws.onmessage = (ev) => {
     let d; try { d = JSON.parse(ev.data); } catch { return; }
-    // Any of these events means the model is actively producing output — reset the stall clock.
-    if (["tool", "tool_result", "usage", "reasoning", "token"].includes(d.type)) markActivity();
-    if (d.type === "tool") { addActivity(d.tool, d.input); labelWorking("running " + d.tool + "…"); pinWorking(); }
-    else if (d.type === "tool_result") { if (d.tool === "run_shell" || d.tool === "sub▸ run_shell") retireStreams(); addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output); labelWorking("working…"); }
-    else if (d.type === "tool_stream") { addStreamChunk(d); markActivity(); }
-    else if (d.type === "tool_media") { addMediaActivity(d); markActivity(); }
-    else if (d.type === "failover") {
-      addMessage("assistant", `⚡ Primary model unavailable (${esc(d.reason || "endpoint failed")}) — continuing this turn on the fallback **${esc(d.to)}**.`, "notice");
-      addActivity("⚡ failover", d.from + " → " + d.to);
-      markActivity();
-    }
-    else if (d.type === "usage") {
-      addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
-      sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage();
-      if (d.usage && d.usage.context_tokens) updateContextMeter(d.usage.context_tokens);
-    }
-    else if (d.type === "reasoning") {
-      const pre = ensureThink();
-      pre.textContent += d.text;
-      labelWorking("thinking…"); pinWorking();
-      scrollDown();
-    }
-    else if (d.type === "token") {
-      finalizeThink();   // the answer is starting — collapse the thinking panel
-      if (!streamBubble) { streamBubble = addMessage("assistant", ""); streamText = ""; ttsSpokenLen = 0; labelWorking("responding…"); pinWorking(); }
-      streamText += d.text;
-      speakStreaming();
-      scheduleRender();
-    } else if (d.type === "reply") {
-      hideWorking(); finalizeThink();
-      const t = d.text || "";
-      const finalText = streamBubble ? (streamText || t) : t;
-      let replyBubble = streamBubble;
-      if (streamBubble) { const lvl = renderAssistant(streamBubble, finalText); if (lvl) flashChat(lvl); }
-      else replyBubble = addMessage("assistant", finalText);
-      if (replyBubble) replyBubble.title = new Date().toLocaleString();
-      // ephemeral = a verbose Autopilot cycle: show it, but don't add it to the chat's
-      // model-context history (would bloat/confuse your next chat turn) and don't speak it.
-      if (!d.ephemeral) {
-        history.push({ role: "assistant", content: finalText, ts: Date.now() }); saveHistory();
-        if (window.JarvisVoice) {
-          if (ttsSpokenLen > 0 && streamText) { const rest = streamText.slice(ttsSpokenLen); if (rest.trim()) JarvisVoice.speak(rest); }
-          else JarvisVoice.speak(plain(finalText));
-        }
-      }
-      ttsSpokenLen = 0;
-      streamBubble = null; streamText = "";
-    } else if (d.type === "error") {
-      hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
-      addMessage("assistant", "Error: " + d.error, "error");
-      addRetry();
-    } else if (d.type === "plan") {
+    if (STREAM_EVENTS.has(d.type)) { onStreamEvent(d); return; }
+    if (d.type === "plan") {
       planCache[d.key || "default"] = d.plan;
       renderActivePlan();
     } else if (d.type === "autopilot") {
@@ -709,16 +739,121 @@ function connectWS() {
       if (window.JarvisVoice) JarvisVoice.speak(plain(d.message));
     }
   };
-  ws.onclose = () => {
+  ws.onclose = async () => {
     // A request in flight when the socket dropped will never get a reply — clear the
     // spinner and streaming state so the UI isn't stuck, and tell the user once.
-    if (workingEl || streamBubble || streamThink) {
-      hideWorking(); finalizeThink(); streamBubble = null; streamText = "";
+    const lostChat = run ? run.chatId : null;
+    if (run || Object.keys(streams).length) {
+      endRun();
+      for (const k of Object.keys(streams)) { finalizeThink(streams[k]); delete streams[k]; }
       if (!connLost) { connLost = true; addMessage("assistant", "🔌 Connection lost — reconnecting…", "error"); }
+      if (lostChat && lostChat !== chatsMeta.active) noteFor(lostChat, "🔌 The connection dropped while JARVIS was answering here, so that reply was lost. Retry once it reconnects.", "error", true);
+    }
+    // The socket also closes when the session ends (sign-out elsewhere, a restart, a removed
+    // user). If the server no longer knows us, start over so the sign-in screen shows.
+    if (appBooted) {
+      try {
+        const me = await (await rawFetch("/api/auth/me", { cache: "no-store" })).json();
+        if (me && (me.status === "unauthenticated" || me.status === "not_initialized")) { appBooted = false; location.reload(); return; }
+      } catch (_) { /* server unreachable — keep retrying below */ }
     }
     setTimeout(connectWS, wsBackoff);
     wsBackoff = Math.min(wsBackoff * 2, 15000);   // exponential backoff, cap 15s
   };
+}
+
+// --- Routing the request's events to the chat tab they belong to --------------------
+const STREAM_EVENTS = new Set(["token", "reasoning", "reply", "error", "busy", "usage", "tool", "tool_result", "tool_stream", "tool_media", "failover"]);
+// The server's "busy" event; older servers sent this as an error instead.
+const BUSY_RE = /still working on your previous message/i;
+function onStreamEvent(d) {
+  // Which chat: the event's chatId, else the tab that started the request in flight.
+  const cid = d.chatId != null && d.chatId !== "" ? String(d.chatId) : (run ? run.chatId : null);
+  const forRun = !!run && cid === run.chatId;
+  const known = cid != null && chatsMeta.list.some((c) => c.id === cid);
+  // Where its text goes: that chat; nothing (its tab was closed mid-request); or, for output
+  // that belongs to no chat here (Autopilot's verbose stream), the tab that is open.
+  const key = known ? cid : (forRun ? null : BG_KEY);
+  const noteChat = key === BG_KEY || key == null ? chatsMeta.active : key;
+  if (forRun && d.type !== "busy" && d.type !== "error" && d.type !== "reply") markActivity();
+  switch (d.type) {
+    case "tool": addActivity(d.tool, d.input); if (forRun) labelRun("running " + d.tool + "…"); break;
+    case "tool_result":
+      if (d.tool === "run_shell" || d.tool === "sub▸ run_shell") retireStreams();
+      addActivity(d.tool + " →" + (d.ms != null ? ` (${d.ms}ms)` : ""), undefined, d.output);
+      if (forRun) labelRun("working…");
+      break;
+    case "tool_stream": addStreamChunk(d); break;
+    case "tool_media": addMediaActivity(d); break;
+    case "failover":
+      if (key != null) noteFor(noteChat, `⚡ Primary model unavailable (${d.reason || "endpoint failed"}) — continuing this turn on the fallback **${d.to}**.`, "notice");
+      addActivity("⚡ failover", d.from + " → " + d.to);
+      break;
+    case "usage":
+      addActivity(`↳ ${d.model ? d.model + " · " : ""}${(d.usage && d.usage.total_tokens) || 0} tokens` + (d.cost_usd ? ` · ~$${d.cost_usd}` : ""));
+      if (key === chatsMeta.active || key === BG_KEY) { sessTokens += (d.usage && d.usage.total_tokens) || 0; sessCost += Number(d.cost_usd) || 0; updateSessUsage(); }
+      if (key === chatsMeta.active && d.usage && d.usage.context_tokens) updateContextMeter(d.usage.context_tokens);
+      break;
+    case "reasoning": {
+      if (key == null) break;
+      const s = getStream(key);
+      if (s.thinkDone) { s.think = ""; s.thinkDone = false; s.thinkPre = null; }   // a new round of thinking: a new panel
+      s.think += d.text || "";
+      if (streamShown(s)) { const pre = ensureThink(s); if (pre.textContent !== s.think) pre.textContent += d.text || ""; pinWorking(); scrollDown(); }
+      if (forRun) labelRun("thinking…");
+      break;
+    }
+    case "token": {
+      if (key == null) break;
+      const s = getStream(key);
+      finalizeThink(s);   // the answer is starting — collapse the thinking panel
+      const first = !s.started;
+      if (first) { s.started = true; s.text = ""; s.spoken = 0; }
+      s.text += d.text || "";
+      speakStreaming(s);
+      if (streamShown(s)) { if (!s.bubble) { s.bubble = addMessage("assistant", ""); pinWorking(); } scheduleRender(s); }
+      if (forRun && first) labelRun("responding…");
+      break;
+    }
+    case "reply": {
+      if (forRun) endRun();
+      if (key == null) { delete streams[cid]; break; }
+      const s = getStream(key);
+      finalizeThink(s); renderQueue.delete(s);
+      let finalText = s.started ? (s.text || d.text || "") : (d.text || "");
+      // Stopped part-way: keep what was streamed and say it was stopped.
+      if (s.started && s.text && /^⏹/.test(d.text || "") && !s.text.includes(d.text)) finalText = s.text + "\n\n" + d.text;
+      const target = key === BG_KEY ? chatsMeta.active : key;
+      if (streamShown(s)) {
+        let b = s.bubble;
+        if (b) { const lvl = renderAssistant(b, finalText); if (lvl) flashChat(lvl); }
+        else b = addMessage("assistant", finalText);
+        if (b) b.title = new Date().toLocaleString();
+      } else markUnread(target);
+      // ephemeral = a verbose Autopilot cycle: show it, but don't add it to the chat's
+      // model-context history (would bloat/confuse your next chat turn) and don't speak it.
+      if (!d.ephemeral) {
+        appendToChat(target, { role: "assistant", content: finalText, ts: Date.now() });
+        if (window.JarvisVoice) {
+          if (s.spoken > 0 && s.text) { const rest = s.text.slice(s.spoken); if (rest.trim()) JarvisVoice.speak(rest); }
+          else JarvisVoice.speak(plain(finalText));
+        }
+      }
+      delete streams[key];
+      break;
+    }
+    case "busy":
+      // A message was refused because another is still running. The running turn goes on.
+      noteFor(noteChat, "⏳ " + (d.text || "JARVIS is still working on the last message — wait, or press Stop."), "notice");
+      break;
+    case "error": {
+      if (BUSY_RE.test(d.error || "")) { onStreamEvent({ ...d, type: "busy", text: d.error }); break; }
+      if (forRun) endRun();
+      if (key != null && streams[key]) { finalizeThink(streams[key]); delete streams[key]; }
+      if (key != null || !forRun) noteFor(noteChat, "Error: " + d.error, "error", true);
+      break;
+    }
+  }
 }
 
 // Memory viewer: list the Mem0 long-term memories with delete buttons.
@@ -740,7 +875,7 @@ function renderMemories(filter) {
   items.forEach((m) => {
     const row = document.createElement("div"); row.className = "mem-item";
     const txt = document.createElement("span"); txt.className = "mem-text"; txt.textContent = m.memory || "";
-    const edit = document.createElement("button"); edit.className = "ghost"; edit.textContent = "✏️"; edit.title = "Edit this memory (keeps its id)";
+    const edit = document.createElement("button"); edit.className = "ghost"; edit.textContent = "✏️"; edit.title = "Edit this memory (keeps its id)"; edit.setAttribute("aria-label", "Edit memory");
     edit.addEventListener("click", async () => {
       const next = await uiPrompt("Edit memory", m.memory || "", { textarea: true, okText: "Save" });
       if (next === null || !next.trim() || next === m.memory) return;
@@ -752,7 +887,7 @@ function renderMemories(filter) {
       } catch (e) { addMessage("assistant", "Memory update failed: " + e, "error"); }
       edit.disabled = false;
     });
-    const del = document.createElement("button"); del.className = "ghost"; del.textContent = "🗑"; del.title = "Delete this memory";
+    const del = document.createElement("button"); del.className = "ghost"; del.textContent = "🗑"; del.title = "Delete this memory"; del.setAttribute("aria-label", "Delete memory");
     del.addEventListener("click", async () => {
       del.disabled = true;
       try { await fetch("/api/memories/" + encodeURIComponent(m.id), { method: "DELETE" }); memItems = memItems.filter((x) => x.id !== m.id); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No memories saved yet.</div>'; }
@@ -800,10 +935,10 @@ async function refreshFiles() {
     const row = document.createElement("div"); row.className = "file-item";
     const link = document.createElement("a"); link.className = "file-name"; link.href = "/api/files/raw?dir=" + filesDir + "&path=" + enc; link.target = "_blank"; link.textContent = f.path; link.title = "Open / preview";
     const meta = document.createElement("span"); meta.className = "file-meta"; meta.textContent = fmtBytes(f.size);
-    const dl = document.createElement("a"); dl.className = "ghost file-btn"; dl.href = "/api/files/raw?dir=" + filesDir + "&download=1&path=" + enc; dl.textContent = "⬇"; dl.title = "Download";
+    const dl = document.createElement("a"); dl.className = "ghost file-btn"; dl.href = "/api/files/raw?dir=" + filesDir + "&download=1&path=" + enc; dl.textContent = "⬇"; dl.title = "Download"; dl.setAttribute("aria-label", "Download " + f.path);
     row.append(link, meta, dl);
     if (!ro) {   // the read-only folder is exactly that
-      const del = document.createElement("button"); del.className = "ghost file-btn"; del.textContent = "🗑"; del.title = "Delete";
+      const del = document.createElement("button"); del.className = "ghost file-btn"; del.textContent = "🗑"; del.title = "Delete"; del.setAttribute("aria-label", "Delete " + f.path);
       del.addEventListener("click", async () => { if (!(await uiConfirm("Delete " + f.path + "?", { title: "Delete file", okText: "Delete", danger: true }))) return; del.disabled = true; try { await fetch("/api/files?dir=rw&path=" + enc, { method: "DELETE" }); row.remove(); if (!el.children.length) el.innerHTML = '<div class="hint">No files yet.</div>'; } catch { del.disabled = false; } });
       row.append(del);
     }
@@ -850,7 +985,7 @@ if (modelSelect) modelSelect.addEventListener("change", () => setModel(modelSele
 
 // --- Regenerate the last response ---
 function regenerate() {
-  if (workingEl) return;
+  if (run) { busyNotice(); return; }
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected.", "error"); return; }
   if (history.length && history[history.length - 1].role === "assistant") {
     history.pop(); saveHistory();
@@ -864,7 +999,7 @@ function regenerate() {
     const last = replies[replies.length - 1]; if (last) last.remove();
   }
   if (!history.length || history[history.length - 1].role !== "user") { addMessage("assistant", "Nothing to regenerate yet.", "notice"); return; }
-  stickBottom = true; showWorking("working…");
+  stickBottom = true; startRun("working…");
   sendChatWS({ messages: history });
 }
 const regenBtn = $("regen"); if (regenBtn) regenBtn.addEventListener("click", regenerate);
@@ -916,7 +1051,7 @@ function handleSlash(text) {
       return;
     case "files": case "tasks": case "memory": case "activity": case "workbench": {
       if (cmd === "workbench" && !workbenchOn()) { addMessage("assistant", "The Linux workbench is turned off, so there is no desktop to show. Turn it on in the Config tab → Workbench & shared folders.", "notice"); return; }
-      const tab = document.querySelector('.tab[data-tab="' + cmd + '"]'); if (tab) tab.click(); return;
+      selectSideTab(cmd); return;
     }
     case "guide": case "howto": case "docs": {
       const base = "Using the JARVIS self-help guides in /LLM_READ_ONLY_FILES/JARVIS_Guides/ (list_dir that folder, then read_file the guide that best matches — do NOT answer from general knowledge), ";
@@ -952,7 +1087,8 @@ function showNotification(note) {
 function resend() {
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Not connected — reconnecting…", "error"); return; }
   if (!history.length || history[history.length - 1].role !== "user") return;
-  showWorking("working…");
+  if (run) { busyNotice(); return; }
+  startRun("working…");
   sendChatWS({ messages: history });
 }
 function addRetry() {
@@ -963,15 +1099,23 @@ function addRetry() {
   wrap.appendChild(btn); messagesEl.appendChild(wrap); scrollDown();
 }
 
+const STOP_WORDS = /^(stop|stop\s*it|just\s*stop|stop\s*everything|halt|abort|cancel|quit\s*it|nevermind|never\s*mind|enough)[\s.!]*$/i;
 function send(text) {
   text = (text || "").trim(); if (!text) return;
   if (text.startsWith("/")) { inputEl.value = ""; autoGrow(); handleSlash(text); return; }   // slash command
+  // One request at a time (the server refuses a second one). A bare "stop" while working
+  // is the keyboard-free Stop; anything else waits, said plainly, with the text kept.
+  if (run) {
+    if (STOP_WORDS.test(text) && runShown()) { inputEl.value = ""; autoGrow(); sendCancel(); return; }
+    if (inputEl.value.trim() !== text) { inputEl.value = text; autoGrow(); }   // a voice/slash message: keep it in the box
+    busyNotice(); return;
+  }
   if (!ws || ws.readyState !== 1) { addMessage("assistant", "Connecting… try again in a moment.", "error"); return; }
   stickBottom = true;                     // a fresh send always snaps to the bottom
   const ub = addMessage("user", text); const now = Date.now();
   if (ub) ub.title = new Date(now).toLocaleString();
   history.push({ role: "user", content: text, ts: now }); saveHistory();
-  inputEl.value = ""; autoGrow(); showWorking("working…");
+  inputEl.value = ""; autoGrow(); startRun("working…");
   sendChatWS({ messages: history, persona: currentPersona || undefined });
 }
 
@@ -992,22 +1136,34 @@ formEl.addEventListener("submit", (e) => { e.preventDefault(); send(inputEl.valu
 
 // Interrupt in-flight processing: the Stop button, or Escape while it's working.
 if (stopBtn) stopBtn.addEventListener("click", sendCancel);
+// Escape ALWAYS silences speech — registered on window in the capture phase, so it runs
+// before any dialog or overlay handles (and swallows) the key.
+window.addEventListener("keydown", (e) => { if (e.key === "Escape" && window.JarvisVoice) JarvisVoice.stopSpeaking(); }, true);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && workingEl) { e.preventDefault(); sendCancel(); }
+  if (e.key === "Escape") {
+    if (e.defaultPrevented) return;                                  // an overlay (ambient view) used it
+    if (drawer && drawer.sheetOpen()) { e.preventDefault(); drawer.closeSheet(); return; }   // phone/tablet panel sheet
+    if (topbarEl && topbarEl.classList.contains("more-open")) { e.preventDefault(); setMoreOpen(false); return; }
+    const overlayOpen = ["ap-drop", "ap-modify-modal"].some((id) => $(id) && !$(id).hidden);
+    if (runShown() && !overlayOpen) { e.preventDefault(); sendCancel(); }
+  }
   else if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); inputEl.focus(); }
 });
 
 
-document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => {
-  document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
+// Pick a side-panel tab; `reveal` also opens the drawer (or, on a phone/tablet, the sheet).
+function selectSideTab(name, reveal = true) {
+  const t = document.querySelector('.tab[data-tab="' + name + '"]'); if (!t) return;
+  document.querySelectorAll(".tab").forEach((x) => { x.classList.remove("active"); x.setAttribute("aria-selected", "false"); });
   document.querySelectorAll(".panel").forEach((x) => x.classList.remove("active"));
-  t.classList.add("active"); $("panel-" + t.dataset.tab).classList.add("active");
-  if (drawer && !drawer.isOpen()) drawer.open();   // picking a tab reveals the drawer if it was closed
+  t.classList.add("active"); t.setAttribute("aria-selected", "true"); $("panel-" + t.dataset.tab).classList.add("active");
+  if (reveal && drawer && !drawer.isOpen()) drawer.open();   // picking a tab reveals the drawer if it was closed
   if (t.dataset.tab === "tasks") { refreshTasks(); refreshNotes(); }
   if (t.dataset.tab === "memory") refreshMemories();
   if (t.dataset.tab === "files") refreshFiles();
   if (t.dataset.tab === "config") loadConfig();
-}));
+}
+document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => selectSideTab(t.dataset.tab)));
 
 // --- Persistent PLAN ledger banner -------------------------------------------
 // Plans are keyed per conversation (chat_<tab id> / autopilot / default). The banner
@@ -1080,7 +1236,7 @@ function renderAutopilot(st) {
   const bar = $("autopilot-bar"); if (!bar) return;
   // Header pill reflects a live run too — "Autopilot" while it's actively working (not paused/ended).
   apRunning = !!(st && !st.ended && (st.status === "running" || st.status === "stopping" || st.status === "pausing"));
-  if (!workingEl) restStatus();   // update the pill now, unless a chat request is in flight (that shows "Working")
+  if (!run) restStatus();   // update the pill now, unless a chat request is in flight (that shows "Working")
   if (!st || (!st.active && !st.ended)) { bar.hidden = true; if (apTick) { clearInterval(apTick); apTick = null; } return; }
   bar.hidden = false;
   apLastStatus = st.status || null;
@@ -1278,43 +1434,91 @@ const drawer = (() => {
   const clamp = (w) => Math.max(MIN, Math.min(maxW(), Math.round(w)));
   let width = clamp(parseInt(localStorage.getItem(LSW) || "480", 10) || 480);
   let open = localStorage.getItem(LSO) !== "0";
+  let ready = false;
   function apply() {
     layout.style.setProperty("--drawer-w", width + "px");
     layout.classList.toggle("drawer-collapsed", !open);
     if (open && dot) dot.hidden = true;   // opening clears the "activity while hidden" badge
+    if (ready) syncAria();
   }
   function setWidth(w, save) { width = clamp(w); if (save) localStorage.setItem(LSW, String(width)); apply(); }
   function setOpen(o) { open = !!o; localStorage.setItem(LSO, open ? "1" : "0"); apply(); }
-  // The handle stays attached to the drawer's left edge. Click = toggle open/close.
-  // Drag = live resize; drag past the right edge closes it, drag out from the edge opens it.
-  handle.addEventListener("mousedown", (e) => {
+  // The handle stays attached to the drawer's left edge. Click (or Enter/Space) = toggle
+  // open/close; ←/→ resize. Drag (mouse, pen or finger) = live resize; drag past the right
+  // edge closes it, drag out from the edge opens it.
+  let dragged = false;
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-    const startX = e.clientX; let moved = false;
+    const startX = e.clientX; let moved = false; dragged = false;
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
     layout.classList.add("resizing");
     document.body.style.userSelect = "none"; document.body.style.cursor = "col-resize";
     const move = (ev) => {
       if (!moved && Math.abs(ev.clientX - startX) > 4) moved = true;
       if (!moved) return;
-      const raw = window.innerWidth - ev.clientX;   // desired drawer width under the cursor
+      const raw = window.innerWidth - ev.clientX;   // desired drawer width under the pointer
       if (raw < CLOSE_AT) { if (open) setOpen(false); }
       else { if (!open) setOpen(true); setWidth(raw, false); }
     };
     const up = () => {
       layout.classList.remove("resizing");
       document.body.style.userSelect = ""; document.body.style.cursor = "";
-      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
-      if (!moved) setOpen(!open);                       // click → toggle
-      else if (open) localStorage.setItem(LSW, String(width));   // persist the dragged width
+      handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up);
+      dragged = moved;
+      if (moved && open) localStorage.setItem(LSW, String(width));   // persist the dragged width
     };
-    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
+  });
+  handle.addEventListener("click", () => { if (dragged) { dragged = false; return; } setOpen(!open); });   // a drag is not a click
+  handle.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    if (!open) { setOpen(true); return; }
+    setWidth(width + (e.key === "ArrowLeft" ? 40 : -40), true);
   });
   window.addEventListener("resize", () => setWidth(width, false));   // keep within new bounds
-  apply();
+
+  // Phone / tablet (≤900px): the side panels are a full-height sheet over the chat, opened
+  // from the ☰ Panels button in the top bar (the drag handle is hidden there).
+  const narrow = window.matchMedia("(max-width: 900px)");
+  const sheetBtn = $("panel-btn"), sheetDot = $("panel-dot"), backdrop = $("sheet-backdrop"), side = $("side-panel");
+  let sheetOpen = false, sheetReturn = null;
+  function setSheet(o) {
+    sheetOpen = !!o && narrow.matches;
+    layout.classList.toggle("sheet-open", sheetOpen);
+    if (backdrop) backdrop.hidden = !sheetOpen;
+    if (sheetBtn) sheetBtn.setAttribute("aria-expanded", String(sheetOpen));
+    if (sheetOpen) {
+      if (sheetDot) sheetDot.hidden = true;
+      sheetReturn = document.activeElement;
+      const c = $("sheet-close"); if (c) setTimeout(() => c.focus(), 0);
+    } else if (sheetReturn && sheetReturn.focus && narrow.matches) { try { sheetReturn.focus(); } catch (_) {} sheetReturn = null; }
+    syncAria();
+  }
+  if (sheetBtn) sheetBtn.addEventListener("click", () => setSheet(!sheetOpen));
+  const closeB = $("sheet-close"); if (closeB) closeB.addEventListener("click", () => setSheet(false));
+  if (backdrop) backdrop.addEventListener("click", () => setSheet(false));
+  // The closed sheet is off-screen: keep it out of the accessibility tree too.
+  function syncAria() {
+    if (side) { if (narrow.matches && !sheetOpen) side.setAttribute("aria-hidden", "true"); else side.removeAttribute("aria-hidden"); }
+    handle.setAttribute("aria-expanded", String(open));
+  }
+  const onNarrow = () => { if (!narrow.matches) setSheet(false); syncAria(); };
+  if (narrow.addEventListener) narrow.addEventListener("change", onNarrow); else if (narrow.addListener) narrow.addListener(onNarrow);
+  ready = true;
+  apply(); onNarrow();
   return {
-    isOpen: () => open,
-    open: () => setOpen(true),
-    toggle: () => setOpen(!open),
-    notifyActivity: () => { if (!open && dot) dot.hidden = false; },   // badge the handle when work happens while closed
+    isOpen: () => (narrow.matches ? sheetOpen : open),
+    open: () => (narrow.matches ? setSheet(true) : setOpen(true)),
+    toggle: () => (narrow.matches ? setSheet(!sheetOpen) : setOpen(!open)),
+    sheetOpen: () => sheetOpen,
+    closeSheet: () => setSheet(false),
+    // badge the handle (or, on a phone/tablet, the ☰ Panels button) when work happens while closed
+    notifyActivity: () => {
+      if (narrow.matches) { if (!sheetOpen && sheetDot) sheetDot.hidden = false; }
+      else if (!open && dot) dot.hidden = false;
+    },
   };
 })();
 
@@ -1335,9 +1539,9 @@ async function refreshTasks() {
     el.innerHTML =
       `<div class="t-top"><span class="t-label">${paused ? "⏸ " : ""}${esc(t.label || t.prompt.slice(0, 40))}</span>` +
       `<span><span class="badge ${recurring ? "recurring" : ""}">${paused ? "paused" : recurring ? "every " + Math.round(t.every_seconds / 60) + "m" : "once"}</span> ` +
-      `<button class="ghost file-btn t-hist" data-id="${esc(t.id)}" title="Recent runs of this task">📜</button>` +
-      `<button class="ghost file-btn t-edit" data-id="${esc(t.id)}" title="Edit this task">✏️</button>` +
-      `<button class="ghost file-btn t-pause" data-id="${esc(t.id)}" data-paused="${paused ? "1" : ""}" title="${paused ? "Resume this task" : "Pause this task (keeps it, skips runs)"}">${paused ? "▶" : "⏸"}</button>` +
+      `<button class="ghost file-btn t-hist" data-id="${esc(t.id)}" title="Recent runs of this task" aria-label="Recent runs of this task">📜</button>` +
+      `<button class="ghost file-btn t-edit" data-id="${esc(t.id)}" title="Edit this task" aria-label="Edit this task">✏️</button>` +
+      `<button class="ghost file-btn t-pause" data-id="${esc(t.id)}" data-paused="${paused ? "1" : ""}" title="${paused ? "Resume this task" : "Pause this task (keeps it, skips runs)"}" aria-label="${paused ? "Resume this task" : "Pause this task"}">${paused ? "▶" : "⏸"}</button>` +
       `<button class="cancel" data-id="${esc(t.id)}">cancel</button></span></div>` +
       `<div class="t-meta">next: ${paused ? "(paused)" : esc(fmtWhen(t.next_run))}${t.last_run ? " · last run: " + esc(fmtWhen(t.last_run)) : ""}${t.until ? " · until: " + esc(t.until) : ""} · runs: ${t.runs}</div>` +
       `<div class="t-prompt">${esc(t.prompt)}</div>` +
@@ -1378,7 +1582,7 @@ function addNoteEl(n, prepend) {
   const el = document.createElement("div"); el.className = "note" + (n.level === "error" ? " error" : "");
   el.innerHTML = `<div class="n-time">${esc(new Date(n.at).toLocaleString())}</div><div class="n-msg">${esc(n.message || "")}</div>`;
   if (n.id) {
-    const x = document.createElement("button"); x.className = "n-dismiss"; x.textContent = "×"; x.title = "Dismiss";
+    const x = document.createElement("button"); x.className = "n-dismiss"; x.textContent = "×"; x.title = "Dismiss"; x.setAttribute("aria-label", "Dismiss notification");
     x.addEventListener("click", async () => {
       try { await fetch("/api/notifications/" + encodeURIComponent(n.id), { method: "DELETE" }); } catch (_) {}
       el.remove(); if (!notesList.querySelector(".note")) notesList.innerHTML = '<div class="hint">No notifications yet.</div>';
@@ -1457,14 +1661,15 @@ async function refreshSessions() {
     el.innerHTML =
       `<span class="s-name" title="${esc(s.name)}${isLive ? " — auto-saved live chat tab" : ""}">${isLive ? "● " : ""}${esc(s.name)}</span><span class="s-meta">${s.count}</span>` +
       `<button class="load" data-act="load" data-id="${esc(s.id)}">load</button>` +
-      `<button data-act="export" data-id="${esc(s.id)}" title="export">⤓</button>` +
-      `<button data-act="del" data-id="${esc(s.id)}" title="delete">✕</button>`;
+      `<button data-act="export" data-id="${esc(s.id)}" title="export" aria-label="Export ${esc(s.name)}">⤓</button>` +
+      `<button data-act="del" data-id="${esc(s.id)}" title="delete" aria-label="Delete ${esc(s.name)}">✕</button>`;
     sessionsItems.appendChild(el);
   });
 }
 function loadConversation(messages) {
-  messagesEl.innerHTML = ""; history.length = 0;
+  clearTranscript(); history.length = 0;
   (messages || []).forEach((m) => { addMessage(m.role, m.content, null, true); history.push({ role: m.role, content: m.content }); });
+  attachRunView();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // reset usage + show the loaded convo's context estimate
 }
 async function saveCurrent() {
@@ -1477,12 +1682,13 @@ async function saveCurrent() {
 }
 async function newSession() {
   if (history.length && !(await uiConfirm("Start a new chat? The current conversation will be cleared.", { title: "New chat", okText: "New chat" }))) return;
-  messagesEl.innerHTML = ""; history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
+  clearTranscript(); history.length = 0; currentSession = { id: null, name: null }; renderCurrent();
   saveHistory(); resetSessUsage(); refreshContextMeter();   // clear conversation, reset usage, meter -> 0%
   // A fresh chat starts with no active plan — clear THIS tab's ledger only.
   try { fetch("/api/plan?key=" + encodeURIComponent(activePlanKey()), { method: "DELETE" }); } catch (_) {}
   planCache[activePlanKey()] = null; renderActivePlan();
   addMessage("assistant", "New session. JARVIS online — ask me anything. (type `/help` for the help menu)");
+  attachRunView();
 }
 const newChatBtn = $("new-chat");
 if (newChatBtn) newChatBtn.addEventListener("click", newSession);
@@ -1536,7 +1742,7 @@ function setMic(state) {
     state === "open" ? "always on" :
     state === "listening" ? "listening…" :
     state === "asleep" ? `say "${wakeWordLabel()}"` :
-    state === "unsupported" ? "no mic API" : "voice off";
+    state === "unsupported" ? (window.isSecureContext === false ? "mic needs HTTPS" : "no mic API") : "voice off";
   if (state === "off" || state === "unsupported") setActiveMode("off");
   // Push-to-talk only makes sense when the mic is Off — Wake/Open already listen.
   if (micBtn) {
@@ -1545,7 +1751,7 @@ function setMic(state) {
     micBtn.title = usable ? "Push to talk (tap, then speak)" : "Not needed — the mic is already listening (Wake/Open)";
   }
   voiceListening = (state === "listening" || state === "open");
-  if (!ambSpeaking && !workingEl) amb(ambIdle());   // reflect mic state on the orb when idle
+  if (!ambSpeaking && !run) amb(ambIdle());   // reflect mic state on the orb when idle
 }
 if (micMode) micMode.addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-mode]");
@@ -1555,6 +1761,20 @@ if (micMode) micMode.addEventListener("click", (e) => {
   persistSetting("voice.mic_mode", btn.dataset.mode);   // remember the mic mode across reboots
 });
 if (micBtn) micBtn.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.listenOnce(); });
+// "Stop speaking" — shown only while JARVIS is talking (Escape does the same).
+(() => { const b = $("stop-speak"); if (b) b.addEventListener("click", () => { if (window.JarvisVoice) JarvisVoice.stopSpeaking(); b.hidden = true; inputEl.focus(); }); })();
+
+// Phone (≤600px): the top-bar controls fold behind a ⋯ button so the chat keeps the height.
+const topbarEl = document.querySelector(".topbar");
+function setMoreOpen(o) {
+  if (!topbarEl) return;
+  topbarEl.classList.toggle("more-open", !!o);
+  const b = $("more-btn"); if (b) b.setAttribute("aria-expanded", String(!!o));
+}
+(() => {
+  const b = $("more-btn"); if (!b) return;
+  b.addEventListener("click", (e) => { e.stopPropagation(); setMoreOpen(!topbarEl.classList.contains("more-open")); });
+})();
 
 // The "Voice" button toggles spoken replies (text-to-speech). Listening is handled
 // separately by the mic-mode control (Off / Wake / Open) + push-to-talk.
@@ -1651,7 +1871,7 @@ if (ambientBtn && window.JarvisAmbient) {
     if (JarvisAmbient.active()) {
       // Entering: turn on spoken replies so it can talk back, and reflect current state.
       if (window.JarvisVoice && !JarvisVoice.ttsEnabled()) { JarvisVoice.setTts(true); persistSetting("voice.tts", true); updateVoiceBtn(); }
-      amb(workingEl ? "thinking" : ambSpeaking ? "speaking" : ambIdle());
+      amb(run ? "thinking" : ambSpeaking ? "speaking" : ambIdle());
     }
   });
 }
@@ -1710,11 +1930,13 @@ async function init() {
   if (window.JarvisVoice && cfg.voice) {
     const ok = JarvisVoice.init(cfg.voice, {
       onUtterance: (t) => send(t), onState: setMic, onError: onVoiceError,
-      onSpeak: (speaking) => { ambSpeaking = speaking; amb(speaking ? "speaking" : ambIdle()); },
+      onSpeak: (speaking) => { ambSpeaking = speaking; amb(speaking ? "speaking" : ambIdle()); const b = $("stop-speak"); if (b) b.hidden = !speaking; },
       onBoundary: () => { if (window.JarvisAmbient) JarvisAmbient.pulse(); },   // browser: per-word pulse
       onLevel: (lvl) => { if (window.JarvisAmbient && JarvisAmbient.active()) JarvisAmbient.setLevel(lvl); }, // piper: real amplitude
     });
-    if (!ok) { setMic("unsupported"); onVoiceError(JarvisVoice.supportMessage()); }
+    // No usable microphone here (no speech API, or a page opened over plain http from another
+    // device): show it on the mic pill, but explain only when someone actually tries the mic.
+    if (!ok) setMic("unsupported");
     updateVoiceBtn();   // reflect the saved TTS state on the Voice button
     if (window.JarvisAmbient) JarvisAmbient.setStyle(cfg.voice.ambient_style || "face");   // avatar style (face | orb)
     if (ttsEngineSel) ttsEngineSel.value = curEngine();
@@ -1850,6 +2072,10 @@ async function renderAccess() {
 // save). Saving writes both files (server validates + auto-backs-up); applying the
 // change is a separate `./JARVIS.sh --reload`.
 let cfgObj = {}, secretsObj = { secrets: {} };
+// `version` of the files as this tab loaded them: the server refuses (409, code "stale") a
+// save over a newer config — e.g. a header toggle saved meanwhile — instead of overwriting it.
+let cfgVersion = null;
+let secretsDirty = false;   // the secrets editor was changed — only then are secrets sent
 
 // Declarative map of structured field -> config path -> type.
 // Types: str | num | bool | csv (comma-separated text ⇄ JSON array of strings).
@@ -2057,6 +2283,7 @@ function populateStructured() {
   if (getPath(cfgObj, "ollama.manage") === undefined) $("cfg-ollama-manage").checked = true;
   if (getPath(cfgObj, "secret_access_notice") === undefined) { const e = $("cfg-secret-notice"); if (e) e.checked = true; }
   if (getPath(cfgObj, "llm.smart_routing") === undefined) { const e = $("cfg-smart-routing"); if (e) e.checked = true; }
+  if (getPath(cfgObj, "llm.idle_watchdog") === undefined) { const e = $("cfg-idle-watchdog"); if (e) e.checked = true; }
   if (getPath(cfgObj, "voice.stt_engine") === undefined) { const e = $("cfg-stt-engine-field"); if (e) e.value = "browser"; }
   if (getPath(cfgObj, "workbench.enabled") === undefined) { const e = $("cfg-wb-enabled"); if (e) e.checked = true; }
   if (getPath(cfgObj, "search.provider") === undefined) { const e = $("cfg-search-provider"); if (e) e.value = "duckduckgo"; }
@@ -2217,6 +2444,7 @@ async function loadConfig() {
   if (d.config_error) { $("cfg-json-err").textContent = "Config file error: " + d.config_error; }
   cfgObj = d.config && typeof d.config === "object" ? d.config : {};
   secretsObj = d.secrets && typeof d.secrets === "object" ? d.secrets : { secrets: {} };
+  cfgVersion = d.version != null ? d.version : null; secretsDirty = false;
   populateProviderSelect(getPath(cfgObj, "llm.provider"));
   populateStructured();
   syncProviderUI();
@@ -2235,17 +2463,31 @@ async function saveConfig() {
   let config, secrets;
   try { config = JSON.parse($("cfg-json").value); }
   catch (e) { $("cfg-json-err").textContent = "Invalid JSON — fix before saving: " + e.message; return; }
-  try { secrets = JSON.parse($("cfg-secrets").value); }
-  catch (e) { $("cfg-secrets-err").textContent = "Invalid JSON — fix before saving: " + e.message; return; }
+  if (secretsDirty) {
+    try { secrets = JSON.parse($("cfg-secrets").value); }
+    catch (e) { $("cfg-secrets-err").textContent = "Invalid JSON — fix before saving: " + e.message; return; }
+  }
   const btn = $("cfg-save"); btn.disabled = true;
   try {
+    const body = { config };
+    if (secretsDirty) body.secrets = secrets;   // untouched secrets are not re-sent (nor re-written)
+    if (cfgVersion != null) body.version = cfgVersion;
     const r = await fetch("/api/config/full", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ config, secrets }),
+      body: JSON.stringify(body),
     });
-    const d = await r.json();
+    const d = await r.json().catch(() => ({}));
+    if (r.status === 409 && d.code === "stale") {
+      result.className = "cfg-result err";
+      result.innerHTML = "The config changed since you opened this tab (e.g. a header toggle). Reload the tab to see the latest, then make your change again. " +
+        '<button type="button" class="ghost cfg-stale-reload">↻ Reload</button>';
+      const rb = result.querySelector(".cfg-stale-reload"); if (rb) rb.addEventListener("click", () => loadConfig());
+      return;
+    }
     if (!r.ok) { result.className = "cfg-result err"; result.textContent = "Save failed: " + (d.error || r.status); return; }
-    cfgObj = config; secretsObj = secrets; populateStructured(); renderAccess();
+    if (d.version != null) cfgVersion = d.version;
+    if (secretsDirty) { secretsObj = secrets; secretsDirty = false; }
+    cfgObj = config; populateStructured(); renderAccess();
     // Refresh the header badge from the canonical config so it reflects the just-saved model. In
     // multi mode publicConfig() reports the CHAT-tier model (always present), so the badge stays
     // accurate even though the header has no per-tier display. (Without this the badge kept its
@@ -2295,7 +2537,8 @@ MODEL_SELECT_IDS.forEach((id) => { const s = $(id); if (s) s.addEventListener("c
     try { cfgObj = JSON.parse(raw.value); populateProviderSelect(getPath(cfgObj, "llm.provider")); populateStructured(); syncProviderUI(); $("cfg-json-err").textContent = ""; }
     catch (e) { $("cfg-json-err").textContent = "Invalid JSON: " + e.message; }
   });
-  const sraw = $("cfg-secrets"); if (sraw) sraw.addEventListener("blur", () => {
+  const sraw = $("cfg-secrets"); if (sraw) sraw.addEventListener("input", () => { secretsDirty = true; });
+  if (sraw) sraw.addEventListener("blur", () => {
     try { secretsObj = JSON.parse(sraw.value); $("cfg-secrets-err").textContent = ""; }
     catch (e) { $("cfg-secrets-err").textContent = "Invalid JSON: " + e.message; }
   });
@@ -2317,49 +2560,81 @@ function renderChatTabs() {
   const bar = $("chat-tabs"); if (!bar) return;
   bar.innerHTML = "";
   for (const c of chatsMeta.list) {
-    const tab = document.createElement("button");
-    tab.className = "chat-tab" + (c.id === chatsMeta.active ? " active" : "");
-    tab.setAttribute("role", "tab");
-    tab.innerHTML = `<span class="ct-name">${esc(c.name)}</span>` +
-      (chatsMeta.list.length > 1 ? `<span class="ct-x" title="Close this chat">✕</span>` : "");
+    // The tab is a frame holding two real buttons: the name (role="tab") and its close ✕.
+    const active = c.id === chatsMeta.active;
+    const tab = document.createElement("div");
+    tab.className = "chat-tab" + (active ? " active" : "");
+    tab.dataset.id = c.id;
+    tab.setAttribute("role", "presentation");
     tab.title = c.name + " — click to switch, double-click to rename";
-    tab.addEventListener("click", (e) => {
-      if (e.target.classList.contains("ct-x")) return closeChat(c.id);
-      if (c.id !== chatsMeta.active) switchChat(c.id);
-    });
+    const name = document.createElement("button");
+    name.type = "button"; name.className = "ct-name"; name.textContent = c.name;
+    name.setAttribute("role", "tab"); name.setAttribute("aria-selected", String(active));
+    tab.appendChild(name);
+    if (chatsMeta.list.length > 1) {
+      const x = document.createElement("button");
+      x.type = "button"; x.className = "ct-x"; x.textContent = "✕"; x.title = "Close this chat";
+      x.setAttribute("aria-label", "Close chat " + c.name);
+      x.addEventListener("click", (e) => { e.stopPropagation(); closeChat(c.id); });
+      x.addEventListener("dblclick", (e) => e.stopPropagation());
+      tab.appendChild(x);
+    }
+    tab.addEventListener("click", () => { if (c.id !== chatsMeta.active) switchChat(c.id); });
     tab.addEventListener("dblclick", async () => {
-      const name = await uiPrompt("Rename chat", c.name, { okText: "Rename" });
-      if (name && name.trim()) { c.name = name.trim().slice(0, 40); saveChatsMeta(); renderChatTabs(); syncChat(c.id).catch(() => {}); }
+      const nm = await uiPrompt("Rename chat", c.name, { okText: "Rename" });
+      if (nm && nm.trim()) { c.name = nm.trim().slice(0, 40); saveChatsMeta(); renderChatTabs(); syncChat(c.id).catch(() => {}); paintRunState(); }
     });
     bar.appendChild(tab);
   }
   const add = document.createElement("button");
-  add.className = "chat-tab-add"; add.textContent = "＋"; add.title = "Open another conversation in parallel";
+  add.type = "button"; add.className = "chat-tab-add"; add.textContent = "＋"; add.title = "Open another conversation in parallel";
+  add.setAttribute("aria-label", "New chat tab");
   add.addEventListener("click", () => {
     saveHistory();
     const id = "c" + Date.now().toString(36);
     chatsMeta.list.push({ id, name: "Chat " + (chatsMeta.list.length + 1) });
     chatsMeta.active = id; saveChatsMeta();
-    messagesEl.innerHTML = ""; history.length = 0;
+    clearTranscript(); history.length = 0;
     currentSession = { id: null, name: null }; renderCurrent();
-    resetSessUsage(); refreshContextMeter(); renderChatTabs();
+    resetSessUsage(); refreshContextMeter(); renderChatTabs(); paintRunState();
     addMessage("assistant", "New parallel chat. The other tabs keep their conversations — switch any time.");
   });
   bar.appendChild(add);
+  paintChatTabBadges();
+}
+// Small badges on the chat tabs: ● working (the request in flight), • new reply/notice there.
+function paintChatTabBadges() {
+  const bar = $("chat-tabs"); if (!bar) return;
+  bar.querySelectorAll(".chat-tab").forEach((t) => {
+    const id = t.dataset.id;
+    const busy = !!run && run.chatId === id, unread = unreadChats.has(id);
+    t.classList.toggle("busy", busy);
+    t.classList.toggle("unread", unread && !busy);
+    const n = t.querySelector(".ct-name");
+    if (n) n.setAttribute("aria-label", chatName(id) + (busy ? " (working)" : unread ? " (new)" : ""));
+  });
 }
 function switchChat(id) {
   if (!chatsMeta.list.some((c) => c.id === id)) return;
   saveHistory();                       // persist the outgoing chat
   chatsMeta.active = id; saveChatsMeta();
-  messagesEl.innerHTML = ""; history.length = 0;
+  clearTranscript(); history.length = 0;
   currentSession = { id: null, name: null }; renderCurrent();
   restoreHistory(); resetSessUsage(); refreshContextMeter(); renderChatTabs();
+  // Notices that arrived for this chat while another tab was showing, then the live request.
+  for (const n of chatNotes[id] || []) { addMessage("assistant", n.text, n.cls); if (n.retry) addRetry(); }
+  delete chatNotes[id]; unreadChats.delete(id);
+  if (streams[BG_KEY]) { const b = streams[BG_KEY]; if (b.started) { b.bubble = addMessage("assistant", ""); renderAssistant(b.bubble, b.text); } }
+  attachRunView(); paintRunState();
   fetchPlanFor(activePlanKey());       // the banner follows the active tab's ledger
   stickBottom = true; messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 async function closeChat(id) {
   const c = chatsMeta.list.find((x) => x.id === id); if (!c || chatsMeta.list.length < 2) return;
-  if (!(await uiConfirm(`Close "${c.name}"? Its conversation is discarded (save it via Sessions first if you want to keep it).`, { title: "Close chat", okText: "Close", danger: true }))) return;
+  const working = !!run && run.chatId === id;
+  if (!(await uiConfirm(`Close "${c.name}"? Its conversation is discarded (save it via Sessions first if you want to keep it).` + (working ? "\n\nJARVIS is still working on a message there — closing the tab stops it." : ""), { title: "Close chat", okText: "Close", danger: true }))) return;
+  if (working && ws && ws.readyState === 1) { try { ws.send(JSON.stringify({ type: "cancel" })); } catch (_) {} }
+  delete streams[id]; delete chatNotes[id]; unreadChats.delete(id);
   try { localStorage.removeItem(chatSlotKey(id)); } catch (_) {}
   try { fetch("/api/sessions/" + encodeURIComponent("live_" + id), { method: "DELETE" }); } catch (_) {}   // drop the server copy too
   chatsMeta.list = chatsMeta.list.filter((x) => x.id !== id);

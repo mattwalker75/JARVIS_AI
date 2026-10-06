@@ -197,9 +197,9 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, obj):
+    def _send(self, obj, code=200):
         b = json.dumps(obj).encode()
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
@@ -209,6 +209,14 @@ class H(BaseHTTPRequestHandler):
         self._send({"ok": True})
 
     def do_POST(self):
+        # Only JSON requests. A web page open in this same browser could otherwise fire a
+        # "simple" cross-site POST (text/plain, no CORS preflight) at this daemon and drive
+        # the agent's logged-in browser. application/json forces a preflight, which this
+        # server never answers, so such a request is never sent.
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            self._send({"error": "requests must be JSON (Content-Type: application/json)"}, 415)
+            return
         try:
             ln = int(self.headers.get("Content-Length") or 0)
             d = json.loads(self.rfile.read(ln) or b"{}")
@@ -219,4 +227,7 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     # Single-threaded on purpose: serializes all browser ops through one Playwright page.
+    # Bound to all interfaces ON PURPOSE: the app reaches it from ITS container at
+    # http://jarvis-workbench:9251 over the compose network (127.0.0.1 would cut it off).
+    # The port is not published to the host.
     HTTPServer(("0.0.0.0", PORT), H).serve_forever()

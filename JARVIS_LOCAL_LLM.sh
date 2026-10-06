@@ -84,6 +84,9 @@ PY
 }
 
 port_up() { [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$1" 2>/dev/null)" != "000" ]]; }
+# An MLX server is "up" only if its OpenAI API answers 200 — any other service on that port
+# (which port_up would accept) is not our model server.
+mlx_answers() { [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localhost:$1/v1/models" 2>/dev/null)" == "200" ]]; }
 
 # Export provider API keys from JARVIS_CONFIG.json so the (optional) gateway can reach each
 # provider. Only relevant with --gateway; harmless otherwise.
@@ -526,7 +529,11 @@ def implements(pkg):                 # models/<type>.py OR models/<type>/ (mlx-v
     if not spec or not spec.origin: return False
     base = os.path.join(os.path.dirname(spec.origin), "models", mt)
     return os.path.exists(base + ".py") or os.path.isdir(base)
-print("lm" if implements("mlx_lm") else "vlm" if implements("mlx_vlm") else "")
+# A vision-language model (config has vision_config) goes to mlx-vlm when mlx-vlm implements it —
+# mlx-lm may also implement the type but serves it text-only, silently dropping vision.
+vision = bool(srcdir and (read_cfg(srcdir) or {}).get("vision_config"))
+if vision and implements("mlx_vlm"): print("vlm")
+else: print("lm" if implements("mlx_lm") else "vlm" if implements("mlx_vlm") else "")
 PY
 }
 
@@ -552,10 +559,12 @@ mlx_serve_one() {  # model [port]
   esac
   local log; log="${SCRIPT_DIR}/mlx/$(echo "$model" | tr '/:' '__').log"
   info "Starting MLX $model on :$port via $(basename "$server")  (first run downloads into mlx/models; big models take a while)..."
-  HF_HOME="$MLX_MODELS_DIR" nohup "$server" --model "$model" --host 0.0.0.0 --port "$port" > "$log" 2>&1 &
-  mlx_registry_add "$model" "$port"
+  # 127.0.0.1: the model server has no login, so it is NOT offered to the network. Docker Desktop
+  # on a Mac still reaches it through host.docker.internal. MLX_HOST=0.0.0.0 widens it on purpose.
+  HF_HOME="$MLX_MODELS_DIR" nohup "$server" --model "$model" --host "${MLX_HOST:-127.0.0.1}" --port "$port" > "$log" 2>&1 &
   for _ in $(seq 1 180); do
-    port_up "http://localhost:${port}/v1/models" && {
+    mlx_answers "$port" && {
+      mlx_registry_add "$model" "$port"   # remembered for mlx-up only once it actually came up
       ok "MLX $model up on :$port."
       # The served name is NOT optional on mlx-vlm: it has no "default_model" alias, and any other
       # string is treated as a repo id to fetch. Say exactly what to put in Config.
@@ -564,7 +573,10 @@ mlx_serve_one() {  # model [port]
     }
     sleep 1
   done
+  # Still loading after 3 minutes: remember it anyway (big models), but report a failure.
+  mlx_registry_add "$model" "$port"
   warn "MLX $model not answering on :$port yet — may still be loading (see $log)."
+  return 1
 }
 # Relaunch any registered model that isn't currently running (reboot recovery).
 mlx_up() {
@@ -572,7 +584,7 @@ mlx_up() {
   local any=0
   while IFS='|' read -r model port; do
     [[ -z "$model" ]] && continue; any=1
-    if port_up "http://localhost:${port}/v1/models"; then ok "MLX $model already up on :$port."
+    if mlx_answers "$port"; then ok "MLX $model already up on :$port."
     else mlx_serve_one "$model" "$port"; fi
   done < <(mlx_registry_list)
   [[ "$any" == 0 ]] && info "No MLX models registered yet — bring one online:  ./JARVIS_LOCAL_LLM.sh mlx-serve <model>"
@@ -584,7 +596,9 @@ mlx_stop_target() {  # model|port|all
   while IFS='|' read -r model port; do
     [[ -z "$port" ]] && continue
     if [[ "$target" == "all" || "$target" == "$model" || "$target" == "$port" ]]; then
-      pid="$(lsof -ti tcp:"$port" 2>/dev/null | head -1)"
+      # -a + LISTEN: the process LISTENING on the port. Plain `lsof -ti tcp:PORT` also lists
+      # clients (Docker Desktop's backend, LiteLLM) and could kill one of them instead.
+      pid="$(lsof -a -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1)"
       [[ -n "$pid" ]] && kill "$pid" 2>/dev/null && { ok "stopped $model (:$port)."; stopped=1; }
       [[ "$target" != "all" ]] && mlx_registry_remove "$target"
     fi
@@ -1064,14 +1078,20 @@ while [[ $# -gt 0 ]]; do
     delete-model|delete_model|rm-model|remove-model)      CMD="delete-model" ;;
     --gateway)             USE_GATEWAY=1 ;;
     --backend)             shift; BACKEND="$(lc "${1:-ollama}")"; BACKEND_EXPLICIT=1 ;;
-    --port)                shift; MLX_PORT_ARG="${1:-}" ;;
+    --port)                shift; MLX_PORT_ARG="${1:-}"
+                           [[ "$MLX_PORT_ARG" =~ ^[0-9]+$ && "$MLX_PORT_ARG" -ge 1 && "$MLX_PORT_ARG" -le 65535 ]] \
+                             || { err "--port needs a number from 1 to 65535."; exit 1; } ;;
     --json)                AS_JSON=1 ;;
     --details|--detail|-l) DETAILS=1 ;;
-    --runtime)             shift; MLX_RUNTIME_ARG="$(lc "${1:-}")" ;;   # force lm | vlm
+    --runtime)             shift; MLX_RUNTIME_ARG="$(lc "${1:-}")"    # force lm | vlm
+                           [[ "$MLX_RUNTIME_ARG" == lm || "$MLX_RUNTIME_ARG" == vlm ]] \
+                             || { err "--runtime must be lm or vlm."; exit 1; } ;;
     -y|--yes)              YES=1 ;;
     -h|--help|help)        usage; exit 0 ;;
     -*)                    err "unknown option: $1"; usage; exit 1 ;;
-    *)                     MLX_ARG="$1" ;;    # positional: model id / target for the mlx-* commands
+    *)                     # positional: model id / target for the mlx-* commands (just one)
+                           [[ -n "$MLX_ARG" ]] && { err "only one model/target, got '$MLX_ARG' and '$1'."; exit 1; }
+                           MLX_ARG="$1" ;;
   esac
   shift
 done
@@ -1087,10 +1107,10 @@ the_url() { if [[ "$USE_GATEWAY" == 1 ]]; then gateway_url; else "${BACKEND}_url
 case "$CMD" in
   start)
     "${BACKEND}_apply_config"
-    "${BACKEND}_ensure_running" || true
+    "${BACKEND}_ensure_running" || { err "The $BACKEND runtime is not answering yet — see the messages above, then run this again."; exit 1; }
     if [[ "$USE_GATEWAY" == 1 ]]; then
-      sync_gateway_models    # regenerate the local-routes block from THIS backend's live models...
-      gateway_up             # ...then (re)start the gateway so it re-reads the fresh config.
+      sync_gateway_models || { err "Could not update the gateway's model list."; exit 1; }   # local routes from THIS backend...
+      gateway_up || { err "The gateway did not start — see the messages above."; exit 1; }  # ...then (re)start it.
     fi
     echo
     ok "Local LLM ready ($BACKEND)."
@@ -1110,8 +1130,14 @@ case "$CMD" in
     the_url
     ;;
   mlx-serve)
-    mlx_serve_one "$MLX_ARG" "$MLX_PORT_ARG"
-    [[ "$USE_GATEWAY" == 1 ]] && { BACKEND=mlx; sync_gateway_models && { port_up "http://localhost:${GATEWAY_PORT}/health/liveliness" && gateway_up; }; }
+    rc=0; mlx_serve_one "$MLX_ARG" "$MLX_PORT_ARG" || rc=$?
+    if [[ "$USE_GATEWAY" == 1 && $rc -eq 0 ]]; then
+      BACKEND=mlx
+      if sync_gateway_models; then
+        if port_up "http://localhost:${GATEWAY_PORT}/health/liveliness"; then gateway_up || rc=$?; fi
+      else rc=1; fi
+    fi
+    exit $rc
     ;;
   mlx-stop)   mlx_stop_target "${MLX_ARG:-all}" ;;
   mlx-ls)     mlx_ls ;;

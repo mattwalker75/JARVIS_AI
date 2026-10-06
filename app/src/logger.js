@@ -83,9 +83,23 @@ function secretValues() {
   } catch (_) {}
   return [...out];
 }
+// Each secret is also scrubbed in the forms it takes inside logged payloads: JSON-escaped (a
+// secret containing " or \ is written as \" / \\ once the payload is JSON.stringify'd, so the raw
+// value never matches) and base64 (e.g. a Basic auth header). Longest first, so a longer form is
+// replaced before a shorter one it contains.
+function redactionForms() {
+  const out = new Set();
+  for (const v of secretValues()) {
+    out.add(v);
+    const esc = JSON.stringify(v).slice(1, -1); if (esc !== v) out.add(esc);
+    const esc2 = JSON.stringify(esc).slice(1, -1); if (esc2 !== esc) out.add(esc2);   // stringified twice (a JSON string inside JSON)
+    out.add(Buffer.from(v, "utf8").toString("base64").replace(/=+$/, ""));
+  }
+  return [...out].filter((v) => v && v.length >= 4).sort((a, b) => b.length - a.length);
+}
 function redact(s) {
   let out = String(s);
-  for (const v of secretValues()) { if (v) out = out.split(v).join("***REDACTED***"); }
+  for (const v of redactionForms()) out = out.split(v).join("***REDACTED***");
   return out;
 }
 
@@ -102,6 +116,7 @@ function write(lvl, category, message, data) {
   try {
     if (cfg.logLevel() < lvl) return;      // cheap early-out when disabled or below level
     if (!ensureDir()) return;
+    cleanupOldLogs();                      // guards itself to once a day — retain_days on a long-running server
     const ts = new Date().toISOString();
     const day = ts.slice(0, 10);
     const file = path.join(LOG_DIR, `jarvis-${day}.log`);
@@ -119,4 +134,5 @@ module.exports = {
   debug:   (category, message, data) => write(5, category, message, data),
   level:   () => cfg.logLevel(),
   LOG_DIR,
+  redact,
 };

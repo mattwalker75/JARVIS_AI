@@ -17,12 +17,32 @@ const SETTABLE = new Set([
   "skills_autohint",
 ]);
 
+// Expected value type for each allowlisted setting — a wrong type (a string where a number
+// belongs, an object, …) is refused instead of being written into the file.
+const SETTING_TYPES = {
+  "voice.tts": "boolean", "voice.stt": "boolean", "voice.enabled": "boolean", "skills_autohint": "boolean",
+  "voice.silence_timeout_seconds": "number", "voice.followup_seconds": "number",
+  "voice.tts_rate": "number", "voice.tts_pitch": "number", "llm.temperature": "number", "llm.max_tokens": "number",
+  "voice.mic_mode": "string", "voice.ambient_style": "string", "voice.tts_engine": "string", "voice.tts_voice": "string",
+  "voice.stt_engine": "string", "assistant_name": "string", "llm.model": "name", "llm.models.chat": "name",
+};
+
 let config = {};
 let loadError = null;
 try {
   config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+  if (!config || typeof config !== "object" || Array.isArray(config)) { config = {}; throw new Error("the file must hold one JSON object"); }
 } catch (e) {
   loadError = e.message;
+}
+// The plain sentence shown while the config file can't be read. Writes are refused then (they
+// would overwrite the user's broken-but-recoverable file with an empty config) and the API stays
+// locked (the login settings live in that file, so running without them would mean no login).
+function configProblem() {
+  return loadError ? `config/JARVIS_CONFIG.json can't be read (${loadError}). Fix the file, then reload — nothing was saved.` : null;
+}
+function refuseIfBroken() {
+  if (loadError) { const e = new Error(configProblem()); e.status = 503; throw e; }
 }
 
 // The AI's name. Drives identity (system prompt), the displayed title, and the
@@ -124,6 +144,10 @@ function paramsFor(tier) {
   return out;
 }
 
+// The context-window size assumed when neither the config nor the endpoint says (shared with
+// server.js /api/context-window so the meter and the page agree).
+const DEFAULT_CONTEXT_WINDOW = 32768;
+
 // Safe subset sent to the browser (no api_key, no db password).
 function publicConfig() {
   const v = config.voice || {};
@@ -161,14 +185,44 @@ function publicConfig() {
     stall_seconds: Number((config.ui || {}).stall_seconds) || 25,
     auto_compact_pct: Number((config.ui || {}).auto_compact_pct ?? 85),   // 0 = never auto-compact
     autopilot: { autonomy: ((config.autopilot || {}).autonomy === "full") ? "full" : "guarded", default_minutes: Number((config.autopilot || {}).default_minutes) || 30 },
-    context_window: Number((config.llm || {}).context_window) || Number((config.ollama || {}).context_length) || 32768,
+    context_window: Number((config.llm || {}).context_window) || Number((config.ollama || {}).context_length) || DEFAULT_CONTEXT_WINDOW,
   };
 }
 
 // Update one allowlisted setting IN MEMORY (takes effect immediately) and persist it
 // atomically to JARVIS_CONFIG.json so it survives restarts/rebuilds.
+function checkSettingType(pathStr, value) {
+  const want = SETTING_TYPES[pathStr];
+  const bad = (what) => { throw new Error(`${pathStr} must be ${what} — nothing was saved.`); };
+  if (want === "boolean" && typeof value !== "boolean") bad("true or false");
+  if (want === "number" && !(typeof value === "number" && Number.isFinite(value))) bad("a number");
+  if (want === "number" && pathStr === "llm.max_tokens" && !(value > 0)) bad("a number above 0");
+  if (want === "string" && typeof value !== "string") bad("text");
+  if (want === "name" && !(typeof value === "string" && value.trim())) bad("a model name");
+  if (typeof value === "string" && value.length > 500) bad("shorter than 500 characters");
+}
 function setSetting(pathStr, value) {
   if (!SETTABLE.has(pathStr)) throw new Error("setting not allowed: " + pathStr);
+  refuseIfBroken();
+  checkSettingType(pathStr, value);
+  if (pathStr.startsWith("llm.models.")) {
+    // A tier's model. In single-model mode every tier runs llm.model, and creating a models block
+    // would silently flip the app into multi-model mode — so set llm.model instead. A tier written
+    // in the object form ({model, temperature, …}) keeps its other overrides: only .model changes.
+    const tier = pathStr.slice("llm.models.".length);
+    if (!config.llm || typeof config.llm !== "object") config.llm = {};
+    if (modelMode() === "single") {
+      config.llm.model = value;
+      _persist();
+      return { path: "llm.model", value };
+    }
+    if (!config.llm.models || typeof config.llm.models !== "object") config.llm.models = {};
+    const cur = config.llm.models[tier];
+    if (cur && typeof cur === "object" && !Array.isArray(cur)) cur.model = value;
+    else config.llm.models[tier] = value;
+    _persist();
+    return { path: pathStr, value };
+  }
   const parts = pathStr.split(".");
   let o = config;
   for (let i = 0; i < parts.length - 1; i++) {
@@ -176,12 +230,15 @@ function setSetting(pathStr, value) {
     o = o[parts[i]];
   }
   o[parts[parts.length - 1]] = value;
-  // Write IN PLACE: CONFIG_FILE is a bind-mounted single file, so a tmp+rename swap fails
-  // with EBUSY (can't rename over a mount point). Back up first so a crash mid-write (which would
-  // truncate the file and wipe every persisted setting on next boot) is recoverable.
+  _persist();
+  return { path: pathStr, value };
+}
+// Write IN PLACE: CONFIG_FILE is a bind-mounted single file, so a tmp+rename swap fails
+// with EBUSY (can't rename over a mount point). Back up first so a crash mid-write (which would
+// truncate the file and wipe every persisted setting on next boot) is recoverable.
+function _persist() {
   _backup(CONFIG_FILE);
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-  return { path: pathStr, value };
 }
 
 // Current debug-logging level (0 off .. 5 full). Read live from `config` so a change
@@ -200,11 +257,20 @@ function logLevel() {
 function _readJson(file) { return JSON.parse(fs.readFileSync(file, "utf8")); }
 
 function readFullConfig() {
-  const out = { config: null, secrets: null, config_error: null, secrets_error: null };
+  const out = { config: null, secrets: null, config_error: null, secrets_error: null, version: fullConfigVersion() };
   try { out.config = _readJson(CONFIG_FILE); } catch (e) { out.config_error = e.message; }
   try { out.secrets = _readJson(SECRETS_FILE); } catch (e) { out.secrets_error = e.message; }
   return out;
 }
+
+// "<config hash>:<secrets hash>" of the files on disk. The Config tab sends back the version it
+// loaded; a save is refused if a file changed since (a header toggle, a secret the model saved,
+// another tab) — it used to silently overwrite those changes with the tab's stale copy.
+function _fileHash(f) {
+  try { return require("crypto").createHash("sha256").update(fs.readFileSync(f)).digest("hex").slice(0, 16); }
+  catch (_) { return "none"; }
+}
+function fullConfigVersion() { return _fileHash(CONFIG_FILE) + ":" + _fileHash(SECRETS_FILE); }
 
 // Keep only the newest N backups per file (backups.retain in JARVIS_CONFIG.json, default
 // 10; 0 = keep everything). Every CONFIG backup carries the live api_key, so an unbounded
@@ -248,13 +314,25 @@ function _put(obj, dotted, value) {
 /** Set one protected key (in memory + on disk, with a backup). Server-internal: never reachable with a caller-chosen path. */
 function setProtected(pathStr, value) {
   if (!PROTECTED.includes(pathStr)) throw new Error("not a protected setting: " + pathStr);
+  refuseIfBroken();
   _put(config, pathStr, value);
   _backup(CONFIG_FILE);
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
   return { path: pathStr, value };
 }
 
-function writeFullConfig({ config: newConfig, secrets: newSecrets }) {
+function writeFullConfig({ config: newConfig, secrets: newSecrets, version }) {
+  refuseIfBroken();
+  if (typeof version === "string" && version) {
+    const [cv, sv] = version.split(":");
+    const [ncv, nsv] = fullConfigVersion().split(":");
+    const stale = (newConfig != null && cv !== ncv) || (newSecrets != null && sv !== nsv);
+    if (stale) {
+      const e = new Error("The config changed since you opened this tab (for example a header toggle, or a secret JARVIS saved). Reload the tab to see the latest, then make your change again — nothing was saved.");
+      e.status = 409; e.code = "stale";
+      throw e;
+    }
+  }
   const result = { saved: [], backups: [] };
   if (newConfig !== undefined && newConfig !== null) {
     if (typeof newConfig !== "object" || Array.isArray(newConfig)) throw new Error("config must be a JSON object");
@@ -307,4 +385,5 @@ function deleteSecret(name) {
   return { name, deleted: true };
 }
 
-module.exports = { config, loadError, publicConfig, workbenchEnabled, modelFor, modelMode, paramsFor, setSetting, setProtected, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };
+module.exports = {
+  fullConfigVersion, config, loadError, configProblem, DEFAULT_CONTEXT_WINDOW, publicConfig, workbenchEnabled, modelFor, modelMode, paramsFor, setSetting, setProtected, getSecrets, setSecret, deleteSecret, assistantName, systemPrompt, activePromptName, readFullConfig, writeFullConfig, logLevel };

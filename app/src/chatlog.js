@@ -15,13 +15,17 @@ let buf = [];
 { const j = persist.readJson(FILE, null); if (Array.isArray(j)) buf = j; }
 
 let writeTimer = null;
-function flush() { try { persist.writeJsonAtomic(FILE, buf.slice(-MAX)); } catch (_) {} }
+function flush() {
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  try { persist.writeJsonAtomic(FILE, buf.slice(-MAX)); } catch (_) {}
+}
 function schedulePersist() {
   if (writeTimer) return;      // debounce bursts of writes
   writeTimer = setTimeout(() => { writeTimer = null; flush(); }, 250);
 }
-// Don't lose the last few messages on shutdown.
-process.on("SIGTERM", flush); process.on("SIGINT", flush); process.on("beforeExit", flush);
+// Don't lose the last few messages on shutdown. SIGTERM/SIGINT are handled by server.js's one
+// shutdown handler (it calls flush() and then exits) — a handler here would keep the process alive.
+process.on("beforeExit", flush);
 
 // Record one chat-visible message.
 function record(role, text) {
@@ -47,4 +51,4 @@ function recent(opts) {
   return out.slice(-lim).map((m) => ({ at: new Date(m.at).toISOString(), role: m.role, text: m.text }));
 }
 
-module.exports = { record, recent };
+module.exports = { record, recent, flush };

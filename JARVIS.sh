@@ -46,13 +46,14 @@
 #   -d, --delete       Remove containers, network, and ALL data volumes.
 #                      If long-term memory is online, it first ASKS whether to back it up
 #                      (runs --backup-memory on "yes"). Add -f/--force to skip that prompt.
-#   -f, --force        Skip interactive confirmations (currently: --delete's memory-backup prompt).
+#   -f, --force        Skip interactive confirmations (--delete's memory-backup prompt, and the
+#                      "are you sure?" of --restore-memory / --restore-workspace).
 #       --backup-memory   Save the semantic memory (Mem0 vector store) to backups/jarvis-memory-<ts>.tgz.
-#       --restore-memory [--from <file>]   Restore the memory from a backup tarball,
-#                      or (no --from) reset to a FRESH empty memory.
+#       --restore-memory --from <file> | --fresh   Restore the memory from a backup tarball, or
+#                      (--fresh) reset it to an EMPTY memory. Asks first; one of the two is required.
 #       --backup-workspace   Save the workbench /LLM_WORKSPACE to backups/jarvis-workspace-<ts>.tgz.
-#       --restore-workspace [--from <file>]   Restore /LLM_WORKSPACE from a backup,
-#                      or (no --from) reset it to EMPTY.
+#       --restore-workspace --from <file> | --fresh   Restore /LLM_WORKSPACE from a backup, or
+#                      (--fresh) empty it. Asks first; one of the two is required.
 #       --reset-workbench   DELETE & REBUILD only the dev OS container (the Linux the LLM works in),
 #                      back to its clean image — wipes everything the LLM installed/changed at RUNTIME
 #                      (apt & pip packages, system tweaks). KEEPS /LLM_WORKSPACE build files + browser
@@ -118,7 +119,32 @@ MEM_CONTAINER="jarvis-memory"
 MEM_VOLUME="${PROJECT}_jarvis_memory_data"
 # (LLM_WORKSPACE is a host bind mount now — ./LLM_WORKSPACE — not a Docker volume)
 APP_PORT="8110"; WB_PORT="8111"   # (memory is internal-only — no host port; see wait_mem)
-FORCE=0   # set by -f/--force; when 1, --delete skips its "back up memory first?" prompt
+FORCE=0   # set by -f/--force; when 1, --delete / --restore-* skip their confirmation prompts
+
+# "Are you sure?" for destructive restores. Yes with --force; without a terminal (and no
+# --force) the answer is No, so a script can never wipe data by accident.
+confirm_destroy() { # $1 = what will be destroyed
+  [[ "$FORCE" == "1" ]] && return 0
+  if [[ ! -t 0 ]]; then err "$1 — refusing without confirmation (add --force to run it unattended)."; return 1; fi
+  printf '%b' "${C_YEL}?? ${C_RESET}$1. Continue? [y/N] "
+  local ans; read -r ans
+  [[ "$(lc "$ans")" == "y" || "$(lc "$ans")" == "yes" ]] || { info "Cancelled — nothing was changed."; return 1; }
+}
+
+# Check a backup before anything is deleted: it must exist, be a readable .tgz, and hold no
+# absolute or '..' paths. (A corrupt file used to pass, and the restore wiped the current data
+# before tar failed.)
+check_backup_file() { # $1 = file
+  local from="$1"
+  [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
+  local list
+  if ! list="$(tar tzf "$from" 2>/dev/null)"; then
+    err "Not a readable backup (.tgz) — nothing was changed: $from"; return 1
+  fi
+  if grep -qE '(^|/)\.\.(/|$)|^/|^~' <<<"$list"; then
+    err "Backup contains unsafe paths (absolute or '..'); refusing to restore: $from"; return 1
+  fi
+}
 
 # LLM hosting/management lives OUTSIDE this script now — see ./JARVIS_LOCAL_LLM.sh (local runtimes
 # like Ollama + an optional LiteLLM gateway). JARVIS just talks to whatever URL is in
@@ -152,8 +178,31 @@ net_env() {
   if net_allowed; then export APP_BIND="0.0.0.0"; else export APP_BIND="127.0.0.1"; fi
   JARVIS_HOST_ADDRS="$(host_addrs)"; JARVIS_HOSTNAMES="$(host_names)"; export JARVIS_HOST_ADDRS JARVIS_HOSTNAMES
 }
-# Where the running app container's port is published right now ("127.0.0.1" / "0.0.0.0"; empty if not running).
-app_bind_now() { docker port "$APP_CONTAINER" 80/tcp 2>/dev/null | head -1 | sed 's/:[0-9]*$//'; }
+# Where the app container's port is published ("127.0.0.1" / "0.0.0.0"; empty if there is no
+# container). Read from the container's own settings, so it also works while it is stopped —
+# `docker port` answers nothing then, and a network change made while stopped was never applied.
+app_bind_now() {
+  docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}{{end}}{{end}}' "$APP_CONTAINER" 2>/dev/null | head -1
+}
+
+# config/JARVIS_SECRETS.json (and JARVIS_CONFIG.json) are bind-mounted as single files. If one
+# is missing, Docker creates a DIRECTORY with that name and the app can't read or save it —
+# so seed a missing one from its template. Both hold keys/passwords: keep them owner-only.
+ensure_config_files() {
+  local d="${SCRIPT_DIR}/config" f
+  for f in JARVIS_CONFIG JARVIS_SECRETS; do
+    if [[ -d "$d/$f.json" ]]; then
+      err "config/$f.json is a folder (Docker made it because the file was missing). Remove that empty folder, then run this again."; return 1
+    fi
+    if [[ ! -f "$d/$f.json" && -f "$d/${f}_template.json" ]]; then
+      ( umask 077; cp "$d/${f}_template.json" "$d/$f.json" ) && info "Created config/$f.json from its template."
+    fi
+  done
+  for f in "$d"/JARVIS_CONFIG.json "$d"/JARVIS_SECRETS.json "$d"/JARVIS_CONFIG.*backup*.json; do
+    [[ -f "$f" ]] && chmod 600 "$f" 2>/dev/null
+  done
+  return 0
+}
 # Who can open the chat UI, for --start, --reload and --status.
 access_summary() {
   if net_allowed; then
@@ -283,7 +332,10 @@ check_memory_embedder() {
 # should hand you a clean slate — no zombie Autopilot banner or leftover plan. Wipe them here.
 clear_autopilot_state() {
   local removed=0
-  for f in "${SCRIPT_DIR}/data/autopilot.json" "${SCRIPT_DIR}/data/plan.json"; do
+  # Plans now live in data/plans/<key>.json; the Autopilot and the default (REST/CLI/task) plans
+  # are cleared here. Each chat tab's own plan (chat_<id>.json) stays with that chat.
+  for f in "${SCRIPT_DIR}/data/autopilot.json" "${SCRIPT_DIR}/data/plan.json" \
+           "${SCRIPT_DIR}/data/plans/autopilot.json" "${SCRIPT_DIR}/data/plans/default.json"; do
     [[ -e "$f" ]] && { rm -f "$f" && removed=1; }
   done
   [[ "$removed" == 1 ]] && info "Cleared saved Autopilot run + plan (fresh start)." || true
@@ -297,6 +349,7 @@ cmd_check() {
 
 cmd_setup() {
   require_daemon
+  ensure_config_files || return 1
   clear_autopilot_state
   local targets="jarvis-app jarvis-memory jarvis-piper"
   if workbench_enabled; then
@@ -317,6 +370,7 @@ cmd_setup() {
 
 cmd_start() {
   require_daemon
+  ensure_config_files || return 1
   clear_autopilot_state
   if workbench_enabled; then info "START: bringing up app + memory + workbench + voice..."; wb_base_env
   else info "START: bringing up app + memory + voice (the workbench is turned off in the config)..."; fi
@@ -345,14 +399,18 @@ cmd_reload() {
   info "(Local LLM runtimes are managed separately — see ./JARVIS_LOCAL_LLM.sh.)"
   # A change to network access is a change to the container's port binding, which a plain
   # restart keeps — re-create just the app container in that case.
+  ensure_config_files || return 1
   net_env
   local now; now="$(app_bind_now)"
-  if [[ -n "$now" && "$now" != "$APP_BIND" ]]; then
-    info "Network access changed — re-creating the app container so its port is published on ${APP_BIND}."
-    dc up -d jarvis-app || { err "Reload failed."; return 1; }
+  if [[ -z "$now" || "$now" != "$APP_BIND" ]]; then
+    [[ -n "$now" ]] && info "Network access changed — re-creating the app container so its port is published on ${APP_BIND}."
+    # shellcheck disable=SC2046
+    dc $(stack_profiles) up -d jarvis-app || { err "Reload failed."; return 1; }
   else
     dc restart jarvis-app || { err "Reload failed."; return 1; }
   fi
+  # search.provider switched to searxng: start its sidecar (it isn't started otherwise).
+  [[ -n "$(search_profile)" ]] && { dc --profile search up -d jarvis-searxng >/dev/null 2>&1 || warn "Could not start the SearXNG search sidecar."; }
   sync_workbench   # the workbench switch: stop its container when off, start it when on
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
   ok "Configuration reloaded."
@@ -375,7 +433,9 @@ cmd_update() {
   require_daemon
   local changed to_build=""
   changed="$(git -C "$SCRIPT_DIR" diff --name-only "$old" "$new")"
-  echo "$changed" | grep -q '^app/'       && to_build="$to_build jarvis-app"
+  # The app's SOURCE is bind-mounted (a restart picks it up); only its dependencies and image
+  # recipe need a rebuild.
+  echo "$changed" | grep -qE '^app/(package(-lock)?\.json|Dockerfile|\.dockerignore)$' && to_build="$to_build jarvis-app"
   echo "$changed" | grep -q '^memory/'    && to_build="$to_build jarvis-memory"
   echo "$changed" | grep -q '^piper/'     && to_build="$to_build jarvis-piper"
   if echo "$changed" | grep -q '^workbench/'; then
@@ -394,6 +454,12 @@ cmd_update() {
   info "Restarting with the new version..."
   # shellcheck disable=SC2046
   dc $(stack_profiles) up -d || { err "Restart failed."; return 1; }
+  # A rebuilt app image carries new node_modules, but the container keeps its old anonymous
+  # node_modules volume unless it is renewed (-V).
+  if [[ "$to_build" == *jarvis-app* ]]; then
+    # shellcheck disable=SC2046
+    dc $(stack_profiles) up -d --force-recreate -V jarvis-app || { err "Restart failed."; return 1; }
+  fi
   sync_workbench
   dc restart jarvis-app >/dev/null 2>&1 || true   # bind-mounted app code loads on restart
   wait_http "$APP_PORT" "/healthz" "JARVIS app" || true
@@ -490,40 +556,44 @@ cmd_backup_memory() {
   mkdir -p "${SCRIPT_DIR}/backups"
   local ts file; ts="$(date +%Y%m%d-%H%M%S)"; file="${SCRIPT_DIR}/backups/jarvis-memory-${ts}.tgz"
   info "Backing up semantic memory -> backups/jarvis-memory-${ts}.tgz ..."
-  if docker exec "$MEM_CONTAINER" sh -c 'tar czf - -C /data .' > "$file" && [[ -s "$file" ]]; then
+  if ( umask 077; docker exec "$MEM_CONTAINER" sh -c 'tar czf - -C /data .' > "$file" ) && [[ -s "$file" ]]; then
     ok "Backup written: backups/jarvis-memory-${ts}.tgz ($(du -h "$file" | cut -f1 | tr -d ' '))"
   else
     err "Backup failed."; rm -f "$file"; return 1
   fi
 }
 
-cmd_restore_memory() { # $1 = backup file (empty => wipe to a fresh, empty memory)
+cmd_restore_memory() { # $1 = "from" | "fresh", $2 = backup file (for "from")
   require_daemon
-  local from="$1"
-  if [[ -n "$from" ]]; then
-    [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
-    # Refuse a tarball with absolute or ../ members before feeding it to BusyBox tar (which can honor
-    # them). Extraction only mounts the memory volume, so impact is bounded, but reject unsafe archives.
-    if tar tzf "$from" 2>/dev/null | grep -qE '(^|/)\.\.(/|$)|^/|^~'; then
-      err "Backup contains unsafe paths (absolute or '..'); refusing to restore: $from"; return 1
-    fi
-    warn "Restoring semantic memory from ${from} — this REPLACES the current memories."
+  local mode="$1" from="${2:-}"
+  if [[ "$mode" == "from" ]]; then
+    check_backup_file "$from" || return 1
+    confirm_destroy "Restoring semantic memory from ${from} REPLACES all current memories" || return 1
     info "Stopping the memory service to restore cleanly..."
     dc stop "$MEM_CONTAINER" >/dev/null 2>&1 || true
-    if docker run --rm -i -v "${MEM_VOLUME}:/data" alpine sh -c 'rm -rf /data/* /data/..?* 2>/dev/null; tar xzf - -C /data' < "$from"; then
+    # Unpack into a temp folder first; only when that worked are the old files removed and the new
+    # ones moved in — a failed extract leaves the current memory as it was.
+    if docker run --rm -i -v "${MEM_VOLUME}:/data" alpine sh -c '
+        rm -rf /data/.restore-tmp && mkdir /data/.restore-tmp &&
+        if ! tar xzf - -C /data/.restore-tmp; then rm -rf /data/.restore-tmp; exit 1; fi &&
+        find /data -mindepth 1 -maxdepth 1 ! -name .restore-tmp -exec rm -rf {} + &&
+        cd /data/.restore-tmp && for f in * .[!.]* ..?*; do [ -e "$f" ] && mv "$f" /data/; done;
+        cd / && rmdir /data/.restore-tmp' < "$from"; then
       dc up -d "$MEM_CONTAINER" >/dev/null 2>&1 || return 1
       wait_mem || true
       ok "Semantic memory restored from ${from}."
     else
       err "Restore failed."; dc up -d "$MEM_CONTAINER" >/dev/null 2>&1 || true; return 1
     fi
-  else
-    warn "Resetting semantic memory to EMPTY — this DESTROYS all stored memories."
+  elif [[ "$mode" == "fresh" ]]; then
+    confirm_destroy "Resetting semantic memory to EMPTY DESTROYS all stored memories" || return 1
     dc rm -sf "$MEM_CONTAINER" >/dev/null 2>&1 || true
     docker volume rm "$MEM_VOLUME" >/dev/null 2>&1 || true
     dc up -d "$MEM_CONTAINER" || return 1
     wait_mem || true
     ok "Fresh, empty semantic memory deployed."
+  else
+    err "Say what to restore: --restore-memory --from <backup.tgz>  or  --restore-memory --fresh"; return 2
   fi
 }
 
@@ -535,30 +605,36 @@ cmd_backup_workspace() {
   mkdir -p "${SCRIPT_DIR}/backups"
   local ts file; ts="$(date +%Y%m%d-%H%M%S)"; file="${SCRIPT_DIR}/backups/jarvis-workspace-${ts}.tgz"
   info "Backing up LLM_WORKSPACE -> backups/jarvis-workspace-${ts}.tgz ..."
-  if tar czf "$file" -C "$ws" . && [[ -s "$file" ]]; then
+  if ( umask 077; tar czf "$file" -C "$ws" . ) && [[ -s "$file" ]]; then
     ok "Backup written: backups/jarvis-workspace-${ts}.tgz ($(du -h "$file" | cut -f1 | tr -d ' '))"
   else
     err "Backup failed."; rm -f "$file"; return 1
   fi
 }
 
-cmd_restore_workspace() { # $1 = backup file (empty => wipe to an empty LLM_WORKSPACE)
-  local ws="${SCRIPT_DIR}/LLM_WORKSPACE" from="$1"
+cmd_restore_workspace() { # $1 = "from" | "fresh", $2 = backup file (for "from")
+  local ws="${SCRIPT_DIR}/LLM_WORKSPACE" mode="$1" from="${2:-}"
   mkdir -p "$ws"
-  if [[ -n "$from" ]]; then
-    [[ -f "$from" ]] || { err "Backup file not found: $from"; return 1; }
-    warn "Restoring LLM_WORKSPACE from ${from} — this REPLACES its current contents."
-    find "$ws" -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-    if tar xzf "$from" -C "$ws"; then
-      ok "Workspace restored from ${from}."
-    else
-      err "Restore failed."; return 1
+  if [[ "$mode" == "from" ]]; then
+    check_backup_file "$from" || return 1
+    confirm_destroy "Restoring LLM_WORKSPACE from ${from} REPLACES its current contents" || return 1
+    # Unpack beside it first; swap only after the extract succeeded.
+    local tmp="${SCRIPT_DIR}/.LLM_WORKSPACE.restore-tmp"
+    rm -rf "$tmp"; mkdir -p "$tmp"
+    if ! tar xzf "$from" -C "$tmp"; then
+      rm -rf "$tmp"; err "Restore failed — the workspace was not changed."; return 1
     fi
-  else
-    warn "Resetting LLM_WORKSPACE to EMPTY — this DESTROYS its current contents."
-    find "$ws" -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+    find "$ws" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} + 2>/dev/null || true
+    ( shopt -s dotglob nullglob; for f in "$tmp"/*; do mv "$f" "$ws"/; done )
+    rmdir "$tmp" 2>/dev/null || rm -rf "$tmp"
+    ok "Workspace restored from ${from}."
+  elif [[ "$mode" == "fresh" ]]; then
+    confirm_destroy "Resetting LLM_WORKSPACE to EMPTY DESTROYS its current contents" || return 1
+    find "$ws" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} + 2>/dev/null || true
     touch "$ws/.gitkeep"
     ok "Fresh, empty LLM_WORKSPACE."
+  else
+    err "Say what to restore: --restore-workspace --from <backup.tgz>  or  --restore-workspace --fresh"; return 2
   fi
 }
 
@@ -585,8 +661,17 @@ cmd_reset_workbench() {
 
 usage() { awk 'NR>=3 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "${BASH_SOURCE[0]}"; }
 
+# The containers should use THIS computer's time zone (reminders like "at 5pm" are local
+# time). macOS / most Linux: /etc/localtime links into the zoneinfo tree. An explicit TZ wins.
+host_tz() {
+  local z; z="$(readlink /etc/localtime 2>/dev/null)"
+  [[ "$z" == *zoneinfo/* ]] && printf '%s' "${z##*zoneinfo/}" && return
+  [[ -f /etc/timezone ]] && head -1 /etc/timezone
+}
+
 main() {
   require_compose_file
+  if [[ -z "${TZ:-}" ]]; then TZ="$(host_tz)"; [[ -n "$TZ" ]] && export TZ || unset TZ; fi
   [[ $# -eq 0 ]] && { usage; exit 1; }
   # Pre-scan for -f/--force so it applies to --delete regardless of flag order.
   for a in "$@"; do case "$(lc "$a")" in -f|--force) FORCE=1 ;; esac; done
@@ -610,18 +695,23 @@ main() {
       -x|--stop)    cmd_stop   || rc=$? ;;
       -d|--delete)  cmd_delete || rc=$? ;;
       --backup-memory)  cmd_backup_memory || rc=$? ;;
-      --restore-memory)
-        local from=""
-        if [[ "$(lc "${2:-}")" == "--from" || "$(lc "${2:-}")" == "--from-backup" ]]; then from="${3:-}"; shift 2;
-        elif [[ "$(lc "${2:-}")" == "--fresh" ]]; then shift 1; fi
-        cmd_restore_memory "$from" || rc=$? ;;
+      --restore-memory|--restore-workspace)
+        # Exactly one of --from <file> / --fresh. Anything else (a forgotten --from, an empty
+        # file name) used to fall through to "reset to EMPTY".
+        local what="$(lc "$1")" mode="" rfile=""
+        case "$(lc "${2:-}")" in
+          --from|--from-backup)
+            if [[ -z "${3:-}" || "${3:-}" == -* ]]; then err "$1 --from needs a backup file."; rc=2;
+            else mode="from"; rfile="$3"; shift 2; fi ;;
+          --fresh) mode="fresh"; shift 1 ;;
+          *) err "$1 needs --from <backup.tgz> or --fresh."; rc=2 ;;
+        esac
+        if [[ $rc -eq 0 ]]; then
+          if [[ "$what" == "--restore-memory" ]]; then cmd_restore_memory "$mode" "$rfile" || rc=$?
+          else cmd_restore_workspace "$mode" "$rfile" || rc=$?; fi
+        fi ;;
       --reset-workbench)   cmd_reset_workbench || rc=$? ;;
       --backup-workspace)  cmd_backup_workspace || rc=$? ;;
-      --restore-workspace)
-        local fromw=""
-        if [[ "$(lc "${2:-}")" == "--from" || "$(lc "${2:-}")" == "--from-backup" ]]; then fromw="${3:-}"; shift 2;
-        elif [[ "$(lc "${2:-}")" == "--fresh" ]]; then shift 1; fi
-        cmd_restore_workspace "$fromw" || rc=$? ;;
       -h|--help)    usage ;;
       check) cmd_check || rc=$? ;; setup) cmd_setup || rc=$? ;; start) cmd_start || rc=$? ;;
       reload) cmd_reload || rc=$? ;; terminal) cmd_terminal || rc=$? ;;

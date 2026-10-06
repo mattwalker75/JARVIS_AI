@@ -44,17 +44,65 @@ const state = (() => {
   return { tasks: Array.isArray(d.tasks) ? d.tasks : [], notifications: Array.isArray(d.notifications) ? d.notifications : [] };
 })();
 
+// --- more than one process writes tasks.json -------------------------------------------
+// The server owns the scheduler, but `node cli.js` (JARVIS.sh's terminal chat) is a separate
+// process with its own copy of this module: a task it scheduled used to be overwritten by the
+// server's next save and never ran. So before every save and every tick, a process re-reads
+// the file when SOMEONE ELSE changed it (its size/mtime differ from what this process last
+// read or wrote) and merges it in by id: unknown tasks are adopted, and for a task both know
+// the copy changed most recently (updated_at) wins. Notifications are merged by id too.
+let diskSig = null;           // size:mtime of tasks.json as this process last read/wrote it
+let notesClearedAt = 0;       // a "clear all" here must not be undone by an older copy on disk
+const dismissedNotes = new Set();
+function fileSig() { try { const st = fs.statSync(FILE); return st.size + ":" + st.mtimeMs; } catch (_) { return null; } }
+diskSig = fileSig();          // the state above was just read from this version
+function touch(t) { t.updated_at = Date.now(); return t; }
+function syncFromDisk() {
+  const sig = fileSig();
+  if (!sig || sig === diskSig) return false;
+  const d = persist.readJson(FILE, null);
+  diskSig = sig;
+  if (!d) return false;
+  for (const dt of Array.isArray(d.tasks) ? d.tasks : []) {
+    if (!dt || !dt.id) continue;
+    const mine = state.tasks.find((x) => x.id === dt.id);
+    if (!mine) { state.tasks.push(dt); continue; }
+    if ((dt.updated_at || 0) > (mine.updated_at || 0)) {
+      const running = inflight.has(mine.id);
+      Object.assign(mine, dt);                       // keep the object: a running task holds it
+      if (running) mine.status = "running";
+    }
+  }
+  const known = new Set(state.notifications.map((n) => n.id));
+  let added = false;
+  for (const n of Array.isArray(d.notifications) ? d.notifications : []) {
+    if (!n || !n.id || known.has(n.id) || dismissedNotes.has(n.id) || (n.at || 0) <= notesClearedAt) continue;
+    state.notifications.push(n); added = true;
+  }
+  if (added) {
+    state.notifications.sort((a, b) => (a.at || 0) - (b.at || 0));
+    if (state.notifications.length > 300) state.notifications = state.notifications.slice(-300);
+  }
+  return true;
+}
+function writeState() {
+  try { syncFromDisk(); persist.writeJsonAtomic(FILE, state); diskSig = fileSig(); } catch (_) {}
+}
+
 let saveTimer = null;
 function save() {
   if (saveTimer) return;                     // debounce bursts of mutations
-  saveTimer = setTimeout(() => { saveTimer = null; try { persist.writeJsonAtomic(FILE, state); } catch (_) {} }, 150);
+  saveTimer = setTimeout(() => { saveTimer = null; writeState(); }, 150);
 }
 function saveNow() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
-  try { persist.writeJsonAtomic(FILE, state); } catch (_) {}
+  writeState();
 }
 // Flush pending writes on shutdown so the last mutations aren't lost.
-process.on("SIGTERM", saveNow); process.on("SIGINT", saveNow); process.on("beforeExit", saveNow);
+process.on("beforeExit", saveNow); process.on("jarvis:shutdown", saveNow);   // SIGTERM/SIGINT: server.js's shutdown handler emits "jarvis:shutdown", then exits
+
+// A short-lived process (the CLI exits right after its reply) must not lose a pending save.
+process.on("exit", () => { if (saveTimer) saveNow(); });
 
 function genId(p) { return (p || "t") + Date.now().toString(36) + Math.floor(Math.random() * 46656).toString(36); }
 
@@ -62,21 +110,27 @@ function schedule(args) {
   const { prompt, in_seconds, at, every_seconds, until, label } = args || {};
   if (!prompt) throw new Error("prompt is required");
   const now = Date.now();
+  // The first run: `at` (absolute) or `in_seconds` (delay) when given — also for a recurring
+  // task ("every hour starting at 9:00") — else one interval from now for a recurring task.
+  let first = null;
+  if (at) { const t = Date.parse(at); if (isNaN(t)) throw new Error("could not parse 'at' time: " + at); first = t; }
+  else if (typeof in_seconds === "number") first = now + Math.max(0, in_seconds) * 1000;
   let runAt;
-  if (typeof every_seconds === "number" && every_seconds > 0) runAt = now + every_seconds * 1000;
-  else if (typeof in_seconds === "number") runAt = now + Math.max(0, in_seconds) * 1000;
-  else if (at) { const t = Date.parse(at); if (isNaN(t)) throw new Error("could not parse 'at' time: " + at); runAt = t; }
+  if (typeof every_seconds === "number" && every_seconds > 0) runAt = first != null ? first : now + every_seconds * 1000;
+  else if (first != null) runAt = first;
   else throw new Error("provide one of: in_seconds, at (ISO datetime), or every_seconds");
   const task = {
     id: genId("t"), label: label || "", prompt, type: every_seconds ? "recurring" : "once",
     run_at: runAt, every_seconds: every_seconds || null, until: until || null,
-    status: "pending", created_at: now, runs: 0, last_run: null, last_result: null,
+    status: "pending", created_at: now, updated_at: now, runs: 0, last_run: null, last_result: null,
   };
+  syncFromDisk();
   state.tasks.push(task); save();
   return { id: task.id, type: task.type, next_run: new Date(runAt).toISOString(), every_seconds: task.every_seconds, until: task.until || undefined };
 }
 
 function list() {
+  syncFromDisk();
   return state.tasks.filter((t) => t.status === "pending" || t.status === "running" || t.status === "paused").map((t) => ({
     id: t.id, label: t.label, type: t.type, prompt: (t.prompt || "").slice(0, 140),
     next_run: new Date(t.run_at).toISOString(), every_seconds: t.every_seconds, until: t.until, status: t.status, runs: t.runs,
@@ -86,9 +140,10 @@ function list() {
 }
 
 function cancel(id) {
+  syncFromDisk();
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return { id, cancelled: false, error: "not found" };
-  t.status = "cancelled"; save();
+  t.status = "cancelled"; touch(t); save();
   return { id, cancelled: true };
 }
 
@@ -96,6 +151,7 @@ function cancel(id) {
 function update(args) {
   const { id } = args || {};
   if (!id) throw new Error("id is required (get it from list_tasks)");
+  syncFromDisk();
   const t = state.tasks.find((x) => x.id === id);
   if (!t) return { id, updated: false, error: "not found" };
   if (t.status === "cancelled" || t.status === "done") return { id, updated: false, error: `task is ${t.status}, not active — schedule a new one instead` };
@@ -114,7 +170,7 @@ function update(args) {
   } else if (t.status !== "running" && t.status !== "paused") {
     t.status = "pending"; // keep it active (don't disturb an in-flight run)
   }
-  save();
+  touch(t); save();
   return { id, updated: true, type: t.type, label: t.label, prompt: (t.prompt || "").slice(0, 140), every_seconds: t.every_seconds, until: t.until, next_run: new Date(t.run_at).toISOString() };
 }
 
@@ -154,8 +210,9 @@ function pushNotification(n) {
   return { notified: true, id: note.id };
 }
 function recentNotifications(limit) { return state.notifications.slice(-(limit || 50)); }
-function clearNotifications() { state.notifications = []; saveNow(); return { cleared: true }; }
+function clearNotifications() { notesClearedAt = Date.now(); state.notifications = []; saveNow(); return { cleared: true }; }
 function dismissNotification(id) {
+  dismissedNotes.add(id);
   const before = state.notifications.length;
   state.notifications = state.notifications.filter((n) => n.id !== id);
   saveNow();
@@ -177,7 +234,7 @@ function postToChat(message) {
   return { posted: true };
 }
 
-async function runTask(task) {
+async function runTask(task, launchedRunAt) {
   const llm = require("./llm");
   const isRecurring = task.type === "recurring";
   const name = require("./config").assistantName();
@@ -243,7 +300,7 @@ async function runTask(task) {
 
   const t = state.tasks.find((x) => x.id === task.id);
   if (!t || t.status === "cancelled") { return; } // user cancelled mid-run
-  t.runs++; t.last_run = Date.now(); t.last_result = (result || "").slice(0, 2000);
+  t.runs++; t.last_run = Date.now(); t.last_result = (result || "").slice(0, 2000); touch(t);
   // Alert the user when a RECURRING task runs but does nothing useful — once, until it
   // recovers (a one-shot already notifies on completion with the ⚠ in its result, so
   // the standalone warning is only needed for recurring tasks that otherwise stay quiet).
@@ -261,15 +318,21 @@ async function runTask(task) {
   if (runCb) { try { runCb({ id: t.id, label: t.label, type: t.type, ran_at: t.last_run, runs: t.runs, result: (result || "").slice(0, 1200), notified, flag: noEffect ? "no-effect" : null }); } catch (_) {} }
   if (!isRecurring) {
     t.status = "done";
-    if (!notified) pushNotification({ task_id: t.id, label: t.label, level: noEffect ? "warning" : "info", message: `Scheduled task ${noEffect ? "ran but produced NO effective result" : "done"}${t.label ? ` (${t.label})` : ""}:\n${t.last_result}` });
+    // A failed run already sent its error notice — no "done" notice on top of it.
+    if (!notified && !hadError) pushNotification({ task_id: t.id, label: t.label, level: noEffect ? "warning" : "info", message: `Scheduled task ${noEffect ? "ran but produced NO effective result" : "done"}${t.label ? ` (${t.label})` : ""}:\n${t.last_result}` });
   } else if (notified) {
     t.status = "done"; // condition met -> stop the recurring task
   } else {
     // Advance from the SCHEDULED slot (not `now`) so the cadence doesn't drift after a
     // slow run; if we fell multiple periods behind, collapse the misses into one next run.
-    const step = t.every_seconds * 1000;
-    t.run_at = (t.run_at || Date.now()) + step;
-    while (t.run_at <= Date.now()) t.run_at += step;
+    // If the next run was re-timed (update_task in/at) WHILE this run was going, keep that
+    // time — advancing it here would silently skip the run the user just asked for.
+    const retimed = launchedRunAt != null && t.run_at !== launchedRunAt;
+    if (!retimed) {
+      const step = t.every_seconds * 1000;
+      t.run_at = (t.run_at || Date.now()) + step;
+      while (t.run_at <= Date.now()) t.run_at += step;
+    }
     t.status = "pending";
     if (t.runs >= 5000) { t.status = "done"; pushNotification({ task_id: t.id, label: t.label, level: "info", message: `Recurring task${t.label ? ` "${t.label}"` : ""} hit its 5000-run safety cap and was stopped.` }); }
   }
@@ -280,18 +343,19 @@ async function runTask(task) {
 // task that's still running (runs are fire-and-forget so a slow one can't block others).
 const inflight = new Set();
 function tick() {
+  syncFromDisk();   // pick up tasks another process (the CLI) scheduled
   const now = Date.now();
   const due = state.tasks.filter((t) => t.status === "pending" && t.run_at <= now);
   for (const t of due) {
     if (inflight.size >= MAX_CONCURRENT) break;   // rest wait for the next tick
     if (inflight.has(t.id)) continue;
-    t.status = "running"; inflight.add(t.id); save();
-    runTask(t)
+    t.status = "running"; touch(t); inflight.add(t.id); save();
+    runTask(t, t.run_at)
       .catch(() => {})
       .finally(() => {
         inflight.delete(t.id);
         // Safety net: if runTask left it stuck "running" (unexpected throw), requeue it.
-        if (t.status === "running") { t.status = "pending"; save(); }
+        if (t.status === "running") { t.status = "pending"; touch(t); save(); }
       });
   }
 }

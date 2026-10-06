@@ -99,8 +99,11 @@ function updateStep({ step, status, note }, key) {
     plan.steps[idx].status = status;
   }
   if (note != null) plan.steps[idx].note = String(note);
-  if (status === "done") {                                   // auto-advance to the next pending step
-    const next = plan.steps.find((s) => s.status === "pending");
+  // Auto-advance: finishing a step activates the next PENDING step AFTER it (falling back to
+  // an earlier one left pending) — but only when no step is active already, so marking an
+  // old step done never yanks focus away from the step actually being worked on.
+  if (status === "done" && !plan.steps.some((s) => s.status === "active")) {
+    const next = plan.steps.slice(idx + 1).find((s) => s.status === "pending") || plan.steps.find((s) => s.status === "pending");
     if (next) next.status = "active";
   }
   plan.status = planStatus(plan.steps);

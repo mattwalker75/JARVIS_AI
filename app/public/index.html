@@ -46,16 +46,21 @@
         <div class="ctx-meter" id="ctx-meter" hidden><div class="ctx-bar"><div class="ctx-fill" id="ctx-fill"></div></div><span class="ctx-label" id="ctx-label"></span><button class="ctx-sum" id="ctx-summarize" title="Summarize the conversation so far and continue with a smaller context" hidden>🗜 Summarize</button></div>
       </div>
     </div>
-    <div class="controls">
+    <!-- Phone / tablet only: open the side panels (a sheet there) and, on a phone, the folded controls. -->
+    <div class="narrow-btns">
+      <button id="panel-btn" type="button" class="ghost" aria-controls="side-panel" aria-expanded="false" title="Side panels — activity, tasks, memory, files, config">☰ Panels<span class="dot" id="panel-dot" hidden></span></button>
+      <button id="more-btn" type="button" class="ghost" aria-controls="top-controls" aria-expanded="false" aria-label="More controls" title="More controls">⋯</button>
+    </div>
+    <div class="controls" id="top-controls">
       <button id="signout-btn" class="ghost" title="Sign out" hidden></button>
-      <button id="theme-toggle" class="ghost" title="Toggle light / dark theme">☀️</button>
-      <button id="chat-search-btn" class="ghost" title="Search this conversation (Cmd/Ctrl-F)">🔍</button>
+      <button id="theme-toggle" class="ghost" title="Toggle light / dark theme" aria-label="Toggle light / dark theme">☀️</button>
+      <button id="chat-search-btn" class="ghost" title="Search this conversation (Cmd/Ctrl-F)" aria-label="Search this conversation">🔍</button>
       <button id="new-chat" class="ghost" title="Start a new conversation">＋ New chat</button>
       <button id="ambient-btn" class="ghost" title="Ambient voice mode — full-screen orb, hands-free (tap the orb to talk, ✕ to exit)">🌌 Ambient</button>
       <select id="model-select" class="ghost model-select" title="Chat model" hidden></select>
       <button id="voice-chat" class="ghost" title="Speak replies aloud (text-to-speech) — click to toggle">🔊 Voice</button>
       <div class="voice-menu">
-        <button id="voice-settings-btn" class="ghost" title="Voice settings — pick the spoken voice, speed, pitch">🎚️</button>
+        <button id="voice-settings-btn" class="ghost" title="Voice settings — pick the spoken voice, speed, pitch" aria-label="Voice settings">🎚️</button>
         <div class="voice-drop" id="voice-drop" hidden>
           <div class="vd-title">Spoken voice</div>
           <div class="vd-row"><label for="tts-engine">Engine</label><select id="tts-engine">
@@ -75,7 +80,7 @@
       </div>
       <button id="mic-btn" class="ghost mic-btn" title="Push to talk (tap, then speak)">🎤 Talk</button>
       <span class="mic" id="mic-state" title="voice state">voice off</span>
-      <span class="ctl-ic" title="Microphone mode (how JARVIS listens)">🎙️</span>
+      <span class="ctl-ic" title="Microphone mode (how JARVIS listens)" aria-hidden="true">🎙️</span>
       <div class="seg" id="mic-mode" role="group" aria-label="Microphone mode">
         <button data-mode="off" class="active" title="Mic off — use the 🎤 Talk button">Off</button>
         <button data-mode="wake" title="Wake word — say the wake word to start talking">Wake</button>
@@ -146,7 +151,7 @@
         <span class="ap-meta" id="ap-meta"></span>
         <span class="ap-obj" id="ap-barobj"></span>
         <button class="ap-ctl" id="ap-continue" title="Continue on the SAME plan (fresh 15-min budget) — picks up from the first incomplete step, no rebuild" hidden>▶ Continue</button>
-        <button class="ap-ctl" id="ap-history" title="Cycle history — what each Autopilot cycle reported">📜</button>
+        <button class="ap-ctl" id="ap-history" title="Cycle history — what each Autopilot cycle reported" aria-label="Autopilot cycle history">📜</button>
         <button class="ap-ctl" id="ap-pause" title="Pause — stop starting new cycles (time budget freezes); resume later">⏸ Pause</button>
         <button class="ap-ctl" id="ap-extend" title="Extend the time budget by 15 minutes">+15m</button>
         <button class="ap-ctl" id="ap-modify" title="Change the objective — the next cycle re-checks its plan against it">Modify</button>
@@ -159,44 +164,47 @@
           <span class="pb-title">🗂 Plan</span>
           <span class="pb-obj" id="pb-obj"></span>
           <span class="pb-prog" id="pb-prog"></span>
-          <button class="pb-btn" id="pb-clear" title="Clear this plan">✕</button>
+          <button class="pb-btn" id="pb-clear" title="Clear this plan" aria-label="Clear this plan">✕</button>
         </div>
         <ol class="pb-steps" id="pb-steps"></ol>
         <div class="pb-handle" id="pb-handle" role="button" tabindex="0" title="Show / hide the plan steps" aria-label="Show or hide the plan steps"></div>
       </div>
       <div class="chat-tabs" id="chat-tabs" role="tablist" aria-label="Open conversations"></div>
       <div class="chat-search" id="chat-search">
-        <input id="cs-input" placeholder="Search this conversation…" autocomplete="off">
-        <span class="cs-count" id="cs-count"></span>
-        <button id="cs-prev" title="Previous match">↑</button>
-        <button id="cs-next" title="Next match">↓</button>
-        <button id="cs-close" title="Close search (Esc)">✕</button>
+        <input id="cs-input" placeholder="Search this conversation…" autocomplete="off" aria-label="Search this conversation">
+        <span class="cs-count" id="cs-count" aria-live="polite"></span>
+        <button id="cs-prev" title="Previous match" aria-label="Previous match">↑</button>
+        <button id="cs-next" title="Next match" aria-label="Next match">↓</button>
+        <button id="cs-close" title="Close search (Esc)" aria-label="Close search">✕</button>
       </div>
       <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
-        <div class="msg assistant"><div class="bubble">
-          JARVIS online — ask me anything. (type <code>/help</code> for the help menu)
-        </div></div>
+        <div class="msg assistant"><div class="bubble">JARVIS online — ask me anything. (type <code>/help</code> for the help menu)</div></div>
       </div>
       <button id="jump-bottom" class="jump-btn" title="Jump to latest" aria-label="Jump to latest message" hidden>↓ Latest</button>
       <form class="composer" id="composer">
-        <textarea id="input" rows="1" autocomplete="off" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
+        <textarea id="input" rows="1" autocomplete="off" aria-label="Message JARVIS" placeholder="Message JARVIS…  (Enter to send · Shift+Enter for a new line)"></textarea>
+        <button id="stop-speak" type="button" class="ghost speak-stop" title="Stop speaking (Esc)" aria-label="Stop speaking" hidden>🔇<span class="ss-label"> Stop speaking</span></button>
         <button id="regen" type="button" class="ghost regen-btn" title="Regenerate last response (/regen)" aria-label="Regenerate last response">🔄</button>
         <button id="send" type="submit">Send</button>
         <button id="stop" type="button" class="stop-btn" title="Stop processing (Esc)" hidden>⏹ Stop</button>
       </form>
     </section>
 
-    <aside class="side">
-      <div class="tabs">
-        <button class="tab active" data-tab="activity">Activity</button>
-        <button class="tab" data-tab="tasks">Tasks</button>
-        <button class="tab" data-tab="memory">Memory</button>
-        <button class="tab" data-tab="files">Files</button>
-        <button class="tab" data-tab="workbench">Workbench</button>
-        <button class="tab" data-tab="config">Config</button>
+    <aside class="side" id="side-panel" aria-label="Side panels">
+      <div class="sheet-head">
+        <span class="sheet-title">Panels</span>
+        <button id="sheet-close" type="button" class="ghost" aria-label="Close the side panels">✕ Close</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Side panels">
+        <button class="tab active" data-tab="activity" role="tab" aria-selected="true">Activity</button>
+        <button class="tab" data-tab="tasks" role="tab" aria-selected="false">Tasks</button>
+        <button class="tab" data-tab="memory" role="tab" aria-selected="false">Memory</button>
+        <button class="tab" data-tab="files" role="tab" aria-selected="false">Files</button>
+        <button class="tab" data-tab="workbench" role="tab" aria-selected="false">Workbench</button>
+        <button class="tab" data-tab="config" role="tab" aria-selected="false">Config</button>
       </div>
       <div class="panel active" id="panel-activity">
-        <div class="act-toolbar"><input id="act-filter" placeholder="Filter by tool name…" autocomplete="off" title="Show only entries whose tool name matches"></div>
+        <div class="act-toolbar"><input id="act-filter" placeholder="Filter by tool name…" autocomplete="off" title="Show only entries whose tool name matches" aria-label="Filter activity by tool name"></div>
         <div class="activity" id="activity">
           <div class="hint">Tool calls (memory, shell, files) stream here so you can watch what JARVIS does.</div>
         </div>
@@ -204,13 +212,13 @@
       <div class="panel" id="panel-tasks">
         <div class="tasks-pane">
           <div class="tasks-head">
-            <h4>Scheduled tasks</h4><button id="tasks-refresh" class="ghost">↻</button>
+            <h4>Scheduled tasks</h4><button id="tasks-refresh" class="ghost" title="Refresh" aria-label="Refresh tasks">↻</button>
           </div>
           <div class="quick-add">
-            <input id="qa-prompt" placeholder="Quick task, e.g. remind me to stretch" autocomplete="off">
+            <input id="qa-prompt" aria-label="Quick task" placeholder="Quick task, e.g. remind me to stretch" autocomplete="off">
             <div class="qa-row">
-              <select id="qa-mode"><option value="in">in</option><option value="every">every</option></select>
-              <input id="qa-num" type="number" min="1" value="5">
+              <select id="qa-mode" aria-label="When"><option value="in">in</option><option value="every">every</option></select>
+              <input id="qa-num" aria-label="Minutes" type="number" min="1" value="5">
               <span>min</span>
               <button id="qa-add" class="ghost">Add</button>
             </div>
@@ -226,16 +234,16 @@
             <h4>Long-term memory</h4>
             <span>
               <button id="mem-consolidate" class="ghost" title="Merge near-duplicate memories and resolve contradictions (uses the smart model tier)">🧹 Consolidate</button>
-              <button id="mem-refresh" class="ghost">↻</button>
+              <button id="mem-refresh" class="ghost" title="Refresh" aria-label="Refresh memories">↻</button>
             </span>
           </div>
-          <input id="mem-search" class="mem-search" placeholder="Filter memories…" autocomplete="off">
+          <input id="mem-search" aria-label="Filter memories" class="mem-search" placeholder="Filter memories…" autocomplete="off">
           <div id="mem-list"><div class="hint">Semantic memories JARVIS has saved about you.</div></div>
         </div>
       </div>
       <div class="panel" id="panel-files">
         <div class="tasks-pane">
-          <div class="tasks-head"><h4>Shared files</h4><button id="files-refresh" class="ghost">↻</button></div>
+          <div class="tasks-head"><h4>Shared files</h4><button id="files-refresh" class="ghost" title="Refresh" aria-label="Refresh files">↻</button></div>
           <div class="files-toolbar">
             <div class="seg" id="files-dir" role="group" aria-label="Which shared folder">
               <button data-dir="rw" class="active" title="LLM_READ_WRITE_FILES — deliverables + your uploads">Read-write</button>
@@ -333,7 +341,7 @@
               <label>Turn compaction (chars)<input id="cfg-turn-compaction" type="number" min="0" step="10000" title="Once one turn's tool results exceed this, older results are elided to a short head. 0 = off."></label>
               <label>Auto-compact at (%)<input id="cfg-auto-compact" type="number" min="0" max="100" title="When the context meter reaches this %, the UI auto-runs Summarize & continue. 0 = never."></label>
             </div>
-            <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog on by default (the 🐕 toggle overrides per message)</label>
+            <label class="cfg-check"><input type="checkbox" id="cfg-idle-watchdog"> Stream watchdog for requests that don't choose (scheduled tasks, the HTTP API) — chat messages from this page always use the 🐕 Watchdog button in the top bar; Autopilot never uses it</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-smart-routing" title="Route judgment-heavy turns (plan-mode chat, Autopilot planning + wrap-up cycles) to the smart model tier. No-op when no smart tier is configured."> Smart-tier auto-routing (plan mode + Autopilot planning/wrap-up)</label>
             <label class="cfg-check"><input type="checkbox" id="cfg-failover-enabled" title="When the primary endpoint/model fails hard (down, repeated 5xx, stalled stream), the rest of the turn runs on the fallback below and the chat shows a notice."> Model failover</label>
             <div class="cfg-grid">
@@ -503,7 +511,8 @@
         </div>
       </div>
     </aside>
-    <div class="drawer-handle" id="drawer-handle" title="Click to open/close the panel · drag to resize"><span class="dot" id="drawer-dot" hidden></span></div>
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden></div>
+    <button type="button" class="drawer-handle" id="drawer-handle" aria-controls="side-panel" aria-expanded="true" aria-label="Side panel — click to open or close, arrow keys to resize" title="Click to open/close the panel · drag to resize"><span class="dot" id="drawer-dot" hidden></span></button>
   </main>
 
   <script src="/voice.js"></script>

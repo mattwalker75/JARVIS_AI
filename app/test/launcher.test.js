@@ -25,7 +25,7 @@ set_on() { has "$1" || echo "$1" >> "${STATE}"; }
 set_off() { grep -vx "$1" "${STATE}" > "${STATE}.n" 2>/dev/null; mv "${STATE}.n" "${STATE}"; }
 case "$1" in
   info|version) exit 0 ;;
-  inspect) case "$*" in *jarvis-workbench*) has wb-running && echo true || echo false ;; *) echo true ;; esac; exit 0 ;;
+  inspect) case "$*" in *PortBindings*) echo "127.0.0.1" ;; *jarvis-workbench*) has wb-running && echo true || echo false ;; *) echo true ;; esac; exit 0 ;;
   image) has wb-image && exit 0 || exit 1 ;;
   port) echo "127.0.0.1:8110"; exit 0 ;;
   stop) case "$*" in *jarvis-workbench*) set_off wb-running ;; esac; exit 0 ;;
@@ -127,6 +127,39 @@ check("reset-workbench, off: refused with a plain reason", r.rc !== 0 && /turned
 setup({ enabled: true, running: true });
 r = run("--reset-workbench");
 check("reset-workbench, on: the container is re-created", r.rc === 0 && any(r.compose, /^--profile workbench rm -sf jarvis-workbench$/) && any(r.compose, /^--profile workbench up -d jarvis-workbench$/) && wbRunning(), r.compose);
+
+// ---- --restore-workspace: never wipes anything by accident (review fix, Oct 2026)
+const ws = path.join(root, "LLM_WORKSPACE");
+const wsFiles = () => fs.readdirSync(ws).sort().join(",");
+function freshWs() {
+  fs.rmSync(ws, { recursive: true, force: true }); fs.mkdirSync(ws);
+  fs.writeFileSync(path.join(ws, "keep.txt"), "x"); fs.writeFileSync(path.join(ws, ".gitkeep"), "");
+}
+const src = path.join(tmp, "wsrc"); fs.mkdirSync(src); fs.writeFileSync(path.join(src, "new.txt"), "n"); fs.writeFileSync(path.join(src, ".hidden"), "h");
+const good = path.join(tmp, "good.tgz"); spawnSync("tar", ["czf", good, "-C", src, "."]);
+const bad = path.join(tmp, "bad.tgz"); fs.writeFileSync(bad, "not a tarball");
+setup({ enabled: true, running: false });
+freshWs(); r = run("--restore-workspace", good);
+check("restore-workspace without --from: refused, nothing touched", r.rc !== 0 && /--from <backup.tgz> or --fresh/.test(r.out) && wsFiles() === ".gitkeep,keep.txt", r.out.slice(-300));
+freshWs(); r = run("--restore-workspace", "--from");
+check("restore-workspace --from with no file: refused", r.rc !== 0 && wsFiles() === ".gitkeep,keep.txt", r.out.slice(-300));
+freshWs(); r = run("--restore-workspace", "--from", bad, "--force");
+check("restore from a corrupt file: refused BEFORE anything is deleted", r.rc !== 0 && /Not a readable backup/.test(r.out) && wsFiles() === ".gitkeep,keep.txt", r.out.slice(-300));
+freshWs(); r = run("--restore-workspace", "--fresh");
+check("reset without a terminal and without --force: refused", r.rc !== 0 && wsFiles() === ".gitkeep,keep.txt", r.out.slice(-300));
+freshWs(); r = run("--restore-workspace", "--from", good, "--force");
+check("restore with --force: replaced, hidden files included", r.rc === 0 && wsFiles() === ".gitkeep,.hidden,new.txt", wsFiles());
+r = run("--restore-memory", good);
+check("restore-memory without --from: refused before touching Docker", r.rc !== 0 && !any(r.calls, /volume rm|run --rm/), r.calls);
+
+// ---- a missing secrets file is created from its template (owner-only), never left for Docker
+fs.writeFileSync(path.join(root, "config", "JARVIS_SECRETS_template.json"), "{}\n");
+fs.rmSync(path.join(root, "config", "JARVIS_SECRETS.json"), { force: true });
+setup({ enabled: true, running: false });
+r = run("--start");
+const sec = path.join(root, "config", "JARVIS_SECRETS.json");
+check("start creates JARVIS_SECRETS.json from the template", fs.existsSync(sec) && fs.statSync(sec).isFile(), r.out.slice(-300));
+check("…readable by the owner only", fs.existsSync(sec) && (fs.statSync(sec).mode & 0o077) === 0, fs.existsSync(sec) && (fs.statSync(sec).mode & 0o777).toString(8));
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
 console.log(failures ? `\nLAUNCHER: ${failures} FAILURE(S)` : "\nLAUNCHER: ALL PASSED");

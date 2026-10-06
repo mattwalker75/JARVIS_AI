@@ -38,7 +38,11 @@ function workbenchContainerName() { return (config.workbench && config.workbench
 
 // --- run_shell: root command in the workbench container ---
 let shellNonceSeq = 0;
-async function runShell(command, timeoutS, signal) {
+// opts.raw: return the FULL output (no head/tail clipping) and don't stream it to the
+// Activity panel — for internal reads (e.g. a file pulled out of the workbench as base64)
+// where a clipped middle would silently corrupt the data.
+async function runShell(command, timeoutS, signal, opts) {
+  const raw = !!(opts && opts.raw);
   if (!workbenchEnabled()) throw new Error(WORKBENCH_OFF + " — there is no shell to run this in");
   const name = workbenchContainerName();
   const container = docker.getContainer(name);
@@ -67,7 +71,7 @@ async function runShell(command, timeoutS, signal) {
     // emit nothing; the final output still arrives via the normal tool_result.
     let streamedTo = 0;
     const streamTimer = setInterval(() => {
-      if (out.length <= streamedTo) return;
+      if (raw || out.length <= streamedTo) return;
       const chunk = out.toString("utf8", Math.max(streamedTo, out.length - 4096), out.length);
       streamedTo = out.length;
       try { require("./scheduler").emitUiEvent("tool_stream", { id: nonce, tool: "run_shell", chunk }); } catch (_) {}
@@ -81,7 +85,7 @@ async function runShell(command, timeoutS, signal) {
       let info = {};
       try { info = await exec.inspect(); } catch (_) {}
       const code = info.ExitCode ?? null;
-      let output = clipOutput(out.toString("utf8"));
+      let output = raw ? out.toString("utf8") : clipOutput(out.toString("utf8"));
       if (stopped) output += `\n[STOPPED by user — the workbench command was killed]`;
       else if (code === 124 || timedOut) output += `\n[KILLED: command exceeded the ${t}s time limit. Pass a larger timeout_s; or to launch a PERSISTENT app/server use the open_app tool, or 'setsid nohup CMD </dev/null >/dev/null 2>&1 &' — a plain 'nohup CMD &' dies when this shell returns]`;
       resolve({ exit_code: code, output });
@@ -129,29 +133,92 @@ function toWorkbenchPath(p, example) {
 // Write a file anywhere in the workbench (e.g. /LLM_WORKSPACE/app.py) RELIABLY, with no
 // shell-quoting issues — content is base64-piped in. Use this to create code/config
 // files for the workbench instead of run_shell heredocs/echo.
+// One bash argument can carry only ~128 KB on Linux (MAX_ARG_STRLEN), and base64 makes the
+// content a third bigger — so anything past ~96 KB can't go over as ONE string. Bigger files
+// are sent in appended chunks into a temp file that is then copied over the target (cat, not
+// mv, so an existing file keeps its permissions, e.g. an executable script stays executable).
+const WB_CHUNK_B64 = 64000;   // base64 characters per exec (a multiple of 4, well under the limit)
 async function writeWorkbenchFile(p, content) {
   p = toWorkbenchPath(p, "/LLM_WORKSPACE/app.py");
   const b64 = Buffer.from(content == null ? "" : String(content)).toString("base64");
   const dir = String(p).replace(/\/[^/]*$/, "") || "/";
-  const r = await runShell(`mkdir -p ${shq(dir)} && printf %s ${shq(b64)} | base64 -d > ${shq(p)} && wc -c < ${shq(p)}`);
-  if (r.exit_code) throw new Error("write failed: " + (r.output || "").slice(0, 300));
-  return { written: p, bytes: parseInt((r.output || "0").trim(), 10) || 0 };
+  if (b64.length <= WB_CHUNK_B64) {
+    const r = await runShell(`mkdir -p ${shq(dir)} && printf %s ${shq(b64)} | base64 -d > ${shq(p)} && wc -c < ${shq(p)}`);
+    if (r.exit_code) throw new Error("write failed: " + (r.output || "").slice(0, 300));
+    return { written: p, bytes: parseInt((r.output || "0").trim(), 10) || 0 };
+  }
+  const part = `${p}.jarvis-part-${Date.now().toString(36)}`;
+  try {
+    for (let i = 0; i < b64.length; i += WB_CHUNK_B64) {
+      const first = i === 0;
+      const r = await runShell(`${first ? `mkdir -p ${shq(dir)} && ` : ""}printf %s ${shq(b64.slice(i, i + WB_CHUNK_B64))} | base64 -d ${first ? ">" : ">>"} ${shq(part)}`);
+      if (r.exit_code) throw new Error("write failed: " + (r.output || "").slice(0, 300));
+    }
+    const r = await runShell(`cat ${shq(part)} > ${shq(p)} && rm -f ${shq(part)} && wc -c < ${shq(p)}`);
+    if (r.exit_code) throw new Error("write failed: " + (r.output || "").slice(0, 300));
+    return { written: p, bytes: parseInt((r.output || "0").trim(), 10) || 0 };
+  } catch (e) {
+    try { await runShell(`rm -f ${shq(part)}`); } catch (_) {}
+    throw e;
+  }
+}
+
+// read_file / edit_file / edit_workbench_file refuse files bigger than this — reading a huge
+// file whole would flood the model's context (and the app's memory) for no benefit.
+const FILE_MAX_BYTES = 20 * 1024 * 1024;
+function tooBig(name, bytes, verb) {
+  return new Error(`'${name}' is ${(bytes / 1048576).toFixed(1)} MB — too big to ${verb} with this tool (the limit is 20 MB). Use run_shell (head, tail, grep, sed) to work with part of it.`);
+}
+
+// The folders mounted at the SAME path in both the app and the workbench: the two shared
+// folders and the /LLM_WORKSPACE build area. Resolved through symlinks so comparisons are exact.
+const WORKSPACE_DIR = "/LLM_WORKSPACE";
+function realOr(p) { try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); } }
+function isUnder(abs, root) { return abs === root || abs.startsWith(root + path.sep); }
+function sharedRoots() {
+  const sh = config.shared || {};
+  return [sh.read_only_dir, sh.read_write_dir, WORKSPACE_DIR].filter(Boolean).map(realOr);
+}
+// The app-side path for a workbench path — ONLY when it really (after following every
+// symlink) lies inside one of the shared mounts; otherwise null. Anything else must be read
+// INSIDE the workbench: the app's own filesystem holds the config (with API keys) and /data,
+// which a workbench path like /cfg/JARVIS_CONFIG.json must never reach.
+function appSidePath(p) {
+  let real;
+  try { real = fs.realpathSync(p); } catch (_) { return null; }
+  return sharedRoots().some((r) => isUnder(real, r)) ? real : null;
+}
+
+// Read a text file that lives in the workbench, whole and uncorrupted.
+async function readWorkbenchText(p) {
+  const local = appSidePath(p);
+  if (local) {
+    let st = null; try { st = fs.statSync(local); } catch (_) {}
+    if (st && st.isFile()) {
+      if (st.size > FILE_MAX_BYTES) throw tooBig(path.basename(p), st.size, "edit");
+      try { return fs.readFileSync(local, "utf8"); } catch (_) { /* fall through to the workbench */ }
+    }
+  }
+  const r = await runShell(
+    `f=${shq(p)}; if [ ! -f "$f" ]; then echo "no such file"; exit 3; fi; n=$(wc -c < "$f" | tr -d ' '); ` +
+    `if [ "$n" -gt ${FILE_MAX_BYTES} ]; then echo "@@BIG:$n@@"; exit 4; fi; echo "@@B64@@"; base64 < "$f" | tr -d '\\n'`,
+    120, undefined, { raw: true });
+  const out = r.output || "";
+  const big = /@@BIG:(\d+)@@/.exec(out);
+  if (big) throw tooBig(path.basename(p), Number(big[1]), "edit");
+  const i = out.indexOf("@@B64@@");
+  if (r.exit_code || i < 0) throw new Error(`cannot read ${p}: ${out.replace(/\s+/g, " ").trim().slice(0, 200) || "unknown error"}`);
+  return Buffer.from(out.slice(i + 7).replace(/\s+/g, ""), "base64").toString("utf8");
 }
 
 // Targeted string-replace edit of an existing workbench file — avoids error-prone whole-file
-// rewrites. Reads via the shared /LLM_WORKSPACE mount when possible (no truncation), else base64
-// out of the container; writes back reliably as root via writeWorkbenchFile.
+// rewrites. Reads via the shared mounts when the file really lives there, else base64 out of
+// the container; writes back reliably as root via writeWorkbenchFile.
 async function editWorkbenchFile(p, oldStr, newStr, replaceAll) {
   p = toWorkbenchPath(p, "/LLM_WORKSPACE/doom.html");
   if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
   newStr = newStr == null ? "" : String(newStr);
-  let content;
-  try { content = fs.readFileSync(p, "utf8"); }               // /LLM_WORKSPACE + shared dirs are mounted into the app
-  catch (_) {
-    const r = await runShell(`base64 -w0 < ${shq(p)} 2>/dev/null || base64 < ${shq(p)}`);
-    if (r.exit_code) throw new Error(`cannot read ${p}: ${(r.output || "").slice(0, 200)}`);
-    content = Buffer.from((r.output || "").replace(/\s+/g, ""), "base64").toString("utf8");
-  }
+  const content = await readWorkbenchText(p);
   const occurrences = content.split(oldStr).length - 1;
   if (occurrences === 0) throw new Error(`old_string not found in ${p}. It must match EXACTLY (including whitespace/indentation) — read the file first and copy the snippet verbatim.`);
   if (occurrences > 1 && !replaceAll) throw new Error(`old_string appears ${occurrences} times in ${p}. Add more surrounding context to make it unique, or pass replace_all=true.`);
@@ -162,10 +229,31 @@ async function editWorkbenchFile(p, oldStr, newStr, replaceAll) {
   return { edited: p, replacements: replaceAll ? occurrences : 1, bytes: w.bytes };
 }
 
+// Follow symlinks even for a path that doesn't exist yet: realpath the nearest EXISTING
+// ancestor and re-attach the missing tail (which can't contain links — it doesn't exist).
+// A link whose target is missing is refused outright: writing through it would create the
+// file wherever the link points.
+function realpathNearest(abs) {
+  let cur = abs;
+  const tail = [];
+  for (;;) {
+    try { const r = fs.realpathSync(cur); return tail.length ? path.join(r, ...tail.reverse()) : r; }
+    catch (_) {
+      let isLink = false; try { isLink = fs.lstatSync(cur).isSymbolicLink(); } catch (_) {}
+      if (isLink) throw new Error(`${cur} is a link to something that doesn't exist — not following it`);
+      const parent = path.dirname(cur);
+      if (parent === cur) return abs;
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
 // --- shared files (read-only + read-write dirs) ---
 function resolveShared(p, mustWrite) {
   const ro = config.shared.read_only_dir;
   const rw = config.shared.read_write_dir;
+  const roReal = realOr(ro), rwReal = realOr(rw), wsReal = realOr(WORKSPACE_DIR);
   let abs;
   if (!p) abs = path.resolve(rw);
   else if (path.isAbsolute(p)) abs = path.resolve(p);
@@ -181,15 +269,15 @@ function resolveShared(p, mustWrite) {
     else if (under("LLM_WORKSPACE")) abs = path.resolve("/LLM_WORKSPACE", seg.slice("LLM_WORKSPACE".length).replace(/^\/+/, ""));
     else abs = path.resolve(rw, p);
   }
-  // Resolve symlinks so a link planted inside the shared dirs can't escape them.
-  try { abs = fs.realpathSync(abs); }
-  catch { try { abs = path.join(fs.realpathSync(path.dirname(abs)), path.basename(abs)); } catch (_) {} }
-  const inRo = abs === ro || abs.startsWith(ro + path.sep);
-  const inRw = abs === rw || abs.startsWith(rw + path.sep);
+  // Resolve symlinks so a link planted inside the shared dirs can't escape them — including
+  // for a path that doesn't exist yet (a link higher up the tree is still followed).
+  abs = realpathNearest(abs);
+  const inRo = isUnder(abs, roReal);
+  const inRw = isUnder(abs, rwReal);
   // /LLM_WORKSPACE is the workbench's persistent build area (the AI works there). It's a
   // shared volume also mounted into the app, so list_dir/read_file/write_file/analyze_image
   // can operate on it directly (read + write) instead of only the user-exchange folders.
-  const inWs = abs === "/LLM_WORKSPACE" || abs.startsWith("/LLM_WORKSPACE/");
+  const inWs = isUnder(abs, wsReal);
   if (mustWrite && !inRw && !inWs) throw new Error(`write is only allowed under ${rw} or /LLM_WORKSPACE`);
   if (!inRo && !inRw && !inWs) throw new Error(`path must be under ${ro} (read-only), ${rw} (read-write), or /LLM_WORKSPACE (workbench build area)`);
   return abs;
@@ -220,6 +308,8 @@ async function listDir(p) {
 }
 async function readFile(p, offset, maxChars) {
   const abs = resolveShared(p, false);
+  let st = null; try { st = fs.statSync(abs); } catch (_) {}
+  if (st && st.isFile() && st.size > FILE_MAX_BYTES) throw tooBig(path.basename(abs), st.size, "read");
   const buf = fs.readFileSync(abs);
   // Binary sniff: a NUL byte in the head means this isn't text — give a directive
   // error instead of returning mojibake the model will try to reason about.
@@ -233,12 +323,18 @@ async function readFile(p, offset, maxChars) {
   if (text.length > off + max) out.note = `truncated: showing chars ${off}-${off + max} of ${text.length} — re-call with offset:${off + max} for the rest`;
   return out;
 }
+// Create the parent folders of an already-checked path, then check it AGAIN: a link swapped
+// in between the first check and mkdir must not carry the write outside the shared folders.
+function mkdirsChecked(abs) {
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  return resolveShared(abs, true);
+}
 async function writeFile(p, content, append) {
-  const abs = resolveShared(p, true);
+  let abs = resolveShared(p, true);
   // Actionable error instead of a raw EISDIR when a directory path is passed without a filename.
   let isDir = false; try { isDir = fs.statSync(abs).isDirectory(); } catch (_) {}
   if (isDir) throw new Error(`"${p}" is a directory, not a file — include a filename, e.g. ${abs.replace(/\/+$/, "")}/index.html. (To copy a whole folder here, use run_shell: cp -r <src> ${abs.replace(/\/+$/, "")}/)`);
-  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  abs = mkdirsChecked(abs);
   let data = content == null ? "" : String(content);
   if (append) {
     // Guarantee each appended entry starts on its own line: if the file already
@@ -269,6 +365,8 @@ async function editFile(p, oldStr, newStr, replaceAll) {
   if (oldStr == null || oldStr === "") throw new Error("old_string is required — the exact text to replace");
   newStr = newStr == null ? "" : String(newStr);
   let content;
+  let st = null; try { st = fs.statSync(abs); } catch (_) {}
+  if (st && st.isFile() && st.size > FILE_MAX_BYTES) throw tooBig(path.basename(abs), st.size, "edit");
   try { content = fs.readFileSync(abs, "utf8"); }
   catch (e) { throw new Error(`cannot read ${path.basename(abs)}: ${e.message}`); }
   const occ = content.split(oldStr).length - 1;
@@ -515,8 +613,7 @@ async function fetchUrl(url, opts = {}) {
   if (!isText) {
     const buf = await readCapped(resp, FETCH_MAX_BYTES);
     if (opts.save_to) {
-      const abs = resolveShared(opts.save_to, true);
-      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      const abs = mkdirsChecked(resolveShared(opts.save_to, true));
       fs.writeFileSync(abs, buf);
       return { url: current, status: resp.status, content_type: ct, saved_to: abs, bytes: buf.length };
     }
@@ -752,6 +849,12 @@ async function ensureBrowserd() {
   })().finally(() => { browserdStarting = null; });
   return browserdStarting;
 }
+function isConnRefused(e) {
+  for (let x = e, i = 0; x && i < 4; x = x.cause, i++) {
+    if (x.code === "ECONNREFUSED" || /ECONNREFUSED/.test(String(x.message || ""))) return true;
+  }
+  return false;
+}
 async function browserCmd(op, params = {}) {
   const call = async () => {
     const r = await fetch(BROWSERD_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, ...params }), signal: AbortSignal.timeout(60000) });
@@ -759,7 +862,18 @@ async function browserCmd(op, params = {}) {
   };
   let out;
   try { out = await call(); }
-  catch (_) { await ensureBrowserd(); out = await call(); }   // daemon down → start it once
+  catch (e) {
+    // Start the daemon ONLY when nothing is listening (connection refused) — then the request
+    // never reached it and sending it again is safe. A timeout or a dropped connection means
+    // the daemon may already have done it (a click, a form submit), so it is NOT replayed.
+    if (!isConnRefused(e)) {
+      const timedOut = e && (e.name === "TimeoutError" || /timeout|aborted/i.test(String(e.message || "")));
+      throw new Error(timedOut
+        ? `the browser didn't answer within 60 seconds — the '${op}' may or may not have happened. Call browser_snapshot to see the page before trying again.`
+        : `lost the connection to the browser during '${op}' (${(e && e.cause && e.cause.code) || (e && e.message) || e}) — it may or may not have happened. Call browser_snapshot to see the page before trying again.`);
+    }
+    await ensureBrowserd(); out = await call();   // daemon down → start it once
+  }
   // Self-heal a STALE daemon: after a browserd.py update, a still-running old daemon
   // doesn't know newly added ops. Kill it by port and restart with the current script.
   if (out && typeof out.error === "string" && /unknown op/.test(out.error)) {
@@ -823,9 +937,17 @@ async function delegate(args, signal, ctx) {
   // Stream the sub-agent's tool activity to the UI with a "sub▸" prefix so delegated
   // work is visible in the Activity panel (it doesn't touch the chat itself).
   const sched = require("./scheduler");
+  // Token/cost usage goes to the PARENT loop's emit (when the caller passes it in ctx.emit),
+  // so the sub-agent's spend counts toward the chat / Autopilot / task totals. The context
+  // size is dropped — it describes the sub-agent's context, not the parent's.
+  const parentEmit = ctx && typeof ctx.emit === "function" ? ctx.emit : null;
   const emit = (ev) => {
     if (ev && (ev.type === "tool" || ev.type === "tool_result")) {
       try { sched.emitUiEvent(ev.type, { ...ev, tool: "sub▸ " + ev.tool }); } catch (_) {}
+    } else if (ev && ev.type === "usage" && parentEmit) {
+      const usage = { ...(ev.usage || {}) };
+      delete usage.context_tokens;
+      try { parentEmit({ ...ev, usage, model: "sub▸ " + (ev.model || "model") }); } catch (_) {}
     }
   };
   const excludeTools = [...new Set([...DELEGATE_EXCLUDED, ...((ctx && ctx.excludeTools) || [])])];
@@ -959,7 +1081,7 @@ async function serveApp(command, port, cwd) {
 
 const toolDefs = [
   { type: "function", function: { name: "add_memory",
-    description: "Save a durable fact about the user or the world to your long-term semantic memory (Mem0). It auto-extracts the salient fact(s), dedupes, and makes them searchable by meaning. Use for names, preferences, relationships, places, decisions — anything worth recalling in future conversations.",
+    description: "Save a durable fact about the user or the world to your long-term semantic memory (Mem0), searchable by meaning. Use for names, preferences, relationships, places, decisions — anything worth recalling in future conversations. With mem0.infer off (the default, best for local models) the text is stored exactly as given and is NOT deduplicated or merged — so search_memory first, and if the fact is already there (or changed), use update_memory instead of adding a near-duplicate. (With infer on, Mem0 extracts the salient facts and dedupes for you.)",
     parameters: { type: "object", properties: { text: { type: "string", description: "The fact(s) to remember, in natural language." }, metadata: { type: "object", description: "Optional tags, e.g. {category: 'preference', topic: 'food'} — returned with search results." } }, required: ["text"] } } },
   { type: "function", function: { name: "update_memory",
     description: "Correct/replace an existing long-term memory IN PLACE (keeps its id). Get the id from search_memory/list_memories. Prefer this over delete+add when a fact changed (moved house, new preference).",
@@ -977,7 +1099,7 @@ const toolDefs = [
     description: "MAINTENANCE: clean up the long-term memory store — merge near-duplicate facts and resolve contradictions (keeping the newer/more specific fact) across ALL stored memories, then delete the redundant ones. Use ONLY when the user asks to clean up / consolidate / dedupe your memory, or clearly complains about duplicate memories. Reports how many were updated/deleted.",
     parameters: { type: "object", properties: {}, required: [] } } },
   { type: "function", function: { name: "run_shell",
-    description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
+    description: "Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs. Never run a server in the foreground: for a web app the user should open, use serve_app; for any other long-running background process, fully detach it with 'setsid nohup CMD </dev/null >/tmp/CMD.log 2>&1 &' (a plain 'nohup CMD &' is killed along with this command). Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.",
     parameters: { type: "object", properties: { command: { type: "string" }, timeout_s: { type: "integer", description: "Max seconds before the command is killed (default 120, max 600)." } }, required: ["command"] } } },
   { type: "function", function: { name: "write_workbench_file",
     description: "Write a text/code file in your workbench (e.g. /LLM_WORKSPACE/app.py; a relative path like app.py resolves under /LLM_WORKSPACE). Use THIS to CREATE a new file (or fully replace a small one) — it's reliable with any content (quotes, backticks, newlines) unlike run_shell heredocs/echo. To CHANGE part of an EXISTING file, prefer edit_workbench_file (safer + cheaper). Then run it with run_shell. (For files you hand to the USER, use write_file -> /LLM_READ_WRITE_FILES instead.)",
@@ -998,13 +1120,13 @@ const toolDefs = [
       cwd: { type: "string", description: "Working directory to run in (default /LLM_WORKSPACE)." },
     }, required: ["command", "port"] } } },
   { type: "function", function: { name: "list_dir",
-    description: "List a directory inside the shared folders (read-only or read-write).",
+    description: "List a directory in /LLM_READ_WRITE_FILES (the default, read-write), /LLM_READ_ONLY_FILES (read-only), or the workbench build area /LLM_WORKSPACE. Files come with their size and modified time.",
     parameters: { type: "object", properties: { path: { type: "string" } }, required: [] } } },
   { type: "function", function: { name: "read_file",
-    description: "Read a TEXT file from the shared folders. Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document).",
+    description: "Read a TEXT file from /LLM_READ_WRITE_FILES, /LLM_READ_ONLY_FILES, or the workbench build area /LLM_WORKSPACE (a bare name like notes.txt means /LLM_READ_WRITE_FILES/notes.txt). Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document); files over 20 MB are refused (use run_shell with head/tail/grep).",
     parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "integer", description: "Character offset to start from (for long files)." }, max_chars: { type: "integer", description: "Max characters to return (default 50000)." } }, required: ["path"] } } },
   { type: "function", function: { name: "write_file",
-    description: "Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /LLM_WORKSPACE, use write_workbench_file. To CHANGE part of an existing shared file, prefer edit_file.",
+    description: "Write a text file into /LLM_READ_WRITE_FILES to share it back to the user (a bare name like report.md lands there), or into the workbench build area /LLM_WORKSPACE. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). /LLM_READ_ONLY_FILES can't be written. For any other workbench path (outside /LLM_WORKSPACE), use write_workbench_file. To CHANGE part of an existing file, prefer edit_file.",
     parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" }, append: { type: "boolean", description: "Append to the end instead of overwriting (default false)." } }, required: ["path", "content"] } } },
   { type: "function", function: { name: "edit_file",
     description: "Make a TARGETED edit to an existing shared file (in /LLM_READ_WRITE_FILES) by replacing an exact snippet — prefer this over rewriting the whole file with write_file. old_string must match verbatim (including whitespace) and be unique unless replace_all=true; new_string is what to put in its place (\"\" deletes). (For workbench /LLM_WORKSPACE files, use edit_workbench_file.)",
@@ -1029,7 +1151,7 @@ const toolDefs = [
       headers: { type: "object", description: "Request headers, e.g. {\"Authorization\": \"Bearer <token>\"}." },
       body: { type: "string", description: "Raw request body (set your own Content-Type header)." },
       json: { type: "object", description: "JSON payload — sent as the body with Content-Type: application/json." },
-      timeout_s: { type: "integer", description: "Max seconds to wait (default 30)." },
+      timeout_s: { type: "integer", description: "Max seconds to wait (default 45, max 120). A GET that times out is retried once." },
       offset: { type: "integer", description: "Character offset for paging a long text response (a truncated response tells you the next offset)." },
       save_to: { type: "string", description: "For binary downloads: a path in the read-write shared folder to save the response to, e.g. 'downloads/report.pdf'." },
       raw: { type: "boolean", description: "Return the unprocessed body — skip article extraction AND html stripping (for scraping markup)." },
@@ -1131,8 +1253,15 @@ const toolDefs = [
     description: "Get a saved credential (including password) by name, to log in to the user's own account.",
     parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } },
   { type: "function", function: { name: "set_secret",
-    description: "Create or update a saved credential in the user's vault (e.g. after the user gives you a login for one of their own accounts, or after you change a password on a site they own). Only the fields you pass are updated.",
-    parameters: { type: "object", properties: { name: { type: "string" }, username: { type: "string" }, password: { type: "string" }, url: { type: "string" }, notes: { type: "string" } }, required: ["name"] } } },
+    description: "Create or update a saved credential in the user's vault (e.g. after the user gives you a login for one of their own accounts, or after you change a password on a site they own). Only the fields you pass are updated. For the email tools, save a secret named 'email' with username, password, imap_host and smtp_host (optional: imap_port, smtp_port, from).",
+    parameters: { type: "object", properties: {
+      name: { type: "string" }, username: { type: "string" }, password: { type: "string" }, url: { type: "string" }, notes: { type: "string" },
+      imap_host: { type: "string", description: "Email only: IMAP server, e.g. imap.gmail.com." },
+      imap_port: { type: "integer", description: "Email only: IMAP port (default 993)." },
+      smtp_host: { type: "string", description: "Email only: SMTP server, e.g. smtp.gmail.com." },
+      smtp_port: { type: "integer", description: "Email only: SMTP port (default 465)." },
+      from: { type: "string", description: "Email only: the From address, if different from username." },
+    }, required: ["name"] } } },
   { type: "function", function: { name: "delete_secret",
     description: "Delete a saved credential from the vault by name.",
     parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } },
@@ -1226,6 +1355,10 @@ const toolDefs = [
     parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } } },
 ];
 
+// Fields set_secret may write. The email ones are what check_email/read_email/send_email read
+// from the 'email' secret (see email.js).
+const SECRET_FIELDS = ["username", "password", "url", "notes", "imap_host", "imap_port", "smtp_host", "smtp_port", "from"];
+
 // Append-only action audit log: one JSON line per tool call (secrets redacted).
 const AUDIT_FILE = process.env.JARVIS_AUDIT_FILE || "/data/audit.log";
 function audit(name, args, status, ms) {
@@ -1264,6 +1397,12 @@ async function execTool(name, args, signal, ctx) {
 }
 
 async function _execTool(name, args, signal, ctx) {
+  // A run that withholds tools (guarded Autopilot, scheduled tasks, sub-agents) hides them
+  // from the model — and refuses them here too, so a tool name the model produces anyway
+  // (from memory, an old conversation, or injected text) can't slip through.
+  if (ctx && Array.isArray(ctx.excludeTools) && ctx.excludeTools.includes(name)) {
+    throw new Error(`${name} is not available in this run`);
+  }
   if (WORKBENCH_TOOLS.has(name) && !workbenchEnabled()) {
     throw new Error(`${name} is unavailable: ${WORKBENCH_OFF}.` + (name === "read_document" ? " Plain-text files can still be read with read_file." : ""));
   }
@@ -1352,7 +1491,7 @@ async function _execTool(name, args, signal, ctx) {
     case "get_skill": return require("./skills").get(args.name);
     case "set_secret": {
       const fields = {};
-      for (const k of ["username", "password", "url", "notes"]) if (args[k] !== undefined) fields[k] = args[k];
+      for (const k of SECRET_FIELDS) if (args[k] !== undefined) fields[k] = args[k];
       return cfgSetSecret(args.name, fields);
     }
     case "delete_secret": return cfgDeleteSecret(args.name);
@@ -1387,6 +1526,13 @@ function loadCustomTools() {
         delete require.cache[require.resolve(fp)];   // hot-reload: pick up edits to the tool file
         const mod = require(fp);
         if (!mod || !mod.name || typeof mod.handler !== "function") { console.log(`custom tool skipped (${f}): must export {name, handler}`); continue; }
+        // A custom tool can't replace a built-in tool or one loaded earlier: two definitions
+        // with one name confuse the model, and the built-in would win at run time anyway.
+        if (toolDefs.some((t) => t.function && t.function.name === mod.name)) {
+          console.log(`custom tool skipped (${dir}/${f}): a tool named '${mod.name}' already exists`);
+          log.warn("tool", `custom tool skipped: a tool named '${mod.name}' already exists (${dir}/${f})`);
+          continue;
+        }
         customRegistry[mod.name] = mod;
         toolDefs.push({ type: "function", function: { name: mod.name, description: mod.description || ("Custom tool " + mod.name), parameters: mod.parameters || { type: "object", properties: {} } } });
         console.log(`custom tool loaded: ${mod.name} (${dir}/${f})`);
@@ -1446,15 +1592,26 @@ async function reloadExtraTools() {
   for (const k of Object.keys(customRegistry)) delete customRegistry[k];
   loadCustomTools();
   let mcpDefs = [];
-  try { mcpDefs = await require("./mcp").reload(); } catch (_) {}
-  for (const d of mcpDefs) toolDefs.push(d);
-  return { builtin: BUILTIN_DEFS.length, custom: Object.keys(customRegistry).length, mcp: mcpDefs.length, total: toolDefs.length };
+  try { mcpDefs = (await require("./mcp").reload()) || []; } catch (_) {}   // null = a newer reload superseded this one
+  const added = addExternalDefs(mcpDefs);
+  return { builtin: BUILTIN_DEFS.length, custom: Object.keys(customRegistry).length, mcp: added, total: toolDefs.length };
+}
+// Add MCP tool definitions, skipping any name already defined (so a startup handshake that
+// finishes after a reload — or two overlapping reloads — can't list a tool twice).
+function addExternalDefs(defs) {
+  let n = 0;
+  for (const d of defs || []) {
+    const nm = d && d.function && d.function.name;
+    if (!nm || toolDefs.some((t) => t.function && t.function.name === nm)) continue;
+    toolDefs.push(d); n++;
+  }
+  return n;
 }
 
 loadCustomTools();
 
 // Register external MCP tools (async — they join toolDefs once the handshake finishes).
-require("./mcp").init().then((defs) => { for (const d of defs) toolDefs.push(d); }).catch(() => {});
+require("./mcp").init().then((defs) => addExternalDefs(defs)).catch(() => {});
 
 // Retryability lives WITH the tool (read-only/idempotent tools only — mutating tools
 // are never auto-retried to avoid double execution).

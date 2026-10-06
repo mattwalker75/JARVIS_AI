@@ -86,7 +86,14 @@ function start({ objective, minutes, autonomy, verbose }) {
   return status();
 }
 
-function startLoop() { loop().catch((e) => finish("error", `crashed: ${e && e.message ? e.message : e}`, null)); }
+// Each loop gets a token; only the loop holding the CURRENT token may act. A force-stop (or a
+// new loop) bumps it, so a cycle still unwinding from a force-stopped run can never keep going
+// alongside the next run.
+let loopToken = 0;
+function startLoop() {
+  const token = ++loopToken;
+  loop(token).catch((e) => { if (token === loopToken) finish("error", `crashed: ${e && e.message ? e.message : e}`, null); });
+}
 
 function requestWrapUp() {
   if (!run) return status();
@@ -95,9 +102,9 @@ function requestWrapUp() {
   return status();
 }
 function requestStop() {
-  if (!run) return status();
+  if (!run || run.ended) return status();   // nothing to stop (an ended run must not flip back to "stopping")
   if (run.status === "paused") finish("stopped", `stopped while paused after ${run.cycles} cycle(s).`, null);
-  else { run.hardStop = true; run.status = "stopping"; if (ac) { try { ac.abort(); } catch (_) {} } emitStatus(); }
+  else { run.hardStop = true; run.pauseRequested = false; run.status = "stopping"; if (ac) { try { ac.abort(); } catch (_) {} } emitStatus(); }   // Stop beats a pending pause
   return status();
 }
 // Forced stop: don't wait for the current cycle to unwind. End the run NOW (bar flips to the
@@ -108,6 +115,7 @@ function forceStop() {
   if (!run) return status();
   if (run.ended) return status();
   run.hardStop = true;
+  loopToken++;   // orphan the running loop: whatever its cycle returns, it exits without acting
   if (ac) { try { ac.abort(); } catch (_) {} }
   ac = null;
   try { require("./tools").killWorkbenchJobs(); } catch (_) {}   // fire-and-forget cleanup
@@ -190,56 +198,61 @@ function guardClause(mode) {
     : " FULL AUTONOMY: take whatever actions the objective genuinely requires.";
 }
 
-async function loop() {
+async function loop(token) {
   const llm = require("./llm");
-  while (run) {
-    if (run.hardStop) return finish("stopped", `hard-stopped after ${run.cycles} cycle(s).`, null);
-    if (run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // keep run alive
-    if (!run.wrapUp && (nowMs() >= run.deadline || run.cycles >= run.maxCycles || (run.maxCost && run.cost >= run.maxCost))) { run.wrapUp = true; run.budgetHit = true; run.status = "stopping"; emitStatus(); }
+  const me = run;   // THIS loop's run — a later start/continue gets its own loop (and token)
+  // Still the live loop? A force-stop, a dismiss, or a new run/Continue bumps the token, and
+  // an orphaned loop (its cycle still unwinding) must then exit without touching anything.
+  const alive = () => token === loopToken && run === me && !!me && !me.ended;
+  while (alive()) {
+    if (me.hardStop) return finish("stopped", `hard-stopped after ${me.cycles} cycle(s).`, null);
+    if (me.pauseRequested) { me.status = "paused"; me.pauseRequested = false; ac = null; emitStatus(); return; }  // keep run alive
+    if (!me.wrapUp && (nowMs() >= me.deadline || me.cycles >= me.maxCycles || (me.maxCost && me.cost >= me.maxCost))) { me.wrapUp = true; me.budgetHit = true; me.status = "stopping"; emitStatus(); }
 
     const before = planner.get("autopilot");
     const doneBefore = before ? before.steps.filter((s) => s.status === "done").length : 0;
-    const guard = guardClause(run.autonomy);
+    const guard = guardClause(me.autonomy);
     // Cross-cycle continuity (fixes the observed "re-read the same file every cycle" loop):
-    const recap = run.lastSummary ? ` Last cycle you reported: "${run.lastSummary.slice(0, 400)}". Continue FROM there — do NOT re-read files or re-plan things you already did unless they changed.` : "";
+    const recap = me.lastSummary ? ` Last cycle you reported: "${me.lastSummary.slice(0, 400)}". Continue FROM there — do NOT re-read files or re-plan things you already did unless they changed.` : "";
     // Anti-thrash: if recent cycles only read/planned without writing code, push hard to act.
-    const pushWrite = run.idleWork >= 2 ? " ⚠ You have spent multiple cycles only READING/PLANNING without changing any files. STOP re-reading. " + (config.workbenchEnabled() ? "Make the concrete code change NOW with write_workbench_file (or run_shell), then run/test it" : "Make the concrete change NOW with write_file / edit_file") + " — do not just describe what you'll do." : "";
-    const objChange = run.objectiveChanged ? ` NOTE: the objective was just UPDATED to «${run.objective}». Re-check your plan against it and adjust steps (add/remove) before continuing.` : "";
+    const pushWrite = me.idleWork >= 2 ? " ⚠ You have spent multiple cycles only READING/PLANNING without changing any files. STOP re-reading. " + (config.workbenchEnabled() ? "Make the concrete code change NOW with write_workbench_file (or run_shell), then run/test it" : "Make the concrete change NOW with write_file / edit_file") + " — do not just describe what you'll do." : "";
+    const objChange = me.objectiveChanged ? ` NOTE: the objective was just UPDATED to «${me.objective}». Re-check your plan against it and adjust steps (add/remove) before continuing.` : "";
     // Don't re-serve an app that's already running from an earlier cycle (a big source of wasted steps).
-    const servedNote = run.servedPort ? ` A preview server is ALREADY running on http://localhost:${run.servedPort} from an earlier cycle — do NOT call serve_app for it again; only re-open/screenshot it if you actually changed the files it serves.` : "";
+    const servedNote = me.servedPort ? ` A preview server is ALREADY running on http://localhost:${me.servedPort} from an earlier cycle — do NOT call serve_app for it again; only re-open/screenshot it if you actually changed the files it serves.` : "";
     // Converge: as soon as the work verifies, mark it complete and stop re-checking a working result.
     const doneNudge = " IMPORTANT: the MOMENT every plan step is finished and your latest test/verification passed, call plan_update to mark the remaining steps done and give a one-line final summary — do NOT keep re-serving, re-screenshotting, or re-verifying a result that already works. If it works, you are DONE.";
 
     let instr;
-    if (run.wrapUp) {
-      instr = `[AUTOPILOT — WRAP UP] Stop starting new work. If a step is nearly done, finish it; otherwise stop now. Then give a concise FINAL SUMMARY: what is complete, what remains, and where the deliverables are. ${run.budgetHit ? "(The time budget was reached.)" : "(The user asked to wrap up for review.)"}`;
+    if (me.wrapUp) {
+      instr = `[AUTOPILOT — WRAP UP] Stop starting new work. If a step is nearly done, finish it; otherwise stop now. Then give a concise FINAL SUMMARY: what is complete, what remains, and where the deliverables are. ${me.budgetHit ? "(The time budget was reached.)" : "(The user asked to wrap up for review.)"}`;
     } else if (!before) {
-      instr = `[AUTOPILOT] You are running AUTONOMOUSLY — the user is AWAY and cannot answer questions. Objective: «${run.objective}». Start now: call plan_create with a concrete, ordered plan (make reasonable assumptions where anything is unclear and note them — do NOT ask the user or wait), then begin executing it: build, run, and TEST your work, fix failures, refine, and keep the plan ledger up to date with plan_update.${guard}`;
+      instr = `[AUTOPILOT] You are running AUTONOMOUSLY — the user is AWAY and cannot answer questions. Objective: «${me.objective}». Start now: call plan_create with a concrete, ordered plan (make reasonable assumptions where anything is unclear and note them — do NOT ask the user or wait), then begin executing it: build, run, and TEST your work, fix failures, refine, and keep the plan ledger up to date with plan_update.${guard}`;
     } else {
       instr = `[AUTOPILOT] Continue AUTONOMOUSLY (the user is away — do not ask questions; make reasonable decisions). Work your active plan: do the next incomplete step(s), test what you build, fix issues, refine, and update the ledger as you go.${objChange}${recap}${servedNote}${pushWrite}${doneNudge}${guard}`;
     }
-    run.objectiveChanged = false;
+    me.objectiveChanged = false;
 
-    ac = new AbortController();
+    const myAc = new AbortController();
+    ac = myAc;
     const messages = [{ role: "system", content: config.systemPrompt() }, { role: "user", content: instr }];
-    try { broadcast({ type: "tool", tool: `🛫 Autopilot — cycle ${run.cycles + 1}${run.wrapUp ? " (wrap-up)" : ""}`, input: run.objective }); } catch (_) {}   // cycle marker in Activity
+    try { broadcast({ type: "tool", tool: `🛫 Autopilot — cycle ${me.cycles + 1}${me.wrapUp ? " (wrap-up)" : ""}`, input: me.objective }); } catch (_) {}   // cycle marker in Activity
     // Stream tool activity/usage to open clients; also detect whether this cycle actually
     // WROTE anything (vs. just reading/planning) to drive the anti-thrash push above,
     // and tally tokens/cost across the whole run.
     let didWork = false;
     const emit = (ev) => {
-      if (!ev) return;
+      if (!ev || !alive()) return;   // an orphaned cycle's late events must not reach the new run
       if (ev.type === "tool" && ev.tool && !NONPRODUCTIVE_TOOLS.has(ev.tool)) didWork = true;
       // Remember a live preview server so LATER cycles don't waste steps re-serving the same app.
       if (ev.type === "tool_result" && ev.tool === "serve_app" && ev.output) {
         const m = String(ev.output).match(/localhost:(\d{4,5})/);
-        if (m) run.servedPort = m[1];
+        if (m) me.servedPort = m[1];
       }
-      if (ev.type === "usage") { run.tokens += (ev.usage && ev.usage.total_tokens) || 0; run.cost += Number(ev.cost_usd) || 0; }
+      if (ev.type === "usage") { me.tokens += (ev.usage && ev.usage.total_tokens) || 0; me.cost += Number(ev.cost_usd) || 0; }
       // Always stream tool activity + usage (and media previews); in VERBOSE mode also
       // stream the model's live thinking + tokens to the chat so you can watch it work.
       const base = ev.type === "tool" || ev.type === "tool_result" || ev.type === "usage" || ev.type === "tool_media" || ev.type === "failover";
-      const think = run.verbose && (ev.type === "reasoning" || ev.type === "token");
+      const think = me.verbose && (ev.type === "reasoning" || ev.type === "token");
       if (base || think) { try { broadcast(ev); } catch (_) {} }
     };
 
@@ -247,52 +260,55 @@ async function loop() {
     // and the WRAP-UP cycle carry the run's judgment-heavy work — route them to the
     // smart tier. With no smart tier configured, modelFor falls back to chat (no-op).
     const smartRouting = !(config.config && config.config.llm && config.config.llm.smart_routing === false);
-    const tier = smartRouting && (!before || run.wrapUp) ? "smart" : "chat";
+    const tier = smartRouting && (!before || me.wrapUp) ? "smart" : "chat";
     let reply = "";
     try {
-      reply = await llm.chat({ messages, emit, signal: ac.signal, watchdog: false, tier, planKey: "autopilot",
-        excludeTools: run.autonomy === "guarded" ? RISKY_TOOLS : [] });
+      reply = await llm.chat({ messages, emit, signal: myAc.signal, watchdog: false, tier, planKey: "autopilot",
+        excludeTools: me.autonomy === "guarded" ? RISKY_TOOLS : [] });
     } catch (e) {
-      if (run && run.pauseRequested) { run.status = "paused"; run.pauseRequested = false; ac = null; emitStatus(); return; }  // paused mid-cycle
-      if (!run || run.hardStop || (ac && ac.signal.aborted)) return finish("stopped", `hard-stopped after ${run.cycles} cycle(s).`, null);
-      run.errors++;
-      if (run.errors >= 3) return finish("error", `repeated errors (last: ${e && e.message ? e.message : e}).`, null);
+      if (!alive()) return;   // force-stopped or replaced while this cycle ran — exit quietly
+      // Stop wins over a pause that was still pending (Pause, then Stop before the cycle unwound).
+      if (me.hardStop) return finish("stopped", `hard-stopped after ${me.cycles} cycle(s).`, null);
+      if (me.pauseRequested) { me.status = "paused"; me.pauseRequested = false; ac = null; emitStatus(); return; }  // paused mid-cycle
+      if (myAc.signal.aborted) return finish("stopped", `hard-stopped after ${me.cycles} cycle(s).`, null);
+      me.errors++;
+      if (me.errors >= 3) return finish("error", `repeated errors (last: ${e && e.message ? e.message : e}).`, null);
       await sleep(1500);
       continue;
     }
-    if (!run || run.ended) return;   // a force-stop ended the run while this cycle was in flight — drop its result silently
+    if (!alive()) return;   // a force-stop ended (or a new run replaced) this run while the cycle was in flight — drop its result silently
     // Retry-on-empty: a cycle where the model returned NOTHING is a wasted cycle — retry it (up to
     // twice) without counting it, rather than recording a blank summary and burning the budget.
-    if ((reply || "").includes("I wasn't able to produce a response") && (run.emptyStreak || 0) < 2) {
-      run.emptyStreak = (run.emptyStreak || 0) + 1;
+    if ((reply || "").includes("I wasn't able to produce a response") && (me.emptyStreak || 0) < 2) {
+      me.emptyStreak = (me.emptyStreak || 0) + 1;
       try { broadcast({ type: "tool", tool: "↻ Autopilot — empty response, retrying", input: "" }); } catch (_) {}
       await sleep(1000);
       continue;   // does NOT increment cycles or idleWork
     }
-    run.emptyStreak = 0;
-    run.cycles++;
-    run.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
-    run.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
-    run.idleWork = didWork ? 0 : run.idleWork + 1;
+    me.emptyStreak = 0;
+    me.cycles++;
+    me.errors = 0;   // a successful cycle clears the transient-error counter (don't let sporadic errors accumulate across a long run)
+    me.lastSummary = (reply || "").replace(/\s+/g, " ").trim();
+    me.idleWork = didWork ? 0 : me.idleWork + 1;
     // Cycle history: what each cycle reported, browsable from the bar's 📜 button
     // (GET /api/autopilot/history). Persisted with the run, capped so a 12-hour run
     // can't bloat the state file.
-    run.history = run.history || [];
-    run.history.push({ cycle: run.cycles, at: new Date().toISOString(), wrapUp: !!run.wrapUp, didWork, summary: run.lastSummary.slice(0, 600) });
-    if (run.history.length > 200) run.history = run.history.slice(-200);
+    me.history = me.history || [];
+    me.history.push({ cycle: me.cycles, at: new Date().toISOString(), wrapUp: !!me.wrapUp, didWork, summary: me.lastSummary.slice(0, 600) });
+    if (me.history.length > 200) me.history = me.history.slice(-200);
     // Verbose: finalize this cycle's streamed thinking as an (ephemeral) chat message so cycles
     // are separated. ephemeral = shown but not added to your chat's model-context history.
-    if (run.verbose && reply && reply.trim()) { try { broadcast({ type: "reply", text: reply, ephemeral: true }); } catch (_) {} }
+    if (me.verbose && reply && reply.trim()) { try { broadcast({ type: "reply", text: reply, ephemeral: true }); } catch (_) {} }
     emitStatus();
 
     // Prefer reporting genuine completion even if the budget was also reached this cycle.
     const after = planner.get("autopilot");
-    if (after && after.status === "complete") return finish("done", `objective complete after ${run.cycles} cycle(s).`, reply);
-    if (run.wrapUp) return finish(run.budgetHit ? "budget" : "stopped",
-      run.budgetHit ? `time budget reached after ${run.cycles} cycle(s).` : `wrapped up after ${run.cycles} cycle(s).`, reply);
+    if (after && after.status === "complete") return finish("done", `objective complete after ${me.cycles} cycle(s).`, reply);
+    if (me.wrapUp) return finish(me.budgetHit ? "budget" : "stopped",
+      me.budgetHit ? `time budget reached after ${me.cycles} cycle(s).` : `wrapped up after ${me.cycles} cycle(s).`, reply);
     const doneAfter = after ? after.steps.filter((s) => s.status === "done").length : 0;
-    run.noProgress = (after && doneAfter <= doneBefore && before) ? run.noProgress + 1 : 0;
-    if (run.noProgress >= 5) return finish("stuck", `no plan progress for ${run.noProgress} cycles — paused for your review.`, reply);
+    me.noProgress = (after && doneAfter <= doneBefore && before) ? me.noProgress + 1 : 0;
+    if (me.noProgress >= 5) return finish("stuck", `no plan progress for ${me.noProgress} cycles — paused for your review.`, reply);
 
     await sleep(300);
   }

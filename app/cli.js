@@ -11,7 +11,9 @@ const llm = require("./src/llm");
 const { systemPrompt } = require("./src/config");
 const sessions = require("./src/sessions");
 
-const SYSTEM = systemPrompt();
+// The system prompt is rebuilt for every turn (not once at startup) so it carries the current
+// date/time and any prompt-file change made while the terminal chat is open (JARVIS_CONFIG.json itself is
+// read once at startup — other config changes apply to the next terminal chat).
 
 function truncate(s, n = 160) { s = s || ""; return s.length > n ? s.slice(0, n) + "…" : s; }
 function toolEmit(ev) {
@@ -34,7 +36,7 @@ async function runOnce(prompt, piped) {
   let content = prompt || "";
   if (piped && piped.trim()) content += "\n\n--- piped input below ---\n" + piped;
   if (!content.trim()) { process.stderr.write("Nothing to do: no prompt and no piped input.\n"); process.exit(2); }
-  const messages = [{ role: "system", content: SYSTEM }, { role: "user", content }];
+  const messages = [{ role: "system", content: systemPrompt() }, { role: "user", content }];
   try {
     const reply = await llm.chat({ messages, emit: toolEmit });
     // Exit explicitly once stdout is flushed (open DB/socket pools would otherwise keep us alive).
@@ -109,7 +111,7 @@ async function interactive() {
     rl.pause();
     history.push({ role: "user", content: text });
     try {
-      const reply = await llm.chat({ messages: [{ role: "system", content: SYSTEM }, ...history], emit: toolEmit });
+      const reply = await llm.chat({ messages: [{ role: "system", content: systemPrompt() }, ...history], emit: toolEmit });
       process.stdout.write("\nJARVIS> " + (reply || "") + "\n\n");
       history.push({ role: "assistant", content: reply || "" });
     } catch (e) {

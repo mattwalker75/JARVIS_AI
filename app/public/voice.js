@@ -23,6 +23,7 @@
   let srRestartAt = 0, srStreak = 0;   // backoff for the continuous recognizer's onend->restart loop
 
   const setState = (s) => handlers.onState && handlers.onState(s);
+  const sttOn = () => cfg.stt !== false;   // voice.stt: false = speech input off — never (re)start listening
   const reportError = (m) => handlers.onError && handlers.onError(m);
 
   // --- TTS voice selection ---
@@ -38,9 +39,11 @@
     return voices.find((x) => /en[-_]/i.test(x.lang)) || voices[0] || null;
   }
 
+  // Browsers only allow the microphone on https:// pages and on http://localhost.
+  const INSECURE_MSG = "The microphone needs HTTPS when JARVIS is opened from another device (for example with \"tailscale serve\"), or open it at http://localhost:8110 on this computer.";
   function supportInfo() {
+    if (!window.isSecureContext) return { ok: false, msg: INSECURE_MSG };
     if (!SR) return { ok: false, msg: "This browser has no Speech Recognition API. Use Google Chrome (recommended) or Safari." };
-    if (!window.isSecureContext) return { ok: false, msg: "Microphone needs a secure context. Open JARVIS at http://localhost:8110 (not a LAN IP), or use HTTPS." };
     return { ok: true };
   }
   function describeError(code) {
@@ -60,6 +63,7 @@
     if (code === "not-allowed" || code === "service-not-allowed" || code === "audio-capture") setMode("off");
   }
   async function ensureMicPermission() {
+    if (!window.isSecureContext) { reportError(INSECURE_MSG); return false; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return true;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -159,7 +163,7 @@
     const s = supportInfo();
     if (!s.ok) { reportError(s.msg); listenMode = "off"; enabled = false; setState("unsupported"); return false; }
     if (!(await ensureMicPermission())) { listenMode = "off"; enabled = false; setState("off"); return false; }
-    listenMode = m; enabled = true; wantRunning = cfg.stt !== false;
+    listenMode = m; enabled = true; wantRunning = sttOn();
     if (m === "wake") { waking = "asleep"; if (wantRunning) startRecognition(); setState("asleep"); }
     else { waking = "listening"; if (wantRunning) startRecognition(); setState("open"); }
     return true;
@@ -177,15 +181,16 @@
     try { recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch (e) { reportError("Microphone error: " + e.name); return; }
     const chunks = [];
-    mediaRec = new MediaRecorder(recStream, MediaRecorder.isTypeSupported("audio/webm") ? { mimeType: "audio/webm" } : undefined);
+    const rec = new MediaRecorder(recStream, MediaRecorder.isTypeSupported("audio/webm") ? { mimeType: "audio/webm" } : undefined);
+    mediaRec = rec;
     const cleanup = () => {
       if (recStream) { try { recStream.getTracks().forEach((t) => t.stop()); } catch (_) {} recStream = null; }
       mediaRec = null;
       setState(listenMode === "off" ? "off" : listenMode === "open" ? "open" : (waking === "listening" ? "listening" : "asleep"));
     };
-    mediaRec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-    mediaRec.onstop = async () => {
-      const blob = new Blob(chunks, { type: mediaRec && mediaRec.mimeType || "audio/webm" });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       cleanup();
       if (blob.size < 1000) return;   // a tap-tap with no speech
       setState("listening");          // "…transcribing" state (reuses the listening pill)
@@ -197,9 +202,10 @@
       } catch (e) { reportError("Local transcription failed: " + e.message); }
       setState(listenMode === "off" ? "off" : listenMode === "open" ? "open" : (waking === "listening" ? "listening" : "asleep"));
     };
-    mediaRec.start();
+    rec.start();
     setState("listening");
-    setTimeout(() => { if (mediaRec) { try { mediaRec.stop(); } catch (_) {} } }, 30000);   // safety stop
+    // Safety stop after 30 s — of THIS recording only (a later recording has its own timer).
+    setTimeout(() => { if (rec.state === "recording") { try { rec.stop(); } catch (_) {} } }, 30000);
   }
 
   async function listenOnce() {
@@ -219,7 +225,7 @@
     r.onend = () => {
       oneShot = null;
       setState(listenMode === "off" ? "off" : listenMode === "open" ? "open" : (waking === "listening" ? "listening" : "asleep"));
-      if (resume && enabled && !speaking) { wantRunning = true; startRecognition(); }
+      if (resume && enabled && !speaking) { wantRunning = sttOn(); startRecognition(); }
     };
     try { r.start(); } catch (e) { oneShot = null; reportError("Could not start the microphone: " + e.message); }
   }
@@ -258,7 +264,7 @@
     speaking = false;
     stopLevelLoop();
     if (handlers.onLevel) { try { handlers.onLevel(0); } catch (_) {} }
-    if (enabled && resumeAfterTts) { resumeAfterTts = false; wantRunning = true; startRecognition(); }
+    if (enabled && resumeAfterTts) { resumeAfterTts = false; wantRunning = sttOn(); startRecognition(); }
     // Conversational follow-up: after the AI stops talking, keep the mic awake in Wake
     // mode for cfg.followup_seconds so you can reply WITHOUT the wake word — the window
     // starts now (end of speech), not when you last spoke. Say the wake word again after
@@ -368,7 +374,7 @@
     if (handlers.onLevel) { try { handlers.onLevel(0); } catch (_) {} }
     if (was && handlers.onSpeak) { try { handlers.onSpeak(false); } catch (_) {} }
     speaking = false;
-    if (enabled && (resumeAfterTts || was)) { resumeAfterTts = false; wantRunning = true; startRecognition(); }
+    if (enabled && (resumeAfterTts || was)) { resumeAfterTts = false; wantRunning = sttOn(); startRecognition(); }
   }
 
   function setTts(on) { cfg.tts = !!on; if (!on) stopSpeaking(); else if (isPiper()) ensureCtx(); }

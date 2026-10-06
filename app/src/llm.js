@@ -239,7 +239,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
   // inherit this loop's exclusions, or an unattended run could reach a withheld tool
   // (e.g. send_email) through a sub-agent. planKey scopes the plan_* tools to THIS
   // conversation's ledger (see planner.js).
-  const toolCtx = { excludeTools: excludeTools || [], planKey };
+  const toolCtx = { excludeTools: excludeTools || [], planKey, emit };   // emit: delegate forwards a sub-agent's token usage
   // Per-tier overrides (object form under llm.models) beat the global params.
   const tierParams = paramsFor(tier);
   for (let i = 0; i <= maxIter; i++) {
@@ -398,7 +398,7 @@ async function openaiCompatibleChat(messages, emit, tier = "chat", excludeTools,
     // say that specifically.
     if (!msg.content) {
       if (finish === "length") {
-        return `⚠️ Ran out of tokens trying to process the request (max_tokens = ${llm.max_tokens ?? 1200}). The model spent its whole budget thinking before it could finish. Please try again, or raise "llm.max_tokens" in JARVIS_CONFIG.json.`;
+        return `⚠️ Ran out of tokens trying to process the request (max_tokens = ${tierParams.max_tokens ?? llm.max_tokens ?? 1200}). The model spent its whole budget thinking before it could finish. Please try again, or raise "${tierParams.max_tokens != null ? `llm.models.${tier}.max_tokens` : "llm.max_tokens"}" in JARVIS_CONFIG.json.`;
       }
       return "⚠️ I wasn't able to produce a response to that. Please try again, or rephrase the request.";
     }
@@ -454,23 +454,46 @@ async function execWithRetry(name, args, signal, ctx) {
 }
 
 // fetch with retry + backoff on transient HTTP (429/5xx) and network errors.
+// The longest a server's Retry-After may make us wait between attempts (a "retry in an hour"
+// would otherwise freeze the turn); the backoff waits are capped the same way.
+const MAX_RETRY_WAIT_MS = 30000;
+// A sleep that ends early (rejecting) when Stop is pressed, so a retry wait never outlives the turn.
+function abortableSleep(ms, signal) {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.reject(signal.reason || Object.assign(new Error("stopped"), { name: "AbortError" }));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(t); reject(signal.reason || Object.assign(new Error("stopped"), { name: "AbortError" })); };
+    const t = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+/** Retry-After as milliseconds: delta-seconds or an HTTP date; null when absent/unparseable. */
+function retryAfterMs(header) {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const at = Date.parse(header);
+  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+}
 async function fetchWithRetry(url, options, tries = 4) {
   let lastErr;
+  const signal = options && options.signal;
   for (let a = 0; a < tries; a++) {
     try {
       const resp = await fetch(url, options);
       if ((resp.status === 429 || resp.status >= 500) && a < tries - 1) {
-        const ra = parseInt(resp.headers.get("retry-after") || "", 10);
-        await sleep(ra ? ra * 1000 : Math.min(30000, 1000 * 2 ** a) + Math.random() * 1000);
+        const ra = retryAfterMs(resp.headers.get("retry-after"));
+        try { await resp.body?.cancel(); } catch (_) {}   // free the connection before waiting
+        await abortableSleep(Math.min(MAX_RETRY_WAIT_MS, ra != null ? ra : 1000 * 2 ** a + Math.random() * 1000), signal);
         continue;
       }
       return resp;
     } catch (e) {
       lastErr = e;
       // A user-initiated abort is final — do not retry it.
-      if (e.name === "AbortError" || (options.signal && options.signal.aborted)) throw e;
+      if (e.name === "AbortError" || (signal && signal.aborted)) throw e;
       if (a === tries - 1) throw e;
-      await sleep(Math.min(30000, 1000 * 2 ** a) + Math.random() * 1000);
+      await abortableSleep(Math.min(MAX_RETRY_WAIT_MS, 1000 * 2 ** a) + Math.random() * 1000, signal);
     }
   }
   throw lastErr || new Error("fetch failed");
@@ -521,6 +544,14 @@ async function streamChatCompletion(url, headers, body, emit, signal, watchdogOn
       const payload = line.slice(5).trim();
       if (payload === "[DONE]") { done = true; break; }
       let json; try { json = JSON.parse(payload); } catch { continue; }
+      if (json && json.error) {
+        // A mid-stream error event (rate limit, context overflow, provider fault …) — surface it
+        // instead of skipping it and returning an empty reply.
+        const er = json.error;
+        const m = typeof er === "string" ? er : (er.message || er.msg || JSON.stringify(er));
+        try { await reader.cancel(); } catch (_) {}
+        throw new Error("LLM error: " + String(m).slice(0, 400));
+      }
       if (json.usage) usage = json.usage;
       const choice = json.choices && json.choices[0];
       if (choice && choice.finish_reason) finish = choice.finish_reason;

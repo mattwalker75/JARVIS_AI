@@ -10,7 +10,7 @@ module.exports = [
     summary: "Semantic memory (Mem0) for facts; a workbench database for structured data.",
     details: [
       "PRIMARY (facts about the user/world): use the semantic memory tools, backed by Mem0 + a vector store.",
-      "  - add_memory(text): save a durable fact in natural language; it auto-extracts, dedupes, and updates conflicting facts.",
+      "  - add_memory(text): save a durable fact in natural language. With mem0.infer off (the default) it is stored exactly as given and NOT deduplicated — search_memory first and use update_memory when the fact is already there or changed. (With infer on, Mem0 extracts, dedupes, and updates conflicting facts itself.)",
       "  - search_memory(query): recall BY MEANING (not exact match). ALWAYS search before answering anything personal — name, family, home, preferences, prior decisions.",
       "  - update_memory(id, text): correct a fact IN PLACE (moved house, changed preference) — prefer this over delete + re-add.",
       "  - list_memories() / delete_memory(id): review and prune. search results include created_at + any metadata you saved.",
@@ -249,7 +249,7 @@ module.exports = [
       "READ the actual error/output first — don't guess. Tools return structured results; a failure usually says why.",
       "TRANSIENT (network blip, rate limit, timeout, temporary 5xx): retry ONCE, maybe with a longer timeout_s or after a short wait. web_search saying 'blocked/rate-limited' is transient, not 'no results'.",
       "STRUCTURAL (wrong path, bad selector, missing dependency, 4xx, unsupported input): do NOT retry the same thing — change the approach (fix the path, install the package with apt/pip, use a different tool). E.g. read_file 'binary file' -> use read_document or analyze_image; browser selector not found -> browser_snapshot again for the real ref.",
-      "run_shell that was KILLED by the timeout: raise timeout_s, or run it in the background (nohup ... &) and poll.",
+      "run_shell that was KILLED by the timeout: raise timeout_s, or fully detach it (setsid nohup CMD </dev/null >/tmp/CMD.log 2>&1 &) and poll the log — a plain 'nohup CMD &' is killed with the command. For a web app, use serve_app.",
       "EMPTY/NO DATA is a real outcome — report it honestly ('the log had no matching entries', 'the API returned []'). NEVER invent a value or claim success when a tool returned nothing.",
       "If genuinely stuck after a couple of distinct attempts, say what you tried, what failed, and what you'd need — don't loop the same failing call (the tool loop caps iterations anyway).",
     ].join("\n"),

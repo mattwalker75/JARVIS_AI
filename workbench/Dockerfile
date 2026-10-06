@@ -4,10 +4,12 @@
 # webtop (Ubuntu + XFCE + noVNC) base.
 #
 # Internet: the image has internet during build (apt/pip below) and the container
-# has outbound internet at runtime via the default Docker bridge network.
+# has outbound internet at runtime via its own "workbench" compose network — which it
+# shares only with jarvis-app (it can't reach the Docker API proxy or the memory store).
 #
-# NOTE: the base image already ships Node.js (NodeSource) — do NOT apt-install
-# nodejs/npm here or it conflicts. Node + npm are already available.
+# NOTE: Node.js comes from Ubuntu's `nodejs` package below (no separate npm package —
+# it would conflict if the base image's Node is newer). Check with `node -v` in the
+# workbench after a rebuild.
 #
 # BASE_IMAGE is configurable (workbench.base_image in JARVIS_CONFIG.json → exported by
 # ./JARVIS.sh --setup). The default floats on the latest ubuntu-xfce; for reproducible

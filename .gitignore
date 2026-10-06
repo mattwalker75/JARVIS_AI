@@ -7,8 +7,9 @@ config/JARVIS_SECRETS.json
 app/node_modules/
 node_modules/
 
-# Database backups
-backups/*.sql
+# Backups (memory / workspace tarballs, SQL dumps) — personal data, never commit.
+backups/*
+!backups/.gitkeep
 
 # OS / editor
 .DS_Store
@@ -22,6 +23,12 @@ data/.password
 data/.password.tmp
 data/sessions/
 data/backups/
+# runtime logs and records the app writes (tool audit trail, task runs, plans, uploads)
+data/*.log
+data/*.jsonl
+data/plans/
+# transient folder used while --restore-workspace swaps in a backup
+.LLM_WORKSPACE.restore-tmp/
 
 # READ-WRITE folder = the AI's deliverables / scratch — NOT tracked (can be huge or personal).
 LLM_READ_WRITE_FILES/*

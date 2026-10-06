@@ -12,7 +12,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { font-family: var(--font); background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
 /* Ensure the HTML `hidden` attribute always wins, even over class rules that set display
    (e.g. .autopilot-bar{display:flex}) — otherwise a "hidden" bar renders anyway. */
@@ -105,13 +105,15 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .layout.resizing { transition: none; }                      /* no lag while dragging the grip */
 .layout.drawer-collapsed { grid-template-columns: minmax(0, 1fr) 0px; }
 .layout.drawer-collapsed .side { overflow: hidden; }
-@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .side { display: none; } }
 
 /* One drag-handle, always attached to the drawer's left edge — it slides in/out WITH the
    drawer. Click it to open/close; drag it to resize (drag to the far right to close, or from
    the screen edge to the left to open). The chevron flips to show the direction. */
 .drawer-handle { position: absolute; top: 0; bottom: 0; right: var(--drawer-w); width: 18px; z-index: 7; cursor: col-resize;
-  display: flex; align-items: center; justify-content: center; transition: right .18s ease; }
+  display: flex; align-items: center; justify-content: center; transition: right .18s ease;
+  margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; touch-action: none; }
+.drawer-handle:focus { outline: none; }
+.drawer-handle:focus-visible::before { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .layout.drawer-collapsed .drawer-handle { right: 0; }
 .layout.resizing .drawer-handle { transition: none; }
 .drawer-handle::before { content: "\203A"; display: flex; align-items: center; justify-content: center;
@@ -318,6 +320,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); disp
 .composer button { align-self: stretch; padding: 0 18px; border: none; border-radius: 12px; background: var(--accent); color: #042027; font-weight: 700; cursor: pointer; }
 .composer button.stop-btn { background: var(--danger); color: #2a0b0b; }
 .composer button.stop-btn:hover { filter: brightness(1.08); }
+.composer button.speak-stop { background: transparent; color: var(--accent); border: 1px solid var(--accent); font-weight: 600; padding: 0 12px; white-space: nowrap; }
 
 .side { position: relative; display: flex; flex-direction: column; min-height: 0; }
 .tabs { display: flex; gap: 4px; padding: 8px 8px 0; background: var(--panel); border-bottom: 1px solid var(--edge); }
@@ -437,8 +440,16 @@ html[data-theme="light"] .modal-ok { color: #fff; }
 
 /* --- chat tabs (parallel named conversations) --- */
 .chat-tabs { display: flex; align-items: center; gap: 4px; padding: 5px 10px 0; overflow-x: auto; scrollbar-width: thin; }
-.chat-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; border: 1px solid var(--edge); border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); padding: 4px 8px 4px 12px; font-size: .76rem; cursor: pointer; white-space: nowrap; }
-.chat-tab .ct-name { overflow: hidden; text-overflow: ellipsis; }
+.chat-tab { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; border: 1px solid var(--edge); border-bottom: none; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); padding: 4px 8px 4px 12px; font-size: .76rem; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
+.chat-tab .ct-name { overflow: hidden; text-overflow: ellipsis; min-width: 0; margin: 0; padding: 0; border: 0; background: none; color: inherit; font-size: inherit; cursor: pointer; white-space: nowrap; }   /* keeps the browser's button font, as the old one-button tab had */
+.chat-tab .ct-name:focus { outline: none; }
+.chat-tab:focus-within { border-color: var(--accent); }
+.chat-tab .ct-x { margin: 0; }
+/* ● = the tab JARVIS is working in (its reply lands there); • = a reply/notice arrived while away */
+.chat-tab.busy .ct-name::before, .chat-tab.unread .ct-name::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.chat-tab.busy .ct-name::before { background: #ffb03a; box-shadow: 0 0 6px #ffb03a; animation: jstatpulse 1s infinite; }
+.chat-tab.unread .ct-name::before { background: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .chat-tab.busy .ct-name::before { animation: none; } }
 .chat-tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
 .chat-tab .ct-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: .8rem; padding: 0 2px; border-radius: 4px; }
 .chat-tab .ct-x:hover { color: var(--danger); }
@@ -520,3 +531,91 @@ html[data-theme="light"] .modal-ok { color: #fff; }
 .acc-urls code { display: block; }
 .desktop-remote { padding: 18px; max-width: 60ch; }
 
+
+.cfg-result .cfg-stale-reload { margin-left: 6px; }
+
+/* ===== Phone / tablet layout pieces (hidden on the desktop) ===== */
+.narrow-btns, .sheet-head { display: none; }
+.narrow-btns { align-items: center; gap: 6px; }
+#panel-btn { position: relative; }
+#panel-btn .dot { position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.sheet-backdrop { display: none; }
+
+/* Touch screens: copy buttons that only appear on hover would never appear. */
+@media (hover: none) {
+  .msg.assistant .copy-btn { opacity: .55; }
+  .code-copy { opacity: .8; }
+  .entry .e-copy { opacity: 1; }
+}
+
+/* Touch screens: every control is at least 40px to hit with a finger. */
+@media (pointer: coarse) {
+  .ghost, .seg button, .tab, .chat-tab, .chat-tab-add, .session-item button, .ap-ctl, .pb-btn,
+  .chat-search button, .retry-btn, .cfg-eye, .file-btn, .task button.cancel, .ctx-sum, .apd-close,
+  .modal-actions button, .jump-btn, #act-filter, .chat-search input, .mem-search, .quick-add input, .quick-add select,
+  .voice-drop select, .cfg-section select, .cfg-section input:not([type=checkbox]):not([type=radio]) { min-height: 40px; }
+  .ghost, .seg button, .chat-tab-add, .pb-btn, .chat-search button, .file-btn, .apd-close, .session-item button, .chat-tab .ct-name { min-width: 40px; }
+  .chat-tab { padding: 0 2px 0 12px; }
+  .chat-tab .ct-name { align-self: stretch; }
+  .chat-tab .ct-x { min-width: 40px; min-height: 40px; }
+  .msg.assistant .copy-btn, .entry .e-copy, .code-copy, .n-dismiss { min-width: 40px; min-height: 40px; }
+  .pw-eye { width: 40px; height: 40px; right: 2px; }
+  .pw input { padding-right: 46px; }
+  .pb-handle { height: 40px; }
+  .voice-drop input[type=range] { min-height: 40px; }
+  .cfg-check, .apd-check, .modal-choice { min-height: 40px; }
+  .cfg-check input, .apd-check input { width: 20px !important; height: 20px; }
+  .drawer-handle { width: 40px; }
+  .drawer-handle::before { width: 24px; height: 84px; }
+  .chat-search { flex-wrap: wrap; }
+}
+
+/* Tablet + phone (≤900px): the chat gets the whole width; the side panels become a
+   full-height sheet over it, opened with ☰ Panels in the top bar. */
+@media (max-width: 900px) {
+  .layout, .layout.drawer-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .chat { border-right: none; }
+  .drawer-handle { display: none; }
+  .narrow-btns { display: flex; }
+  .side { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%); z-index: 150; background: var(--bg);
+    border-left: 1px solid var(--edge); box-shadow: -18px 0 40px rgba(0,0,0,.45);
+    transform: translateX(100%); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+  .layout.drawer-collapsed .side { overflow: visible; }
+  .layout.sheet-open .side { transform: none; visibility: visible; transition: transform .2s ease; }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+    padding-top: max(8px, env(safe-area-inset-top)); background: var(--panel); }
+  .sheet-title { font-weight: 700; letter-spacing: 1px; }
+  .sheet-backdrop { display: block; position: fixed; inset: 0; z-index: 149; background: rgba(0,0,0,.5); }
+  .tabs { overflow-x: auto; scrollbar-width: thin; }
+  .tab { flex: 1 0 auto; }
+  .bubble, .msg.assistant details.think { max-width: 92%; }
+  .autopilot-bar { flex-wrap: wrap; }
+  .controls { justify-content: flex-start; }
+}
+@media (max-width: 900px) and (prefers-reduced-motion: reduce) { .side, .layout.sheet-open .side { transition: none; } }
+
+/* Phone (≤600px): a compact top bar — the controls fold behind ⋯ — so the chat gets the height. */
+@media (max-width: 600px) {
+  .topbar { padding: 6px 10px; padding-top: max(6px, env(safe-area-inset-top)); gap: 6px; }
+  .brand { flex: 1 1 auto; min-width: 0; gap: 8px; }
+  .brand > div { min-width: 0; }
+  .model, .usage { display: none; }
+  .controls { display: none; width: 100%; gap: 6px; padding-top: 6px; border-top: 1px solid var(--edge); }
+  .topbar.more-open .controls { display: flex; }
+  .mic { min-width: 0; text-align: left; }
+  .voice-drop, .session-drop { position: fixed; left: 8px; right: 8px; top: auto; width: auto; max-height: 70vh; overflow-y: auto; z-index: 160; }
+  .side { width: 100%; border-left: none; }
+  .chat-tabs { padding: 4px 8px 0; }
+  .messages { padding: 10px; }
+  .composer { padding: 8px 10px; gap: 6px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .composer button { padding: 0 12px; }
+  .composer button.speak-stop { padding: 0 10px; }
+  .speak-stop .ss-label { display: none; }
+  .jump-btn { right: 12px; bottom: 76px; }
+  .cfg-grid { grid-template-columns: 1fr; }
+  .apd-row { flex-wrap: wrap; }
+  .autopilot-bar .ap-obj { flex-basis: 100%; order: 10; }
+  /* 16px form text: smaller makes phones zoom the page when a box is focused. */
+  input, select, textarea { font-size: 16px !important; }
+  .composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
