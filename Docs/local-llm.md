@@ -9,7 +9,7 @@ and prints an endpoint URL that you paste into **JARVIS → Config → Endpoint 
 > so they run natively on the **host**, not inside the JARVIS containers. The app reaches them over
 > `host.docker.internal`. Cloud users skip all of this — just point `base_url` at the provider.
 
-There are **two backends** today (a third, the optional LiteLLM gateway, unifies them):
+There are **two backends** today (the optional LiteLLM gateway can front either one's models as a single endpoint):
 
 | | **Ollama** | **MLX** |
 | --- | --- | --- |
@@ -107,7 +107,13 @@ switches tiers — ideal if you have the RAM). The script then discovers what's 
 ./JARVIS_LOCAL_LLM.sh mlx-stop <model|port|all>                                 # take one/all offline
 ```
 `mlx-serve` records what you started in `mlx/serving.json`, so **`mlx-up`** relaunches your set after a
-reboot. (It's auto-written — not a hand-edited config.)
+reboot. (It's auto-written — not a hand-edited config.) A model is added there once it actually
+answers; if it is still not answering after 3 minutes, `mlx-serve` reports a **failure** (but still
+remembers it, since a big model may just be slow to load — check its log in `mlx/`).
+
+MLX servers listen on **this computer only** (`127.0.0.1`) because they have no login — JARVIS in
+Docker Desktop still reaches them via `host.docker.internal`. To open one to your network on purpose,
+start it with `MLX_HOST=0.0.0.0 ./JARVIS_LOCAL_LLM.sh mlx-serve <repo>`.
 
 **4. Wire it into JARVIS + get the URL:**
 ```bash
@@ -132,8 +138,8 @@ straight at its `:port`.
 ## Multiple models & the LiteLLM gateway
 
 JARVIS points at **one** endpoint. If all your local models are Ollama tags, Ollama already routes
-them — done. You need the **gateway** when you want several models (or **mixed runtimes**, e.g. chat
-on Ollama + a reasoning model on MLX) behind **one** endpoint:
+them — done. You need the **gateway** when you want several MLX models (or local + cloud models)
+behind **one** endpoint:
 
 ```bash
 ./JARVIS_LOCAL_LLM.sh start --backend mlx --gateway    # → http://host.docker.internal:4000/v1
@@ -156,7 +162,9 @@ backend** every time you run `start --gateway` — or on demand with **`gateway-
 ./JARVIS_LOCAL_LLM.sh gateway-sync --backend ollama      # just refresh + reload (no full restart)
 ```
 
-The selected `--backend` **owns** that block: Ollama contributes one route per installed tag (all →
+The selected `--backend` **owns** that block — each sync **replaces** it with that one backend's
+routes, so the gateway serves either your Ollama models **or** your MLX models, not both at once
+(mixing local runtimes behind one gateway isn't supported): Ollama contributes one route per installed tag (all →
 `:11434`, embeddings skipped); MLX probes **each** model's port and contributes a route only for the
 servers actually answering (each → its own port). **Cloud routes above the marker are never touched** —
 those are your deliberate choices (enabling `claude-sonnet` etc. is a decision, not something to
@@ -235,7 +243,7 @@ of it:
   ● qwen3:8b                                  5.2G
       qwen3 · 8.2B · Q4_K_M · 40K ctx · tools · thinking
   ○ some-org/Big-Model-MLX                    926G   downloaded
-      glm5_next MoE-288 · 4bit/g64 · 1M ctx · chat · tools · thinking · vision*
+      glm5_next MoE-288 · 4bit/g64 · 1M ctx · chat · tools · thinking · vision
       · 5 quant variants inside: 2-bit, 2bit-lite, 3-bit, 4-bit, 6-bit
   ○ some-org/Foundation-MLX                   167G   downloaded
       deepseek_v4 MoE-256 · 4bit/g32 · 1M ctx · BASE - no chat template
@@ -260,7 +268,9 @@ answering 200.
 
 **Vision-language models** (`pipeline_tag: image-text-to-text`) are implemented in
 **[`mlx-vlm`](https://github.com/Blaizzy/mlx-vlm)** instead, which covers far more architectures and
-ships its own OpenAI-compatible server. Many recent MLX conversions run *only* there.
+ships its own OpenAI-compatible server. Many recent MLX conversions run *only* there. A model whose
+`config.json` has a `vision_config` section is started on `mlx-vlm` whenever `mlx-vlm` supports it —
+even if `mlx-lm` also knows the architecture, because `mlx-lm` would quietly serve it text-only.
 
 ```bash
 ./mlx/venv/bin/pip install mlx-vlm        # once, into the same venv
@@ -276,8 +286,8 @@ tool-calling behave identically. Two things to know:
 - **Architecture support ≠ it fits.** A model still has to fit in RAM (mlx-vlm's
   `--expert-cache-gb` can offload MoE experts for models larger than memory).
 
-**Reclaiming space** — deletion is exact-name-only, refuses while a model is serving, shows what
-it frees, and asks first:
+**Reclaiming space** — deletion is exact-name-only, refuses while an **MLX** model is serving (stop
+it first with `mlx-stop`; Ollama models are deleted even if loaded), shows what it frees, and asks first:
 
 ```bash
 ./JARVIS_LOCAL_LLM.sh delete-model qwen3:8b
@@ -297,8 +307,18 @@ table (`start` / `stop` / `status` / `url` / `config` / `list-models` / `delete-
 ## Troubleshooting
 
 - **App can't reach the model** — confirm the runtime is up from the host (`curl localhost:11434/api/tags`
-  or `curl localhost:8080/v1/models`). The app reaches it via `host.docker.internal`; on Linux the
-  app container maps that host (see `extra_hosts` in `docker-compose.yml`).
+  or `curl localhost:8080/v1/models`). The app reaches it via `host.docker.internal`. On a Mac
+  (Docker Desktop) that works for services listening on `127.0.0.1`. **On Linux it doesn't:** the
+  `extra_hosts` mapping in `docker-compose.yml` points `host.docker.internal` at the Docker bridge,
+  and a service bound to loopback only (Ollama's default, and the gateway's `127.0.0.1:4000` port in
+  `litellm/docker-compose.yml`) can't be reached there. Make Ollama listen on the bridge too — e.g.
+  `OLLAMA_HOST=0.0.0.0:11434` (or the bridge address, usually `172.17.0.1`) in its systemd service —
+  and for the gateway change the `127.0.0.1:` in its `ports:` line the same way. Keep a firewall in
+  front of anything you bind to `0.0.0.0`: these servers have no login.
+- **`stop` stopped more than I expected** — with no `--backend`, `stop` quits **Ollama** (which also
+  stops the memory service's embedding model if that runs on Ollama — restart Ollama before using
+  memory) and stops **every** MLX server on the computer. Use `stop --backend mlx` (or `mlx-stop <model>`)
+  to stop just one.
 - **"model not found"** — the name in JARVIS must match exactly: a **pulled Ollama tag**, or an
   entry in `litellm/config.yaml` (via the gateway), or the served MLX model.
 - **MLX first request is slow** — it's downloading the model into `mlx/models/`; pre-fetch (step 2).

@@ -57,13 +57,6 @@ infrastructure, security, documentation, or test-policy changes.
   - No new packages (Node's own crypto), so the app image does not need rebuilding.
     New: `app/src/auth.js`, `app/test/auth.test.js` (79 checks), `/api/auth/*`, `/api/access`,
     `/api/users`; `docker-compose.yml` publishes the app port on `${APP_BIND}`.
-
-### Changed
-- 2026-10-04: The Host/Origin guard now requires a browser's `Origin` to be the same site as
-  the page it calls (localhost pages on other ports still pass, as before), and the full-config
-  editor can no longer change `security.login_enabled` or `security.password_file`.
-
-### Added
 - 2026-08-31: **MLX vision-language support via mlx-vlm, routed automatically.** `mlx-lm` is
   text-only and implements a fixed architecture list; vision-language models
   (`image-text-to-text`) are implemented in [`mlx-vlm`](https://github.com/Blaizzy/mlx-vlm), which
@@ -80,46 +73,6 @@ infrastructure, security, documentation, or test-policy changes.
   returns clean OpenAI `tool_calls`. Caveat documented: mlx-vlm has **no `default_model` alias**,
   so Config → Model must be the exact repo id (the serve output now prints it).
   (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
-
-### Fixed
-- 2026-08-31: **`mlx-serve` ignored repo-shipped model code when routing.** A model repo can carry
-  its own MLX implementation (`config.json` → `"model_file": "<arch>.py"`), which is how a model
-  runs on a runtime that has no built-in support for its architecture. Routing looked only at
-  which package implements the `model_type`, so such a model went to mlx-vlm purely because
-  mlx-vlm knows the architecture — and failed with
-  `module 'custom_model' has no attribute 'ModelConfig'`, since both runtimes load shipped code
-  but expect different interfaces (mlx-lm: `Model`/`ModelArgs`; mlx-vlm: `ModelConfig`).
-  `mlx_runtime_for` now detects `model_file` and routes by which framework the file imports.
-  (`JARVIS_LOCAL_LLM.sh`)
-- 2026-08-31: `mlx-ls` and `mlx-up` exited **1 whenever servers were actually running** — their
-  last statement was a `[[ … ]] && info` guard that is false in exactly that case, so the
-  conditional became the exit status and broke `&&` chaining. (`JARVIS_LOCAL_LLM.sh`)
-
-### Changed
-- 2026-08-31: **`list-models --details` — what KIND of model is this?** MLX rows previously showed
-  only a name and a size, while Ollama rows carried params/quant/capabilities; the metadata is now
-  symmetric and lives behind one flag. The default view is deliberately lean (name, size, state,
-  and warnings you can't afford to miss — an embedding model in a chat tier, an incomplete
-  download); `--details` adds a line per model with architecture, dense vs MoE width,
-  quantization, context window, instruct-vs-base, tool-calling, thinking and vision. Ollama's
-  detail comes from the daemon, MLX's is read straight from each repo's `config.json` + chat
-  template — no network, no model load, still ~0.4 s across a 2 TB cache. Flags worth having:
-  `BASE - no chat template` (a foundation model that can't converse or call tools),
-  `unquantized`, `N quant variants inside` (one repo holding several quantizations — usually why
-  a repo is enormous), and `vision*` (a vision architecture whose image half `mlx_lm.server`
-  can't serve, since mlx-lm is text-only). `--json` always returns the full record.
-  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
-- 2026-08-31: **`--help` now covers where models come from.** Downloading is the one step in the
-  local-model lifecycle that leaves this script (each runtime's own tool does it), so the help
-  screen now has a "GETTING models" section: `ollama pull <tag>` with the browse/search URLs
-  (<https://ollama.com/library>, `/search`), and for MLX the auto-download-on-serve behavior plus
-  `hf download <repo>` for pre-fetching without loading into RAM — including the warning that it
-  lands in `~/.cache/huggingface` (invisible to `list-models`) unless `ACTIVATE.sh` ran first.
-  The Ollama setup guide and `Docs/local-llm.md` gained the same library URL and a note that a
-  model page's tag is both what you pull and what you set as the JARVIS model/tier.
-  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`)
-
-### Added
 - 2026-08-31: **`list-models` — see what you've actually downloaded.** Every existing command
   answered a question about what's *live* (`status`, `mlx-ls`, Config's "List models" all need the
   runtime up); nothing answered "what's on disk that I could start?".
@@ -176,184 +129,6 @@ infrastructure, security, documentation, or test-policy changes.
   analyze_image captures now show as 📷 thumbnails (click to zoom) — you see exactly what the
   vision model saw. Skipped above 1.5MB; Autopilot runs stream them too. (`app/src/llm.js`,
   `app/src/autopilot.js`, `app/public/app.js`)
-
-### Security
-- 2026-08-27: **Guards on the heavy auth-less endpoints.** `/api/stt` is single-flight (409 while
-  a transcription runs — no stacking whisper jobs in the workbench); `/api/upload` enforces an
-  uploads-folder budget (default 10GB, `UPLOADS_MAX_BYTES`). (`app/server.js`)
-- 2026-08-27: **PWA install.** Web-app manifest + generated arc-reactor icons (192/512, pure-Python
-  PNG writer at `app/public/icon-*.png`) — JARVIS installs as a standalone app (own window, dock
-  icon). Deliberately no service worker (a localhost app gains nothing offline).
-  (`app/public/manifest.webmanifest`, `app/public/index.html`)
-- 2026-08-27: **Live chats auto-persist server-side.** Each chat tab debounce-syncs (per-chat
-  timers) into `data/sessions/` as a ● `live_*` session; a fresh browser pointed at the same JARVIS
-  restores all tabs automatically. Closing a tab removes its server copy. (`app/public/app.js`)
-- 2026-08-27: **Headless server smoke test** (`app/test/smoke-server.test.js`, part of
-  `npm test` — 20 assertions): boots the real server with the mock provider in scratch dirs and
-  verifies the HTTP surface, PWA assets, sessions CRUD, the WebSocket chat loop, and the
-  Host/Origin cross-site guard (403s + WS handshake rejection) end-to-end — no Docker, model, or
-  browser needed.
-
-### Security
-- 2026-08-27: **Dependency chain cleaned — npm audit now reports 0 vulnerabilities** (was 10, 5
-  high): non-breaking `npm audit fix` (body-parser, deepmerge-ts/html-to-text/mailparser chain,
-  ip-address, protobufjs), `@mozilla/readability` → 0.6 (extraction regression-tested),
-  `nodemailer` → 9.x (transport API verified), and an `overrides` pin for dockerode's `uuid`.
-  Server-side chat paths now also strip unknown client message fields (e.g. the UI's `ts`) before
-  anything reaches the model API. (`app/package.json`, `app/server.js`)
-
-### Fixed
-- 2026-08-27: `--probe-context` used `llm.model` directly, which is empty in multi-model
-  configs — now resolves through `modelFor("chat")`. `data/backups/` added to `.gitignore` so
-  auto-backup tarballs can't pollute git status. Per-chat sync debounce fixed to capture the
-  changed chat id (a tab switch could drop the outgoing chat's pending sync).
-- 2026-08-26: **Closed-browser alerts (ntfy bridge).** `notifications.ntfy_url` POSTs every
-  notification to an ntfy topic (phone app / self-hosted) with mapped priorities;
-  `min_level` filters what leaves the machine. (`app/src/scheduler.js`)
-- 2026-08-26: **Automatic memory + workspace backups.** `backups.auto` tars the semantic-memory
-  volume and `/LLM_WORKSPACE` from inside the app into `data/backups/` on a schedule (default
-  daily, keep 7), with restart-safe last-run stamping, per-run notifications, and a **💾 Back up
-  now** button / `POST /api/backup/run`. (`app/src/autobackup.js`)
-- 2026-08-26: **Parallel chat tabs.** Multiple live conversations in a tab strip — ＋ opens,
-  click switches, double-click renames, ✕ closes; per-tab history persists locally (the legacy
-  single history migrates into tab 1). (`app/public/app.js`)
-- 2026-08-26: **`JARVIS.sh --update`** — pull, show incoming commits, rebuild only the images
-  whose sources changed, restart. (`JARVIS.sh`)
-- 2026-08-26: **Web-UI batch:** styled **modal system** replacing every native
-  prompt/confirm/alert; **light theme** (☀️/🌙 toggle, token-driven); in-chat **search**
-  (Cmd/Ctrl-F, match walker); **⬇ .md export** with timestamps; hover **timestamps** on
-  bubbles; Tasks panel **edit-in-place + pause/resume** (`POST /api/tasks/update`, new `paused`
-  state the tick loop skips); Memory **edit-in-place** (`PUT /api/memories/:id`); Files tab
-  **read-only folder view + ⤒ Upload**; Activity **filter box + per-entry copy** and **live
-  run_shell streaming** (700ms-throttled `tool_stream` events, pulsing live entry); Config →
-  Diagnostics **🩺 self-test panel** (green/red rows from `/api/selftest`); Autopilot **📜 cycle
-  history** (per-cycle summaries persisted with the run, `GET /api/autopilot/history`).
-  (`app/public/*`, `app/server.js`, `app/src/{scheduler,autopilot,tools}.js`, `app/public/style.css`)
-- 2026-08-26: **Six new tools** (63 built-ins now). `delegate` — hand a self-contained subtask to a
-  **sub-agent** running in its own fresh context with the full toolset, returning only a final
-  report (the main lever against context pressure; inherits the caller's tool exclusions so
-  unattended runs can't reach withheld tools through it; activity streams as `sub▸` in the panel).
-  `browser_press` / `browser_back` — expose browserd's existing keyboard + history ops.
-  `browser_screenshot` — page-level JPEG capture through the vision look-step (with daemon
-  self-healing when a stale browserd doesn't know new ops). `transcribe_audio` — fully local
-  speech-to-text via faster-whisper in the workbench (mp3/m4a/wav/mp4/…, [mm:ss] stamps on long
-  recordings). `consolidate_memories` — smart-tier merge of near-duplicate/contradicting memories
-  (guarded: unknown ids dropped, >50%-deletion plans refused; also a 🧹 button in the Memory tab +
-  `POST /api/memories/consolidate`). (`app/src/tools.js`, `app/src/browserd.py`)
-- 2026-08-26: **Readability-grade `fetch_url`.** HTML pages now come back as structure-preserving
-  article text (headings/lists/links as markdown) via Mozilla Readability + jsdom (no page scripts
-  execute), falling back to the old tag-strip when no article is extractable; `raw:true` returns
-  the unprocessed body. (`app/src/tools.js`, deps: `@mozilla/readability`, `jsdom`)
-- 2026-08-26: **Local speech input.** New STT engine "local" (🎚️ popover or `voice.stt_engine`):
-  push-to-talk records in the browser and `POST /api/stt` transcribes with whisper in the workbench —
-  no Google speech service, works beyond Chrome. Wake/Open modes still use the browser engine.
-  (`app/public/voice.js`, `app/server.js`)
-- 2026-08-26: **Hot-reload for custom tools + MCP servers** — a config save (or
-  `POST /api/tools/reload`) re-scans `custom_tools/` (require cache busted) and re-handshakes the
-  MCP server list; no app restart. (`app/src/tools.js`, `app/src/mcp.js`, `app/server.js`)
-- 2026-08-26: **Per-tier generation params + smart routing.** A `llm.models` tier may be an object
-  (`{"model", "temperature"?, "max_tokens"?}`) whose params override the globals for that tier (the
-  Config-tab pickers preserve them); `llm.smart_routing` (default on) routes plan-mode turns and
-  Autopilot's planning/wrap-up cycles to the smart tier. (`app/src/config.js`, `app/src/llm.js`,
-  `app/src/autopilot.js`, `app/server.js`)
-- 2026-08-26: **Optional per-turn memory auto-recall** (`memory_auto_recall`, default off): each chat
-  turn silently searches the store and injects the top hits into the volatile note — recall stops
-  depending on the model calling `search_memory`. 3s-capped, never blocks a turn. (`app/src/llm.js`)
-- 2026-08-26: **Workbench image: verified + expanded.** A final build layer now FAILS the build with
-  the list of anything critical missing (backstop for the `||` fallback install chains). Added:
-  `tesseract-ocr` (exact OCR), `exiftool`, `qpdf`, `yt-dlp`, the **DuckDB CLI** (arch-aware), and
-  **faster-whisper**; plus a system-wide git identity (`JARVIS Workbench <jarvis@workbench.local>`,
-  `safe.directory *`) so in-workbench commits work on first use. (`workbench/Dockerfile`)
-
-### Security
-- 2026-08-26: **Cross-site request guard on the REST API.** The WS handshake was origin-checked but
-  the ~40 HTTP endpoints weren't: no-body POSTs (autopilot stop/pause, notifications clear) were
-  CSRF-able from any website, and **DNS rebinding** sidestepped CORS to read `GET /api/config/full`
-  (API key + vault). Every request now validates `Host` and `Origin` against a localhost allowlist
-  (403 otherwise); extra names for proxies/tunnels go in `security.allowed_hosts`. The WS check now
-  shares the same allowlist. (`app/server.js`)
-- 2026-08-26: **Config/secrets backups are pruned.** Every Config-tab save wrote a timestamped backup
-  to `data/` and never cleaned up — 74 key-bearing copies had accumulated. Backups are now pruned to
-  the newest N per file (`backups.retain`, default 10; 0 = unlimited); the existing pile was pruned
-  to 10+10. (`app/src/config.js`)
-- 2026-08-26: **jarvis-memory is internal-only.** The Mem0 store (no auth) was published at
-  `127.0.0.1:8120`, readable/writable by any local process. The host port is gone — the app reaches
-  it at `jarvis-memory:8000` over the compose network, and `JARVIS.sh` now health-checks it via
-  `docker exec` (`wait_mem`). Uncomment the ports mapping in `docker-compose.yml` to debug directly.
-  (`docker-compose.yml`, `JARVIS.sh`)
-- 2026-08-26: **Vault reads are surfaced in the chat.** Every `get_secret` call posts a
-  "🔑 Vault access" notice into the live conversation (in addition to the audit log), so the moment
-  a credential enters the model's context is always visible. Disable with
-  `secret_access_notice: false`. (`app/src/tools.js`)
-
-- 2026-08-04: **Security & quality hardening pass (multi-batch review).** Closed a **cross-site
-  WebSocket hijack** (any website the user visited could open `ws://127.0.0.1/ws` and drive the full
-  tool loop → RCE) via an Origin allowlist on `/ws`. Hardened `fetch_url` **SSRF**: IPv6/IPv4-mapped
-  private-range detection, credential (`Authorization`/`Cookie`) stripping on cross-origin redirects,
-  connect-time **DNS-rebind pinning** (undici), and a response **size cap**. Stopped
-  `/api/models/probe` from sending the **saved API key to a user-supplied host**. Non-image files
-  served from the shared folders now **force-download** instead of rendering inline (stored-XSS).
-  **Deep, key-based secret redaction** across logs + the audit trail; **backup-before-write** for the
-  config and secrets vault. Scheduled/background tasks no longer receive the irreversible tools
-  (`send_email`, `set_secret`, `delete_secret`, `delete_memory`); autopilot gained a **cost ceiling**
-  (`llm`/autopilot `max_cost_usd`). Infra: the app no longer mounts the raw Docker socket — it uses a
-  **filtered `jarvis-docker-proxy`** (containers+exec only); the app runs **non-root** with its source
-  mounted `:ro`; the workbench uses Docker's **default seccomp** profile (was `unconfined`).
-  (`app/server.js`, `app/src/{tools,llm,scheduler,config,logger,autopilot}.js`, `docker-compose.yml`,
-  `app/Dockerfile`, `app/package.json`)
-
-### Performance
-- 2026-08-26: **Screenshots are JPEG-compressed before the vision model.** The desktop look-step
-  sent ~1MB PNGs (~1.3MB as base64) into the vision prefill; captures are now re-encoded at JPEG
-  quality 82 (several times smaller) with automatic PNG fallback if the convert fails.
-  (`app/src/tools.js`)
-
-### Documentation
-- 2026-08-26: **`Docs/tools.md` is now auto-generated from the code** (`node
-  app/scripts/gen-tools-md.js`) — 57 built-in tools with exact signatures and the descriptions the
-  model sees; a new tool missing a family lands in a visible "Uncategorized" section instead of
-  silently vanishing. **Drift sweep** across the docs: five containers (not four), 57 tools (not
-  ~48), memory internal-only, the stale "app mounts the Docker socket" security bullet (it uses the
-  filtered proxy), missing API endpoints (`/api/autopilot/forcestop`, `/api/autopilot/clarify`,
-  `/view`), missing slash commands (`/guide`, `/ro`, `/rw`), 20 skills (not 18) + prompt-scoped
-  skills, `--restore-memory/--restore-workspace --fresh`, and `TEMPLATES/README.md`'s pre-refactor
-  copy paths/gateway/embedder guidance. New **`Docs/evals.md`** documents the regression suite
-  (schema, authoring, reading reports); config templates now carry the local-embedder `mem0`
-  defaults plus the new `backups` / `security` / `secret_access_notice` keys; `app/public/app.js`
-  gained a file-level section index.
-
-### Changed
-- 2026-08-26: **Every scalar config setting now has a field in the Config tab.** New sections —
-  Memory (Mem0/embedder), Autopilot, Workbench & shared folders, Security & housekeeping — plus the
-  missing fields in the existing ones (gateway keys, max tool steps, first-token timeout, full voice
-  block, log rotation/retention, backups retain, allowed hosts, secret-access notice, model-authored
-  custom tools). A new `csv` field type maps comma-separated text ⇄ JSON string arrays
-  (`security.allowed_hosts`); only `personas` and `mcp.servers` remain raw-JSON-only.
-  (`app/public/index.html`, `app/public/app.js`)
-- 2026-08-26: **Workbench base image is configurable and pinnable** (`workbench.base_image`, applied
-  by `--setup` via a build arg): empty = the floating `ubuntu-xfce` tag; set a `@sha256:` digest for
-  reproducible rebuilds. (`workbench/Dockerfile`, `docker-compose.yml`, `JARVIS.sh`)
-- 2026-08-26: **Deterministic app-image builds** — the Dockerfile now copies `package-lock.json` and
-  uses `npm ci` instead of `npm install`. (`app/Dockerfile`)
-- 2026-08-26: **Deduped shared logic.** Prompt-set file handling (naming, read/write/delete,
-  active-set matching) moved to a single `app/src/prompts.js` used by both config.js and the
-  `/api/prompts` routes; the unattended-run `RISKY_TOOLS` list moved to `app/src/policy.js`, shared
-  by Autopilot's guarded mode and the scheduler (previously two copies).
-- 2026-08-26: **Cost table refreshed** (rates as of 2026-08: GPT-5 family, o3, per-family Claude
-  opus/sonnet/haiku, Gemini 2.5, DeepSeek), with a note that matching is first-substring-wins so
-  specific names stay above their prefixes. Unknown/local models still show no estimate.
-  (`app/src/llm.js`)
-
-### Fixed
-- 2026-08-26: **Markdown viewer branding generalized** — `/view` showed "🧭 Survival Knowledge Base"
-  chrome (Start Here / Index links + title suffix) for EVERY file; KB chrome now appears only for
-  files inside the knowledge base, everything else gets a neutral document topbar. (`app/src/mdview.js`)
-- 2026-08-26: **Test-runner default config path** pointed at a nonexistent repo-root
-  `JARVIS_CONFIG.json`; it now defaults to the tracked placeholder template (deterministic, no real
-  keys). Note: the suspected mdview stash-marker collision (review item CLEAN-5) was a false
-  positive — the file already uses NUL sentinels; no change was needed. (`app/test/run.js`)
-
-### Added
 - 2026-08-04: **Survival Knowledge Base expansion + offline behavior.** Added DFW-metro and
   Sherman→Red River **maps** (10 USGS US Topo quads + 3 TxDOT district maps + a `COVERAGE.md`), a
   **Fuel — Siphoning, Storage & Shelf Life** guide, and an **Anna roads/landmarks/egress** sheet (now
@@ -366,114 +141,6 @@ infrastructure, security, documentation, or test-policy changes.
 - 2026-08-04: **Split streaming watchdog.** Separate **first-token (prefill)** vs **mid-stream** idle
   allowances so a slow local model isn't falsely killed during a long prefill
   (`llm.first_token_timeout_ms`, default 600000; `llm.idle_timeout_ms` raised to 180000).
-
-### Fixed
-- 2026-08-04: **Live prompt switching + shared-path doubling.** The active system prompt was **cached
-  at boot** (a Config→Prompts change needed a restart) — now read live per turn, with the active
-  prompt name in the per-turn log. Fixed the **`DEFAULT`/Load** dropdown (loads the general base and
-  applies it immediately). Fixed **shared-path doubling** in the file tools: a path like
-  `LLM_READ_WRITE_FILES/x.md` no longer resolves to `…/LLM_READ_WRITE_FILES/LLM_READ_WRITE_FILES/x.md`.
-  Also: `mdview` `__bold__` + top-bar href escaping, autopilot `extend()` on an ended run, log
-  retention only running once per boot, voice-recognizer hot-loop backoff, `pkill` over-matching, and
-  `$CFG` shell interpolation. (`app/src/{config,tools,mdview,autopilot,logger}.js`,
-  `app/public/{app.js,voice.js}`, `JARVIS.sh`, `JARVIS_LOCAL_LLM.sh`)
-- 2026-08-01: **Follow-ups for the LLM_WORKSPACE bind-mount switch.** The token sweep missed a few
-  spots and the volume→bind change broke two commands: (1) `browserd.py` and a custom-tools template
-  still used the old paths — fixed; (2) the workbench `Dockerfile` now sets `WORKDIR /LLM_WORKSPACE`
-  (and its comment no longer calls it a named volume); (3) **`JARVIS.sh --backup-workspace` /
-  `--restore-workspace` were broken** — they operated on the removed `jarvis_workbench_work` volume
-  (e.g. `--restore-workspace --fresh` did a no-op `docker volume rm`); rewritten to tar/clear the host
-  `./LLM_WORKSPACE` folder directly (works even when stopped); (4) `--delete` messaging + several docs
-  and the maintenance guide corrected — `LLM_WORKSPACE` is a bind mount now, so it **survives**
-  `--delete` (only the memory + workbench-home volumes are wiped). (`app/src/browserd.py`, `JARVIS.sh`,
-  `workbench/Dockerfile`, `Docs/cli.md`, `LLM_READ_ONLY_FILES/JARVIS_Guides/maintenance.md`, …)
-
-### Changed
-- 2026-08-04: **UI/accessibility + cleanup.** New-chat now **confirms** before clearing the
-  conversation; regenerate targets the real reply (not notices/errors); added `aria-live` on the
-  message log, `aria-label`s on icon buttons, and a `sandbox` on the workbench iframe; replaying
-  history no longer re-flashes the screen. Removed dead CSS + unused exports and corrected the survival
-  guide count (49→50). (`app/public/{app.js,index.html,style.css}`, `app/src/{tts,skills_data}.js`)
-- 2026-08-01: **Unified, host-visible LLM directories (workspace + shared folders renamed).** The AI's
-  working area is now a **host bind mount you can watch live**, and all three dirs share an `LLM_`
-  prefix so there's no confusion about where things go:
-  `/workspace` → **`/LLM_WORKSPACE`** (was a hidden Docker volume `jarvis_workbench_work`, now
-  `./LLM_WORKSPACE` on your Mac), `/READ_ONLY_FILES` → **`/LLM_READ_ONLY_FILES`**,
-  `/READ_WRITE_FILES` → **`/LLM_READ_WRITE_FILES`**. Because `LLM_WORKSPACE` is now a bind mount, the
-  AI's build files **survive `--delete`** (only the memory + workbench-home volumes are wiped).
-  Swept across the codebase: docker-compose mounts, `app/**`, all `Prompts/*`, `TEMPLATES/*`, the
-  config template, the workbench `Dockerfile`, `JARVIS.sh`, `.gitignore`, all `Docs/*`, and the
-  self-help guides. (Container paths match the host names now, so the AI references the same folders
-  you see.) Requires `./JARVIS.sh --setup --start` to pick up the new mounts.
-
-### Changed
-- 2026-07-31: **Docs updated to match Architecture B + current state.** Rewrote the self-help guide
-  `READ_ONLY_FILES/JARVIS_Guides/local-models-mlx.md` for the discovery-based MLX flow (`mlx-serve` /
-  `mlx-ls` / `mlx-stop` / `mlx-up`, no config block); fixed `switching-models.md`'s MLX step. Corrected
-  `Docs/architecture.md` and root `README.md` which still listed MLX as a "later" backend (it's shipped).
-  Added the `start --backend ollama --gateway` example to `config --backend ollama` step 4. (Guides,
-  `Docs/architecture.md`, `README.md`, `JARVIS_LOCAL_LLM.sh`.)
-
-### Changed
-- 2026-07-31: **MLX is now discovery-based, like Ollama (Architecture B).** MLX models are managed
-  from the CLI instead of a config array — you bring each model online as its own `mlx_lm.server`
-  process (so several stay hot at once, no reload when JARVIS switches tiers), and the script
-  DISCOVERS the running servers and maps them into gateway routes / the model dropdown.
-  New commands: **`mlx-serve <model> [--port]`** (launch + register), **`mlx-stop <model|port|all>`**,
-  **`mlx-ls`**, **`mlx-up`** (relaunch the registered set after a reboot). A gitignored auto-registry
-  `mlx/serving.json` remembers what you started (not hand-edited). `start --backend mlx` relaunches the
-  registered set then discovers + syncs; `status`/`stop` are discovery-driven. **Removed** the
-  `mlx.models` config array, the **MLX MODELS** UI editor section, and their docs — discovered MLX
-  models appear in the normal scan-driven tier pickers. (`JARVIS_LOCAL_LLM.sh`, `app/public/*`,
-  `config/JARVIS_CONFIG_template.json`, `Docs/*`.)
-
-### Changed
-- 2026-07-30: **`litellm/config.yaml` is now gitignored; a template seeds it.** The live gateway
-  config is regenerated on every `start`/`gateway-sync`, so tracking it meant a perpetually-dirty
-  working tree. It's now gitignored, with the committed default in `litellm/config_template.yaml`;
-  `JARVIS_LOCAL_LLM.sh` seeds `litellm/config.yaml` from the template on first gateway use if missing.
-  (Mirrors the `JARVIS_CONFIG.json` live-vs-template pattern.) (`JARVIS_LOCAL_LLM.sh`, `.gitignore`,
-  `litellm/config_template.yaml`.)
-- 2026-07-30: **`stop` with no `--backend` stops every running runtime, not just Ollama.** Like
-  `status`, `stop` used the `--backend` default (`ollama`), so a plain `stop` stopped the wrong thing
-  when MLX was running. It now stops each local runtime that's actually up (Ollama and/or MLX);
-  `stop --backend <x>` still stops just that one. (`JARVIS_LOCAL_LLM.sh`.)
-
-### Changed
-- 2026-07-30: **MLX MODELS editor: "Name" is now a "Tier" dropdown.** In Config → MLX models, the
-  free-text name field is a dropdown of `chat tier / cheap tier / smart tier / vision tier`, and the
-  column is labeled **tier**. Adding a row defaults to the first unused tier. The tier is a label for
-  the server slot (stored as `mlx.models[].name`, also the process label in start/stop/status); you
-  still pick which model each tier actually uses in the Model-mode "multi" tier pickers. A legacy/custom
-  name that isn't one of the four tiers is preserved as an option. (`app/public/app.js`,
-  `app/public/index.html`, `app/public/style.css`.)
-
-### Changed
-- 2026-07-30: **`config --backend ollama|mlx` guides are in sync, with explicit list/delete steps.**
-  Both setup guides now share the same structure and call out **LIST** ("the models you have
-  downloaded") and **DELETE** ("a downloaded model to reclaim disk") as their own labeled lines with
-  real commands — Ollama: `ollama list` / `ollama rm <tag>`; MLX: `mlx_lm.manage --scan` /
-  `mlx_lm.manage --delete --pattern <substr>` (with the reminder that MLX's tools need the activated
-  env so `HF_HOME` points at `mlx/models`). (`JARVIS_LOCAL_LLM.sh`.)
-
-### Changed
-- 2026-07-30: **MLX gateway routes are named by the actual model id, not the friendly alias.**
-  `start --backend mlx --gateway` (and `gateway-sync`) now emit each MLX route's `model_name` as the
-  real `mlx.models[].model` (e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`) instead of the entry's
-  `name` (`chat`) — so "List models" shows the actual model, consistent with how Ollama tags work, and
-  there's no opaque alias hiding which model a route serves. The `name` field still labels the process
-  in start/stop/status and the log file. Entries with no `model` set are skipped with a clear warning.
-  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`.)
-
-### Fixed
-- 2026-07-30: **`JARVIS_LOCAL_LLM.sh status` now reports every backend, not just Ollama.** `status`
-  ran `${BACKEND}_status`, and `--backend` defaults to `ollama`, so a plain `status` always said
-  "Ollama" even when MLX was the one running. It now shows Ollama, MLX (when models are configured),
-  and the gateway together. `mlx_status` also keys off the port instead of the name, so a live MLX
-  server still appears even if its `mlx.models` name/model is blank — surfacing a misconfig instead of
-  silently hiding the server. (`JARVIS_LOCAL_LLM.sh`.)
-
-### Added
 - 2026-07-30: **`max_tokens` → `max_completion_tokens` auto-fallback for newer OpenAI models.** The
   OpenAI reasoning-model family (o1/o3/gpt-5, e.g. `gpt-5.4-mini`) rejects `max_tokens` with a 400
   ("Unsupported parameter: 'max_tokens' ... Use 'max_completion_tokens' instead"). The LLM client now
@@ -482,17 +149,6 @@ infrastructure, security, documentation, or test-policy changes.
   subsequent turns send the right parameter up front (no repeated failed first attempt). The memory is
   keyed by model name, so switching models re-probes. Applies to both the main tool-loop and the vision
   path. (`app/src/llm.js`.)
-
-### Fixed
-- 2026-07-30: **Header model badge refreshes on Config "Save all".** The top-of-UI model badge was
-  set only at page load and on the quick model dropdown, so after switching models in the Config tab
-  it kept showing the old value (e.g. a stale `openai · gpt-5` after moving to a local Ollama model)
-  until a manual browser refresh. Saving the config now re-reads `/api/config` and updates the badge
-  immediately. In multi-model mode it shows the **chat-tier** model (always present), matching what
-  the server reports via `publicConfig()`'s `modelFor("chat")`. The underlying config was never wrong
-  — this was display-only. (`app/public/app.js`.)
-
-### Added
 - 2026-07-30: **Gateway model list auto-syncs from the live backend (no more stale entries).**
   `./JARVIS_LOCAL_LLM.sh start --gateway` now **regenerates the local-model routes in
   `litellm/config.yaml` from whatever `--backend` selects** before starting the gateway, and a new
@@ -512,22 +168,9 @@ infrastructure, security, documentation, or test-policy changes.
   local+cloud multi-mode case). If the last local models are stopped, the gateway is taken down rather
   than reloaded to an empty model list. (`JARVIS_LOCAL_LLM.sh`, `litellm/config.yaml`,
   `Docs/local-llm.md`, `Docs/cli.md`.)
-
-### Changed
-- 2026-07-30: **Model dropdowns show only available models.** The Config model `<select>`s (chat/
-  cheap/smart/vision tiers, single or multi mode) now list only the models actually returned by
-  "List models" for the current endpoint, instead of also injecting the saved value when it isn't
-  available (which surfaced stale entries like a leftover `gpt-4o-mini` after switching to a local
-  runtime). A configured value is still shown before any list has been fetched so it isn't lost on
-  load; once a list exists an unavailable value drops to blank so you re-pick from what's really
-  there. The **✎ Custom…** option remains for typing a model that doesn't appear in the list.
-  (`app/public/app.js`.)
-
-### Added
 - 2026-07-30: **`/ro` and `/rw` slash commands.** Tell JARVIS to reference the shared folders:
   `/ro [request]` works with `READ_ONLY_FILES`, `/rw [request]` with `READ_WRITE_FILES` (no request
   lists the folder). Complements `/guide`. (`app/public/app.js`, folder READMEs.)
-
 - 2026-07-30: **Self-help guides — ask JARVIS how to use/configure itself.** A shipped set of
   task guides in `READ_ONLY_FILES/JARVIS_Guides/` (switching models, local models via Ollama/MLX,
   Autopilot, maintenance, a glossary) that JARVIS reads at runtime. The system prompt now tells it
@@ -537,13 +180,11 @@ infrastructure, security, documentation, or test-policy changes.
   a matching `READ_WRITE_FILES/README.txt`; `.gitignore` now tracks the READMEs + guides and drops
   dead `shared_rw` rules. (`READ_ONLY_FILES/`, `READ_WRITE_FILES/README.txt`,
   `Prompts/default_system.prompt`, `app/public/app.js`, `.gitignore`.)
-
 - 2026-07-28: **Config tab: friendly MLX models editor.** A new "MLX models" section with add/remove
   rows (name / model / port) instead of hand-editing the `mlx.models` JSON — links to the
   `mlx-community` HF org, notes the `mlx/models/` cache, and reminds you to run
   `./JARVIS_LOCAL_LLM.sh start --backend mlx` to apply (the UI can't launch host processes). Edits
   sync live with the raw-JSON editor. (`app/public/{index.html,app.js,style.css}`.)
-
 - 2026-07-28: **MLX backend — local models on Apple Silicon.** `JARVIS_LOCAL_LLM.sh` gained a
   `--backend mlx` implementation alongside Ollama (dispatch is now backend-generic:
   `<backend>_apply_config/_ensure_running/_url/_status/_stop/_hint/_config_help`). MLX runs on the
@@ -559,74 +200,22 @@ infrastructure, security, documentation, or test-policy changes.
     OpenAI completion). Verified with `mlx-lm 0.31` / `mlx 0.32` on macOS arm64.
   (`JARVIS_LOCAL_LLM.sh`, `ACTIVATE.sh`, `DEACTIVATE.sh`, `config/JARVIS_CONFIG_template.json`,
   `.gitignore`, `Docs/{cli,configuration}.md`.)
-
 - 2026-07-28: **`./JARVIS_LOCAL_LLM.sh config` — a backend setup guide.** Prints start-to-finish
   steps for the local runtime: where to install it (`https://ollama.com/download/mac`), which
   models to `ollama pull`, the `ollama.*` tuning keys (and the note that you can edit them in the
   JARVIS UI but must re-run `start` to apply), how to point JARVIS at the printed URL, and the
   multi-tier `max_loaded_models` tip. `config --backend ollama` (default `ollama`).
   (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`.)
-
-### Changed
-- 2026-07-28: **Config files moved to `config/`.** `JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`, and
-  their `*_template.json` now live in `config/` instead of the repo root — so the `JARVIS_*.sh`
-  scripts aren't buried among JSON in an `ls`. Updated the compose host mounts, both scripts'
-  paths, `.gitignore`, the `cp` quick-start in README/`configuration.md`, the architecture volume
-  table, and the `TEMPLATES/_generate.py` generator (which also had its now-stale in-stack gateway
-  host `jarvis-litellm:4000` → `host.docker.internal:4000` in the example configs fixed). Container
-  paths (`/cfg/…`) are unchanged, so app code needed no edits. **Existing installs:** move your
-  `JARVIS_CONFIG.json` + `JARVIS_SECRETS.json` into `config/` before the next `--start`.
-
-### Added
 - 2026-07-28: **`./JARVIS.sh --reset-workbench` — reset the dev OS.** An escape hatch for when the
   LLM installs a pile of packages or messes up the workbench: it recreates ONLY the workbench
   container from its clean built image (fresh writable layer → every runtime apt/pip install and
   system tweak wiped). Keeps `/workspace` build files + the workbench home (desktop / browser
   logins), and leaves the app, memory, config, and `READ_WRITE_FILES` completely untouched.
   (`JARVIS.sh`, `Docs/cli.md`.)
-
-### Changed
-- 2026-07-28: **Config "Save all" applies live — no restart.** Saving from the Config tab already
-  mutated the in-memory config in place, but the UI still told you to run `./JARVIS.sh --reload`.
-  Corrected the messaging: ordinary settings (endpoint / model / tiers / temperature / max_tokens /
-  completion_checks / prompts / log level …) take effect on the **next message** with no restart.
-  A restart is only flagged for the memory service's embedding key and container-level settings
-  (ports). `POST /api/config/full` now returns `applied_live: true`. (`app/server.js`,
-  `app/public/{app.js,index.html,style.css}`.)
-
-- 2026-07-28: **LLM hosting extracted out of JARVIS core.** JARVIS is now a pure OpenAI-dialect
-  *client* — it talks to whatever URL is in `llm.base_url` and no longer knows or cares where the
-  model lives. Local model management moved to a new, optional **`JARVIS_LOCAL_LLM.sh`** (pluggable
-  backend — Ollama today, MLX/vLLM/llama.cpp later; each implements `apply_config`/`ensure_running`/
-  `url`/`stop`). It applies the local configs, ensures the runtime is up, and **prints the endpoint
-  URL to paste into Config → Endpoint URL** — Ollama direct, or an optional LiteLLM gateway it can
-  front (`--gateway`).
-  - `JARVIS.sh` no longer manages Ollama or exports provider keys (`apply_ollama_settings` +
-    `export_provider_keys` removed); `--setup/--start/--reload` are model-agnostic.
-  - The **LiteLLM gateway left the core stack** — removed from `docker-compose.yml` and moved to a
-    standalone `litellm/docker-compose.yml` that `JARVIS_LOCAL_LLM.sh --gateway` runs. `jarvis-app`
-    gains `extra_hosts: host.docker.internal:host-gateway` so it can reach host runtimes.
-  - Config template: `llm.base_url` now defaults empty (code falls back to OpenAI); `ollama.*` is
-    re-documented as read by `JARVIS_LOCAL_LLM.sh`, not JARVIS core.
-  - **Migration (existing local users):** run `./JARVIS_LOCAL_LLM.sh start --gateway`, copy the
-    printed URL, paste into Config → Endpoint URL. Cloud users are unaffected — `base_url` is already
-    a cloud URL. (`JARVIS_LOCAL_LLM.sh`, `JARVIS.sh`, `docker-compose.yml`, `litellm/`,
-    `JARVIS_CONFIG_template.json`.)
-
-### Fixed
-- 2026-07-28: **Forgiving file-write tools (from the GPT-4.1 build review).** Two friction points a
-  real Autopilot build kept hitting: (1) `write_workbench_file` / `edit_workbench_file` now accept a
-  **relative path** (resolved under `/workspace`) instead of erroring with "path must be absolute" —
-  a `toWorkbenchPath` helper normalizes it. (2) `write_file` given a **directory** path now returns
-  an actionable error ("… is a directory — include a filename, e.g. …/index.html") instead of a raw
-  `EISDIR`. Both let any model self-correct instantly rather than burning retries. (`app/src/tools.js`.)
-
-### Added
 - 2026-07-28: **Config calls out that multi-model is mainly for local models.** The Model-mode
   dropdown now labels `single — one model (best for cloud)` / `multi — mainly for LOCAL models`,
   with a hint: cloud models are multimodal so one model does chat+vision (use single); multi is
   for local setups that stitch specialized models together (or cloud cost-tiers). (`app/public/index.html`.)
-
 - 2026-07-28: **Model tier pickers group by capability (curated `models.json`).** In multi-model
   mode the chat/cheap/smart/vision dropdowns now put the models that fit each tier in a
   "★ …recommended" group on top, the rest under "Other models", and drop non-chat models
@@ -635,13 +224,11 @@ infrastructure, security, documentation, or test-policy changes.
   `app/public/models.json`** (matched by longest name-prefix, so `gpt-4.1` also matches
   `gpt-4.1-2025-04-14`); anything not listed falls back to a name heuristic. Edit the file + refresh
   to keep it current as providers ship models. (`app/public/{models.json,app.js}`.)
-
 - 2026-07-28: **Header pill shows "Autopilot".** The always-visible status pill used to only read
   Idle/Working — and since Autopilot runs on a separate server-side loop, it read "Idle" even while
   a run was actively building. It now shows a distinct cyan **Autopilot** state whenever a run is
   actively working (running/stopping/pausing), falling back to Idle when it ends or pauses. A live
   chat request still shows "Working" and takes visual priority. (`app/public/{app.js,style.css}`.)
-
 - 2026-07-28: **The model can offer to run a job on Autopilot.** New `open_autopilot` tool: for a
   large multi-step task the user could walk away from (including follow-up improvements after
   finishing something), JARVIS now offers "want me to run this on Autopilot so you can step away?"
@@ -651,67 +238,6 @@ infrastructure, security, documentation, or test-policy changes.
   re-planning into the ledger. Wired via a generic `scheduler.emitUiEvent` → WebSocket → the
   launcher. (`app/src/{tools.js,scheduler.js}`, `app/server.js`, `app/public/app.js`,
   `Prompts/default_system.prompt`.)
-
-### Fixed
-- 2026-07-28: **Model pickers now populate reliably.** The model fields (single + the four
-  chat/cheap/smart/vision tiers) were `<input list=datalist>` — native datalists don't reliably
-  drop down, so the multi-mode tier pickers looked empty. Replaced them with real `<select>`
-  dropdowns that **List models** fills; each keeps its currently-configured value even if the
-  endpoint didn't return it, plus a **✎ Custom…** option to enter a model by hand.
-  (`app/public/{index.html,app.js}`.)
-
-### Changed
-- 2026-07-28: **Config tab: clearer model setup.** (1) The **API key** field now has a **Show/Hide**
-  toggle so you can read and edit the stored key. (2) **List models** falls back to the saved
-  config key + endpoint when the form fields are blank, so it works as long as a key is configured.
-  (3) **Model mode** now shows ONLY the relevant fields — `single` reveals just the single-model
-  input, `multi` reveals just the chat/cheap/smart/vision tier grid (toggled on load and on change).
-  (`app/public/{index.html,app.js,style.css}`, `app/server.js` models/probe fallback.)
-
-- 2026-07-28: **Tuning from the two-day log review.** Interactive turns were hitting the tool-step
-  ceiling 41× (terminal "Stopped after the maximum number of tool steps"), and `completion_checks=2`
-  was driving repetitive "verify everything" recitations + a repetition loop. Fixes:
-  `llm.max_tool_iterations` 15 → **22** (fewer mid-task truncations), `llm.completion_checks` 2 → **1**
-  (less over-verification), and `fetch_url` default timeout 30 → **45 s with one automatic retry on
-  timeout** (timeouts were ~1/3 of fetches). New **`app-integration` skill** (+auto-hint) for working
-  with an installed app's own data directory instead of writing into `/workspace` where the app
-  can't see it — the notes-only-say-"Markdown" / wrong-location class of bug.
-  (`JARVIS_CONFIG*.json`, `app/src/{tools.js,skills.js,skills_data.js}`.)
-
-- 2026-07-27: **Less robotic replies on simple turns.** The active system prompt
-  (`Prompts/default_system.prompt`) now scopes the "restate the goal / verify completion"
-  ritual to substantial (multi-step, tool-using, or hard-to-reverse) work. Simple or
-  conversational turns are told to answer directly — no "Re-reading your request…" opener, no
-  numbered re-verification of the request, no "Job done — nothing left to do" epilogue — and to
-  match reply length to the ask. Log review showed the model prefacing even one-line chit-chat
-  with the full completion ritual. (`stock_system.prompt` left pristine as the backup; read live,
-  no restart needed.)
-
-### Fixed
-- 2026-07-27: **Autopilot converges instead of burning cycles re-verifying.** Log review showed
-  runs repeatedly exhausting the per-cycle tool-step cap without ever declaring "done" — each
-  cycle restarted the whole serve→browse→screenshot→verify arc from scratch. Three fixes in
-  `autopilot.js`: (1) it now remembers a **live preview server** (port captured from `serve_app`)
-  and tells later cycles NOT to re-serve it; (2) an explicit **"if it works, you are DONE"** nudge
-  so a passing verification marks the plan complete and exits rather than looping to the step cap;
-  (3) **retry-on-empty** — a cycle where the model returns nothing is retried (up to twice) without
-  being counted, instead of wasting a cycle. Covered by new tests. (`app/src/autopilot.js`,
-  `app/test/autopilot.test.js`.)
-
-### Changed
-- 2026-07-27: **Autopilot launcher + Modify are now floating modals.** Starting a run opens a
-  centered floating window (dimmed backdrop, ✕/Esc/backdrop-click to close, roomier objective
-  box) instead of a cramped header dropdown, and **Modify** opens its own floating window
-  prefilled with the current objective (Save / Cancel, Cmd/Ctrl+Enter to save) instead of a
-  browser `prompt()`. (`app/public/{index.html,app.js,style.css}`.)
-
-- 2026-07-27: **Lifecycle commands wipe Autopilot state.** `./JARVIS.sh --stop / --delete /
-  --setup / --start` now clear the saved Autopilot run + plan (`data/autopilot.json`,
-  `data/plan.json`) so you always come back up to a clean slate — no zombie banner or leftover
-  plan. An app *auto-restart* (crash recovery) still resumes a run as before; only the deliberate
-  lifecycle commands reset it. (`JARVIS.sh`: `clear_autopilot_state`.)
-
-### Added
 - 2026-07-27: **Autopilot forced stop.** A plain **Stop** aborts the current step and ends the
   run — but if it's wedged on a step that won't quit, the button now changes to **Force stop**
   while it's stopping. Clicking it (with a confirm) ends the run *immediately* — the bar flips to
@@ -719,13 +245,6 @@ infrastructure, security, documentation, or test-policy changes.
   running in the workbench (preview servers on ports 9101-9150). `POST /api/autopilot/forcestop`,
   `tools.killWorkbenchJobs()`, `finish()` made idempotent + a post-cycle guard so the orphaned
   cycle is a no-op. (`app/src/autopilot.js`, `app/src/tools.js`, `app/server.js`, frontend.)
-
-### Changed
-- 2026-07-27: **Autopilot clarify leans toward asking.** The pre-flight now confirms at least the
-  architecture and where output should be saved for build/creation tasks instead of replying
-  READY on a merely-specific request, so it asks a question more often than not. (`app/server.js`.)
-
-### Added
 - 2026-07-26: **Autopilot clarify-first.** Before it plans or builds, Autopilot now reviews
   your objective and asks any clarifying questions it needs (architecture, persistence,
   scope, where to save) so it builds the *right* thing instead of guessing. A checkbox
@@ -737,7 +256,6 @@ infrastructure, security, documentation, or test-policy changes.
   early with whatever you've answered so far. `POST /api/autopilot/clarify` returns the
   questions as a structured list (uses `llm.chat({tier:"smart", noTools:true})`).
   (`app/server.js`, `app/public/{index.html,app.js,style.css}`.)
-
 - 2026-07-26: **Autopilot: a finished run stays put so you can Continue it.** When Autopilot
   ends incomplete (time budget, stuck, or you stopped it), the bar no longer disappears — it
   switches to an ENDED state (⏱/⚠️/⏹) and keeps the plan. New **▶ Continue** button resumes on
@@ -745,57 +263,11 @@ infrastructure, security, documentation, or test-policy changes.
   rebuild), **Modify** changes the objective before continuing, and **✕ Dismiss** clears the
   bar. Survives an app restart too (the ended run is re-shown, not lost). `POST
   /api/autopilot/{continue,dismiss}`. (`app/src/autopilot.js`, `app/server.js`, frontend.)
-
-### Added
 - 2026-07-26: **Autopilot verbose mode.** A **Verbose** checkbox in the Autopilot launcher —
   when on, each cycle streams the model's live thinking + tokens into the chat (like a normal
   conversation) so you can watch what it's doing and check in while it works the plan. The
   streamed cycle text is shown but NOT added to your chat's model-context history (or spoken),
   so it won't bloat your next chat. (`app/src/autopilot.js`, frontend.)
-
-### Fixed
-- 2026-07-26: **Autopilot review — 6 planning/loop bugs fixed.**
-  (1) **Stale plan hijack** (reported): a NEW Autopilot objective inherited a leftover plan
-  from a previous task (e.g. a SimCity run continued the earlier DOOM plan). `start()` now
-  clears any existing plan so each objective begins fresh; a fresh chat (New chat) clears it too.
-  (2) **Anti-thrash misfire**: only file-writes counted as "work", so research/browser/serve
-  cycles were wrongly nagged to "stop re-reading and write code" — now ANY non-read/non-plan
-  tool counts as progress.
-  (3) **Sporadic errors killed long runs**: the transient-error counter never reset; it now
-  clears after each successful cycle.
-  (4) **Completion vs budget**: a genuinely-finished objective is now reported "done" even if
-  the time budget was hit the same cycle.
-  (5) **Start guard**: starting a new run while one was PAUSED silently clobbered it; now
-  rejected until you stop it.
-  (`app/src/autopilot.js`, `app/public/app.js`; regression test added.)
-
-### Changed
-- 2026-07-26: **Prompts are now editable files in a top-level `/Prompts` directory.** Replaces
-  the earlier inline/`data` approach. The ACTIVE prompt = `Prompts/default_master.prompt` +
-  `Prompts/default_system.prompt`, read LIVE each turn (edits apply next turn, no reload), with
-  the model receiving master -> system -> built-in tool/planner/coding rules. The Config
-  **Prompts** section edits these; **Save as active** writes the default pair, **Save as… / Load /
-  Delete** manage named sets `Prompts/<name>_master.prompt` + `<name>_system.prompt` (hand-editable
-  outside the app). Ships a starter library: coder, researcher, concise, ops, creative, tutor.
-  `/Prompts` is bind-mounted into the app (compose change -> recreate the container).
-  (`app/src/config.js`, `app/server.js`, frontend, `docker-compose.yml`, `Prompts/`.)
-
-### Fixed
-- 2026-07-25: **File tools can now reach the workbench build area.**
-  `list_dir`/`read_file`/`write_file`/`analyze_image` were restricted to the
-  user-exchange folders, so the model couldn't inspect what it built in
-  `/workspace` (7 errors in one session, e.g. `read_file /workspace/doom.html`).
-  The workbench's `/workspace` volume is now also mounted into the app, and the
-  path check allows `/workspace` (read + write). The model can inspect its own
-  work instead of falling back to `run_shell cat`.
-- 2026-07-25: **`fetch_url` can self-check served preview apps.** The SSRF guard
-  blocked the model from fetching `localhost:9101` to check the app it just
-  served. Now `fetch_url` transparently routes `localhost:<9101-9150>` to the
-  workbench (where preview apps actually run) and allows the workbench host on
-  those ports — other private/loopback addresses stay blocked. Verified: a
-  served page fetched back `200`.
-
-### Added
 - 2026-07-26: **Prompt editor + external prompt-file library.** The Config tab has a new
   **Prompts** section with a **Master prompt** (identity/mission) and **System prompt**
   (operating instructions) editor. The model receives them as master -> system -> the
@@ -976,99 +448,6 @@ infrastructure, security, documentation, or test-policy changes.
   it stops finding new work (re-affirms with no new tool call), bounded by
   `llm.completion_checks` (default 2, `0` = off; in the Config tab). Catches
   premature "I'm done" stops. (`app/src/llm.js`.)
-
-### Fixed
-- 2026-07-26: **Context meter now always visible (even at 0%).** It was hidden until the
-  first turn reported usage, so a fresh or just-refreshed chat showed nothing. It now renders
-  on load — 0% on a new chat, and a rough estimate after a refresh / when loading a saved
-  session — and the exact value replaces the estimate on the next turn. (`app/public/app.js`.)
-- 2026-07-26: **Bare URLs in chat are now clickable.** When the model posts a plain link
-  (e.g. `http://localhost:9101` for a served app), it now renders as a clickable link.
-  Existing markdown links and URLs inside inline code are left as-is. (`app/public/app.js`.)
-- 2026-07-26: **Autopilot objective box no longer closes when you select its text.** The
-  launcher closed on any outside click, including a text-selection drag that ended outside
-  the box — so clearing the field was painful. It now only closes when the press *started*
-  outside. (`app/public/app.js`.)
-- 2026-07-26: **Phantom "RUNNING" Autopilot bar on an idle app.** The `.autopilot-bar`
-  CSS set `display:flex`, which (author > UA cascade) overrode the HTML `hidden`
-  attribute, so the bar rendered with its default "running" text even with no run active.
-  Added a global `[hidden] { display: none !important; }` guard. (`app/public/style.css`.)
-
-### Changed
-- 2026-07-26: **Side panel is now a single attached drag-handle drawer.** Removed the header
-  "▥ Panel" button, the separate resize grip, and the » collapse chevron. One handle stays
-  attached to the drawer's left edge and slides in/out with it: **click** to open/close
-  (chevron flips ‹/›), **drag** to resize (drag it to the far right edge to close, or pull it
-  out from the edge to open). Width + open state persist; the "work happening while closed"
-  badge sits on the handle. (`app/public/{index.html,app.js,style.css}`.)
-- 2026-07-26: **Header controls wrap** instead of overflowing — as the window narrows, the
-  toolbar buttons flow onto additional rows so they stay on screen. (`app/public/style.css`.)
-- 2026-07-26: **Removed the "System self-test" button** from the UI (it's a CLI/`curl`
-  concern); the `GET /api/selftest` endpoint stays for command-line use.
-  (`app/public/{index.html,app.js}`.)
-
-### Fixed
-- 2026-07-25: **Tool calls written as TEXT now actually run — a top cause of "said it
-  did it but didn't."** The chat model (Qwen3 via Ollama) intermittently emitted a
-  tool call as plain text — `<tool_call>run_shell <parameter=command>…</parameter>`
-  (an XML-parameter dialect the server's JSON tool-call parser doesn't recognize) —
-  so the command never executed, yet the model believed it had and carried on
-  reporting the work as done. In one session **22 of 40** no-tool-call turns were
-  actually leaked calls like this. The loop now detects `<tool_call>` blocks in the
-  reply, **salvages and executes** the parseable ones for real (feeding results
-  back), and **corrects** the model to use the real tool-call mechanism; malformed/
-  unparseable ones get a corrective nudge instead of being silently accepted.
-  Bounded to 6 fixes/turn. Verified against the real malformed strings from the logs
-  (clean, garbled, JSON, and multi-call variants). (`app/src/llm.js`.)
-- 2026-07-25: **Follow-through guardrail no longer 400s.** The nudge was pushed
-  as a **system** message, but `oneSystemAtFront` relocates system messages to
-  the front — which both defeated the nudge and left two assistant messages
-  adjacent at the end → `400: Cannot have 2 or more assistant messages`. All
-  in-loop nudges (follow-through, completion check, repeat-tool guard) are now
-  **user**-role messages, so they stay where they belong and never trigger the
-  400. Verified: a real task fired a completion check with zero 400s.
-- 2026-07-24: **"Launched an app but it never started" — now verified & honest.**
-  `open_app`/`open_url` used `nohup CMD & ; echo launched`, which reported success
-  even when the app **crashed on startup** (e.g. Chromium exiting because as root it
-  needs `--no-sandbox`) — so the model believed it had started something that never
-  actually came up. Both now launch detached (`setsid`, survives the exec) AND
-  verify the process is still alive ~1.5s later, returning the real startup output
-  and a clear **`FAILED: the app exited immediately…`** with the reason instead of a
-  false "launched". Confirmed against the exact Chromium-sandbox crash from the logs.
-- 2026-07-24: **Browser tools were completely broken — now fixed, durably.**
-  Root cause found via the new level-5 logs: the browser-daemon start command
-  ran `pkill -f '[b]rowserd.py'` in a shell whose own command line contained
-  `python3 /opt/jarvis/browserd.py`, so **pkill killed its own launching shell
-  before the daemon could start** (surfacing as "browser daemon failed to
-  start:" with an empty reason after a 30s hang). Now it frees the port with
-  `fuser -k 9251/tcp` (port-based, can't match a command line), logs the daemon
-  lifecycle, and surfaces the real failure detail instead of an empty string.
-  Verified end-to-end: `browser_goto` + `browser_extract` work again.
-  - **Durability** (answering "will it come back on rebuild?"): Playwright
-    browsers now install to a fixed image path `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`
-    in the workbench Dockerfile instead of `~/.cache` under the `/config`
-    volume (which shadowed them on fresh volumes), and the install **fails the
-    build loudly** if Chromium is missing instead of the old silent `|| true`.
-    `fuser` (psmisc) was already in the Dockerfile, so the fix's dependency is
-    baked in.
-  - **JavaScript** is explicitly enabled in `browserd.py`
-    (`java_script_enabled=True`) for JS-dependent sites — safe given the
-    intentional sandboxed-container/root design.
-- 2026-07-24: **Follow-through guardrail for "says it but doesn't do it."** When
-  the model ends a turn narrating an action ("let me search that…", "I'll run
-  the command…") but emits no tool call, the loop now nudges it to actually call
-  the tool and continues (bounded budget). Matching is deliberately conservative
-  (`ACTION_INTENT_RE` in `llm.js`) so ordinary conversation ("it's going to be
-  great", "let me know") doesn't trip it; triggers are logged at WARN.
-- 2026-07-24: **Workbench desktop can be brought back after opening it in a new
-  tab.** The embedded desktop iframe shares the workbench's VNC session; opening
-  it in a new tab (or backgrounding the JARVIS tab) left the embedded view frozen
-  with no way to reconnect. Added a **"↻ Reconnect here"** button in the
-  Workbench panel, and the desktop now **auto-reconnects** when you switch back to
-  the JARVIS tab with the Workbench panel open. Front-end only (`app/public/`),
-  no restart needed — just refresh.
-
-### Added
 - 2026-07-24: **Leveled debug logging → `JARVIS_AI/Logs/`.** New `logging.level`
   config flag (0-5), editable from the **Config tab** and applied **live** — no
   `--reload` (the full-config save now mutates the in-memory config in place, so
@@ -1081,26 +460,6 @@ infrastructure, security, documentation, or test-policy changes.
   `llm.js` logs every turn's request/response, `tools.js` `execTool` logs every
   tool call/result/error. `Logs/` is bind-mounted and gitignored. This is the
   diagnostic engine for the pending agent-behavior fixes.
-
-### Fixed
-- 2026-07-21: **Massive prompt-processing latency fix (~50s → ~1s per turn).**
-  Per-turn volatile context (the current-time note and the skill hint) was
-  injected as a leading **system** message, so — merged to the front by
-  `oneSystemAtFront` — the large, otherwise-stable system-prompt + tools
-  prefix (~8k tokens) was byte-different every turn. That defeated
-  Ollama/llama.cpp KV-cache reuse and forced a full re-prefill of the whole
-  prompt on the first model call of EVERY turn (~40s on a 70B). Now that
-  volatile context is prepended to the **last user message** instead, so the
-  system+tools prefix stays byte-identical and the cache is reused; only the
-  changing user tail is re-processed. (`app/src/llm.js`.) Pairs with the
-  `--reload` Ollama `keep_alive:-1` fix that keeps the model + its cache
-  resident. Note: model choice matters too — Llama-3.x templates render tool
-  definitions inside the *last user message* (so the tools payload never
-  caches across prompts), whereas Qwen3 templates put tools in the stable
-  system block; on this hardware Qwen3.6 (35B-A3B MoE) is dramatically faster
-  than a dense 70B for JARVIS's tool-heavy prompts.
-
-### Added
 - 2026-07-20: **Config tab — edit the entire configuration from the UI.** A new
   sidebar tab exposes everything in `JARVIS_CONFIG.json` and
   `JARVIS_SECRETS.json`. Hybrid editor: friendly fields for the high-value
@@ -1122,20 +481,6 @@ infrastructure, security, documentation, or test-policy changes.
   Ollama 0.32 auto-sizes context to the full window (128k → an 85GB resident
   footprint that gets evicted and reloaded); capping `context_length` (default
   65536) plus `keep_alive:-1` keeps models resident and warm.
-
-### Fixed
-- 2026-07-20: **Tool calls now work with strict chat templates (e.g. Qwen3
-  derivatives).** JARVIS injects system notes anywhere in a turn (current
-  time, per-turn skill hint, repeat-tool warning), but some models' chat
-  templates raise `System message must be at the beginning`, which made
-  Ollama's tool-call parser generation 400 the moment tools were attached
-  (e.g. `AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b`). `app/src/llm.js` now
-  collapses all system messages into a single leading one
-  (`oneSystemAtFront`) before each request — the standard, most-compatible
-  message shape, and a no-op in effect for lenient templates. Verified
-  against Ollama: the same model that 400'd now returns a clean tool call.
-
-### Added
 - 2026-07-20: **Two additional local models registered in the LiteLLM
   gateway** (`litellm/config.yaml`), routed to host Ollama via the same
   OpenAI-dialect passthrough as the existing local models — so they appear in
@@ -1184,34 +529,6 @@ infrastructure, security, documentation, or test-policy changes.
   Piper engine is active — because JARVIS plays its own audio through the Web Audio API,
   the orb is driven by the real waveform of its voice (the browser engine still uses the
   word-synced envelope, since it won't expose the synth waveform).
-
-### Fixed
-- 2026-07-07: Recurring gateway error `litellm.APIConnectionError: Extra data: line 1
-  column N` (a JSON-decode failure in LiteLLM's Ollama NDJSON parser when Ollama's
-  streamed chunks coalesce). Rerouted the local models in `litellm/config.yaml` from
-  the `ollama_chat/` provider to `openai/` pointing at Ollama's OpenAI-compatible
-  `/v1` endpoint, so LiteLLM is a clean OpenAI-dialect passthrough and never touches
-  the flaky parser. Verified through the gateway: chat, tool calls, streaming
-  reasoning (`reasoning_content` → the Thinking panel), vision, and the full app
-  path. No functionality or flexibility lost (multi-provider tiers unchanged). Note:
-  the bug is present even in the newest LiteLLM (running 1.92.0), so an upstream
-  update would not have fixed it — the reroute was the right call.
-
-### Changed
-- 2026-07-07: Voice tweaks. The **🎤 Talk** push-to-talk button is now disabled in
-  Wake/Open mic modes (they already listen — it's only useful when the mic is Off).
-  The ambient orb now **animates continuously while the AI speaks** (a synthesized
-  syllable-rate envelope + a fast surface ripple, layered with the per-word pulses),
-  so it visibly reacts when talking, not just to your voice.
-- 2026-07-07: De-cluttered the voice controls (they were redundant). The **Voice**
-  button now toggles spoken replies (text-to-speech) — it was a combined open-mic +
-  TTS shortcut. Removed the separate speaker on/off dip-switch (it did the same thing
-  as the TTS toggle). Listening is now solely the **Off/Wake/Open** mic control +
-  **🎤 Talk** push-to-talk. The wake word is configurable (`voice.wake_word`, defaults
-  to `assistant_name`) and the mic status now shows the actual wake word instead of a
-  hardcoded "Jarvis".
-
-### Added
 - 2026-07-07: **Voice picker.** A 🎚️ voice-settings popover (next to 🔊 Voice) to
   choose the spoken voice from the OS/browser's available voices, plus speed and pitch
   sliders and a Test button (previews immediately, even when muted). Persists to
@@ -1235,48 +552,6 @@ infrastructure, security, documentation, or test-policy changes.
   injected correctly, but qwen3-next often still proceeds directly (it's driven more
   by the always-on tool descriptions than by on-demand skills) — so it's a cheap
   backstop, not a forcing function.
-
-### Changed
-- 2026-07-07: Added `data-analysis` and `error-recovery` skills (18 total). Also
-  measured whether the local model actually consults skills: across two live tests
-  (a data-analysis ask and a browser task) qwen3-next called `list_skills`/`get_skill`
-  ZERO times, yet behaved correctly — it drove the `browser_*` tools straight from
-  their descriptions and answered sensibly. Takeaway: for this model, behavior is
-  driven by the always-on tool descriptions, not by on-demand skills; getting skills
-  actually used would require per-turn auto-hinting (deferred). The corrected/added
-  skills are still kept (they're accurate now and cost no always-on tokens).
-- 2026-07-07: Skills correctness pass (12 → 16 skills). Removed the dead `sql`-tool
-  references that were teaching the model to call a tool that no longer exists (in
-  the `internet` and `workflow-monitor-and-alert` skills). Rewrote `desktop-control`
-  to match reality (screenshot returns a vision text analysis + coordinates, not a
-  raw image; added `ui_actions`) and reframed it for non-browser apps. Replaced the
-  `browser-automation` (Playwright-via-shell) skill with a `browser` skill leading on
-  the first-class `browser_*` tools. Updated `scheduling` (output destinations,
-  notify-as-stop-signal), `workflow-login-and-act` (browser-first), and `memory`
-  (`update_memory`, timestamps). Added new skills: `vision`, `email`, `documents`,
-  and `task-authoring`. Fixed the stale "seeded into the skills DB table" comment
-  (skills are served in-memory now).
-- 2026-07-06: Documentation overhaul. Rewrote the README to be high-level and
-  accurate (it still described the removed MySQL `jarvis-db` / `sql` tool and
-  predated the gateway, browser/email/document/MCP tools, personas, voice
-  streaming, and the whole web UI). Added a `Docs/` directory with detailed guides:
-  architecture, configuration, tools, web-ui, voice, memory-and-scheduling, cli,
-  api, and extending — all cross-linked from the README and a `Docs/README.md`
-  index.
-- 2026-07-06: Voice made ChatGPT-like. TTS now uses a QUEUE and speaks the reply
-  sentence-by-sentence AS it streams in (previously it waited for the entire reply,
-  which meant ~30-90s of silence with the local reasoning model, then a dump). This
-  also fixes a real soundness bug: the browser truncates long single utterances —
-  chunking into sentences avoids it. Added barge-in: a new turn, the Stop button,
-  Esc, or tapping the mic instantly silences speech and resumes listening. Spoken
-  text is cleaned (code blocks, inline code, URLs, and importance markers are
-  skipped, not read aloud). New one-tap "🎙 Voice" toggle turns on hands-free
-  conversation (continuous listening + spoken replies) and remembers it. Mic still
-  pauses during speech to avoid the assistant hearing itself (browser Web Speech has
-  no echo cancellation for continuous recognition — so voice barge-in isn't possible
-  mid-speech; use the mic tap / Esc / Stop).
-
-### Added
 - 2026-07-06: Framework upgrade — new tool families. **Browser control**
   (`browser_goto/snapshot/click/fill/extract`): a persistent Playwright-driven
   Chromium in the workbench (visible on the desktop, logins persist under
@@ -1296,46 +571,6 @@ infrastructure, security, documentation, or test-policy changes.
   optional tier/persona). **Personas**: a `personas` config block (full replacement
   via `system_prompt` or additive via `append`), a per-request persona on WS/REST,
   and a `/persona` slash command.
-
-### Changed
-- 2026-07-06: LiteLLM gateway is now the default LLM path (`llm.base_url` →
-  `http://jarvis-litellm:4000/v1`). The local Ollama models are registered in
-  litellm/config.yaml under their exact Ollama tags, so existing model names work
-  unchanged, and cloud tiers (Claude/GPT/Gemini) become available by just exporting
-  the provider key. Verified through the gateway: basic chat, streaming (reasoning
-  arrives as `reasoning_content`), tool calls, vision (needs `ollama_chat/` prefix
-  — plain `ollama/` requires Pillow the image lacks), and the FULL eval suite
-  (11/11). Set base_url back to `http://host.docker.internal:11434/v1` to bypass.
-- 2026-07-06: Tool-weakness fixes from the code review. `run_shell`: hard
-  `timeout_s` (default 120s, killed in-container) and head+tail truncation with an
-  explicit marker (errors live at the tail). `fetch_url`: headers/body/json are now
-  actually exposed to the model (they existed but were unreachable), plus
-  timeout_s, offset paging, binary `save_to`, and SSRF checks on EVERY redirect hop
-  (was bypassable via 302) with fail-closed DNS. `web_search`: snippets, a `limit`
-  param, and explicit rate-limited/blocked detection instead of a silent empty
-  result. `read_file`: offset/max_chars paging, truncation notes, and a directive
-  error on binary files; `list_dir` returns sizes+mtimes. `press_key`: multi-key
-  sequences ("ctrl+a BackSpace") work instead of being silently mangled.
-  `ui_actions`: stops at the first failing step and reports it, supports
-  right_click, caps at 50 steps, and clamps the click button (was a shell-injection
-  vector). `analyze_image`/`read_document` reject missing files. Retryability now
-  lives with each tool definition (tools.isRetryable) instead of a hardcoded set.
-- 2026-07-06: Memory sidecar namespaces its Chroma collection by embed model
-  (`jarvis_<model>`), with a one-time rename migration of the legacy collection —
-  switching embedders now lands in a fresh collection instead of silently
-  corrupting search with mismatched vector dimensions.
-- 2026-07-06: System prompt: removed the dead `sql` tool reference (three places
-  taught the model to call a tool that no longer exists) and added the
-  browser-first guidance + new tool pointers. Dropped the unused `mysql2`
-  dependency.
-
-### Changed
-- 2026-07-06: Refined the "simplest interpretation" prompt nudge so it no longer
-  discourages real tool use: conversational requests are answered in chat, but tasks
-  that ask to compute/build/run/test/verify or produce a file must actually use the
-  tools and confirm the result. Full eval suite (incl. the new vision test) is 11/11.
-
-### Added
 - 2026-07-06: Big feature batch. **Files tab** — browse, open/preview, download, and
   delete files in the shared folder (`GET /api/files`, `/api/files/raw`,
   `DELETE /api/files`), so JARVIS's outputs are reachable from the UI. **Image
@@ -1376,6 +611,316 @@ infrastructure, security, documentation, or test-policy changes.
   look-step → accurate description) and the backup→restore round-trip for memory.
 
 ### Changed
+- 2026-10-05: **Tablet and phone layout** — at 900px or narrower the side panel is a
+  full-height sheet opened from **☰ Panels** (✕ Close / Escape; a dot shows new activity); at
+  600px or narrower the top bar is just the brand, ☰ and ⋯ (the other controls fold under ⋯).
+  Touch screens get controls at least 40px tall and always-visible copy buttons; phones get
+  16px form text. On desktop the drawer handle is a real button (Enter/Space toggles, ←/→
+  resize, works with touch and pen).
+- 2026-10-05: **Chat tabs show who's working** — a working dot on the tab that is answering, a
+  "new reply" dot when it is done, and "Working · <tab>" in the status pill from other tabs;
+  the Stop button shows in the working tab, and closing a working tab warns and stops it.
+  A **🔇 Stop speaking** button appears while JARVIS talks; Escape also leaves Ambient mode;
+  app notices render markdown. When your session ends (password changed, user removed, restart
+  with the login on) the page returns to the sign-in screen. The mic explains that it needs
+  HTTPS when the page is opened over plain http from another device.
+- 2026-10-05: The **Config tab's watchdog checkbox** now says what it covers: requests that
+  don't choose (scheduled tasks, the HTTP API). Chat from the page follows the 🐕 button;
+  Autopilot never uses it.
+- 2026-10-05: The containers use **this computer's time zone** (`./JARVIS.sh` passes `TZ` in),
+  so "remind me at 5pm" means 5pm here. The app runs with `init: true` and stops cleanly on
+  SIGTERM, so `docker stop` / `--reload` no longer wait 10 seconds.
+- 2026-10-05: **Docs updated across the board** to match the code (web UI, voice, API, CLI,
+  configuration, architecture, Autopilot, tools, local LLMs, memory and scheduling).
+- 2026-10-04: The Host/Origin guard now requires a browser's `Origin` to be the same site as
+  the page it calls (localhost pages on other ports still pass, as before), and the full-config
+  editor can no longer change `security.login_enabled` or `security.password_file`.
+- 2026-08-31: **`list-models --details` — what KIND of model is this?** MLX rows previously showed
+  only a name and a size, while Ollama rows carried params/quant/capabilities; the metadata is now
+  symmetric and lives behind one flag. The default view is deliberately lean (name, size, state,
+  and warnings you can't afford to miss — an embedding model in a chat tier, an incomplete
+  download); `--details` adds a line per model with architecture, dense vs MoE width,
+  quantization, context window, instruct-vs-base, tool-calling, thinking and vision. Ollama's
+  detail comes from the daemon, MLX's is read straight from each repo's `config.json` + chat
+  template — no network, no model load, still ~0.4 s across a 2 TB cache. Flags worth having:
+  `BASE - no chat template` (a foundation model that can't converse or call tools),
+  `unquantized`, `N quant variants inside` (one repo holding several quantizations — usually why
+  a repo is enormous), and `vision*` (a vision architecture whose image half `mlx_lm.server`
+  can't serve, since mlx-lm is text-only). `--json` always returns the full record.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/cli.md`, `Docs/local-llm.md`)
+- 2026-08-31: **`--help` now covers where models come from.** Downloading is the one step in the
+  local-model lifecycle that leaves this script (each runtime's own tool does it), so the help
+  screen now has a "GETTING models" section: `ollama pull <tag>` with the browse/search URLs
+  (<https://ollama.com/library>, `/search`), and for MLX the auto-download-on-serve behavior plus
+  `hf download <repo>` for pre-fetching without loading into RAM — including the warning that it
+  lands in `~/.cache/huggingface` (invisible to `list-models`) unless `ACTIVATE.sh` ran first.
+  The Ollama setup guide and `Docs/local-llm.md` gained the same library URL and a note that a
+  model page's tag is both what you pull and what you set as the JARVIS model/tier.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`)
+- 2026-08-26: **Every scalar config setting now has a field in the Config tab.** New sections —
+  Memory (Mem0/embedder), Autopilot, Workbench & shared folders, Security & housekeeping — plus the
+  missing fields in the existing ones (gateway keys, max tool steps, first-token timeout, full voice
+  block, log rotation/retention, backups retain, allowed hosts, secret-access notice, model-authored
+  custom tools). A new `csv` field type maps comma-separated text ⇄ JSON string arrays
+  (`security.allowed_hosts`); only `personas` and `mcp.servers` remain raw-JSON-only.
+  (`app/public/index.html`, `app/public/app.js`)
+- 2026-08-26: **Workbench base image is configurable and pinnable** (`workbench.base_image`, applied
+  by `--setup` via a build arg): empty = the floating `ubuntu-xfce` tag; set a `@sha256:` digest for
+  reproducible rebuilds. (`workbench/Dockerfile`, `docker-compose.yml`, `JARVIS.sh`)
+- 2026-08-26: **Deterministic app-image builds** — the Dockerfile now copies `package-lock.json` and
+  uses `npm ci` instead of `npm install`. (`app/Dockerfile`)
+- 2026-08-26: **Deduped shared logic.** Prompt-set file handling (naming, read/write/delete,
+  active-set matching) moved to a single `app/src/prompts.js` used by both config.js and the
+  `/api/prompts` routes; the unattended-run `RISKY_TOOLS` list moved to `app/src/policy.js`, shared
+  by Autopilot's guarded mode and the scheduler (previously two copies).
+- 2026-08-26: **Cost table refreshed** (rates as of 2026-08: GPT-5 family, o3, per-family Claude
+  opus/sonnet/haiku, Gemini 2.5, DeepSeek), with a note that matching is first-substring-wins so
+  specific names stay above their prefixes. Unknown/local models still show no estimate.
+  (`app/src/llm.js`)
+- 2026-08-04: **UI/accessibility + cleanup.** New-chat now **confirms** before clearing the
+  conversation; regenerate targets the real reply (not notices/errors); added `aria-live` on the
+  message log, `aria-label`s on icon buttons, and a `sandbox` on the workbench iframe; replaying
+  history no longer re-flashes the screen. Removed dead CSS + unused exports and corrected the survival
+  guide count (49→50). (`app/public/{app.js,index.html,style.css}`, `app/src/{tts,skills_data}.js`)
+- 2026-08-01: **Unified, host-visible LLM directories (workspace + shared folders renamed).** The AI's
+  working area is now a **host bind mount you can watch live**, and all three dirs share an `LLM_`
+  prefix so there's no confusion about where things go:
+  `/workspace` → **`/LLM_WORKSPACE`** (was a hidden Docker volume `jarvis_workbench_work`, now
+  `./LLM_WORKSPACE` on your Mac), `/READ_ONLY_FILES` → **`/LLM_READ_ONLY_FILES`**,
+  `/READ_WRITE_FILES` → **`/LLM_READ_WRITE_FILES`**. Because `LLM_WORKSPACE` is now a bind mount, the
+  AI's build files **survive `--delete`** (only the memory + workbench-home volumes are wiped).
+  Swept across the codebase: docker-compose mounts, `app/**`, all `Prompts/*`, `TEMPLATES/*`, the
+  config template, the workbench `Dockerfile`, `JARVIS.sh`, `.gitignore`, all `Docs/*`, and the
+  self-help guides. (Container paths match the host names now, so the AI references the same folders
+  you see.) Requires `./JARVIS.sh --setup --start` to pick up the new mounts.
+- 2026-07-31: **Docs updated to match Architecture B + current state.** Rewrote the self-help guide
+  `READ_ONLY_FILES/JARVIS_Guides/local-models-mlx.md` for the discovery-based MLX flow (`mlx-serve` /
+  `mlx-ls` / `mlx-stop` / `mlx-up`, no config block); fixed `switching-models.md`'s MLX step. Corrected
+  `Docs/architecture.md` and root `README.md` which still listed MLX as a "later" backend (it's shipped).
+  Added the `start --backend ollama --gateway` example to `config --backend ollama` step 4. (Guides,
+  `Docs/architecture.md`, `README.md`, `JARVIS_LOCAL_LLM.sh`.)
+- 2026-07-31: **MLX is now discovery-based, like Ollama (Architecture B).** MLX models are managed
+  from the CLI instead of a config array — you bring each model online as its own `mlx_lm.server`
+  process (so several stay hot at once, no reload when JARVIS switches tiers), and the script
+  DISCOVERS the running servers and maps them into gateway routes / the model dropdown.
+  New commands: **`mlx-serve <model> [--port]`** (launch + register), **`mlx-stop <model|port|all>`**,
+  **`mlx-ls`**, **`mlx-up`** (relaunch the registered set after a reboot). A gitignored auto-registry
+  `mlx/serving.json` remembers what you started (not hand-edited). `start --backend mlx` relaunches the
+  registered set then discovers + syncs; `status`/`stop` are discovery-driven. **Removed** the
+  `mlx.models` config array, the **MLX MODELS** UI editor section, and their docs — discovered MLX
+  models appear in the normal scan-driven tier pickers. (`JARVIS_LOCAL_LLM.sh`, `app/public/*`,
+  `config/JARVIS_CONFIG_template.json`, `Docs/*`.)
+- 2026-07-30: **`litellm/config.yaml` is now gitignored; a template seeds it.** The live gateway
+  config is regenerated on every `start`/`gateway-sync`, so tracking it meant a perpetually-dirty
+  working tree. It's now gitignored, with the committed default in `litellm/config_template.yaml`;
+  `JARVIS_LOCAL_LLM.sh` seeds `litellm/config.yaml` from the template on first gateway use if missing.
+  (Mirrors the `JARVIS_CONFIG.json` live-vs-template pattern.) (`JARVIS_LOCAL_LLM.sh`, `.gitignore`,
+  `litellm/config_template.yaml`.)
+- 2026-07-30: **`stop` with no `--backend` stops every running runtime, not just Ollama.** Like
+  `status`, `stop` used the `--backend` default (`ollama`), so a plain `stop` stopped the wrong thing
+  when MLX was running. It now stops each local runtime that's actually up (Ollama and/or MLX);
+  `stop --backend <x>` still stops just that one. (`JARVIS_LOCAL_LLM.sh`.)
+- 2026-07-30: **MLX MODELS editor: "Name" is now a "Tier" dropdown.** In Config → MLX models, the
+  free-text name field is a dropdown of `chat tier / cheap tier / smart tier / vision tier`, and the
+  column is labeled **tier**. Adding a row defaults to the first unused tier. The tier is a label for
+  the server slot (stored as `mlx.models[].name`, also the process label in start/stop/status); you
+  still pick which model each tier actually uses in the Model-mode "multi" tier pickers. A legacy/custom
+  name that isn't one of the four tiers is preserved as an option. (`app/public/app.js`,
+  `app/public/index.html`, `app/public/style.css`.)
+- 2026-07-30: **`config --backend ollama|mlx` guides are in sync, with explicit list/delete steps.**
+  Both setup guides now share the same structure and call out **LIST** ("the models you have
+  downloaded") and **DELETE** ("a downloaded model to reclaim disk") as their own labeled lines with
+  real commands — Ollama: `ollama list` / `ollama rm <tag>`; MLX: `mlx_lm.manage --scan` /
+  `mlx_lm.manage --delete --pattern <substr>` (with the reminder that MLX's tools need the activated
+  env so `HF_HOME` points at `mlx/models`). (`JARVIS_LOCAL_LLM.sh`.)
+- 2026-07-30: **MLX gateway routes are named by the actual model id, not the friendly alias.**
+  `start --backend mlx --gateway` (and `gateway-sync`) now emit each MLX route's `model_name` as the
+  real `mlx.models[].model` (e.g. `mlx-community/Qwen2.5-7B-Instruct-4bit`) instead of the entry's
+  `name` (`chat`) — so "List models" shows the actual model, consistent with how Ollama tags work, and
+  there's no opaque alias hiding which model a route serves. The `name` field still labels the process
+  in start/stop/status and the log file. Entries with no `model` set are skipped with a clear warning.
+  (`JARVIS_LOCAL_LLM.sh`, `Docs/local-llm.md`.)
+- 2026-07-30: **Model dropdowns show only available models.** The Config model `<select>`s (chat/
+  cheap/smart/vision tiers, single or multi mode) now list only the models actually returned by
+  "List models" for the current endpoint, instead of also injecting the saved value when it isn't
+  available (which surfaced stale entries like a leftover `gpt-4o-mini` after switching to a local
+  runtime). A configured value is still shown before any list has been fetched so it isn't lost on
+  load; once a list exists an unavailable value drops to blank so you re-pick from what's really
+  there. The **✎ Custom…** option remains for typing a model that doesn't appear in the list.
+  (`app/public/app.js`.)
+- 2026-07-28: **Config files moved to `config/`.** `JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`, and
+  their `*_template.json` now live in `config/` instead of the repo root — so the `JARVIS_*.sh`
+  scripts aren't buried among JSON in an `ls`. Updated the compose host mounts, both scripts'
+  paths, `.gitignore`, the `cp` quick-start in README/`configuration.md`, the architecture volume
+  table, and the `TEMPLATES/_generate.py` generator (which also had its now-stale in-stack gateway
+  host `jarvis-litellm:4000` → `host.docker.internal:4000` in the example configs fixed). Container
+  paths (`/cfg/…`) are unchanged, so app code needed no edits. **Existing installs:** move your
+  `JARVIS_CONFIG.json` + `JARVIS_SECRETS.json` into `config/` before the next `--start`.
+- 2026-07-28: **Config "Save all" applies live — no restart.** Saving from the Config tab already
+  mutated the in-memory config in place, but the UI still told you to run `./JARVIS.sh --reload`.
+  Corrected the messaging: ordinary settings (endpoint / model / tiers / temperature / max_tokens /
+  completion_checks / prompts / log level …) take effect on the **next message** with no restart.
+  A restart is only flagged for the memory service's embedding key and container-level settings
+  (ports). `POST /api/config/full` now returns `applied_live: true`. (`app/server.js`,
+  `app/public/{app.js,index.html,style.css}`.)
+- 2026-07-28: **LLM hosting extracted out of JARVIS core.** JARVIS is now a pure OpenAI-dialect
+  *client* — it talks to whatever URL is in `llm.base_url` and no longer knows or cares where the
+  model lives. Local model management moved to a new, optional **`JARVIS_LOCAL_LLM.sh`** (pluggable
+  backend — Ollama today, MLX/vLLM/llama.cpp later; each implements `apply_config`/`ensure_running`/
+  `url`/`stop`). It applies the local configs, ensures the runtime is up, and **prints the endpoint
+  URL to paste into Config → Endpoint URL** — Ollama direct, or an optional LiteLLM gateway it can
+  front (`--gateway`).
+  - `JARVIS.sh` no longer manages Ollama or exports provider keys (`apply_ollama_settings` +
+    `export_provider_keys` removed); `--setup/--start/--reload` are model-agnostic.
+  - The **LiteLLM gateway left the core stack** — removed from `docker-compose.yml` and moved to a
+    standalone `litellm/docker-compose.yml` that `JARVIS_LOCAL_LLM.sh --gateway` runs. `jarvis-app`
+    gains `extra_hosts: host.docker.internal:host-gateway` so it can reach host runtimes.
+  - Config template: `llm.base_url` now defaults empty (code falls back to OpenAI); `ollama.*` is
+    re-documented as read by `JARVIS_LOCAL_LLM.sh`, not JARVIS core.
+  - **Migration (existing local users):** run `./JARVIS_LOCAL_LLM.sh start --gateway`, copy the
+    printed URL, paste into Config → Endpoint URL. Cloud users are unaffected — `base_url` is already
+    a cloud URL. (`JARVIS_LOCAL_LLM.sh`, `JARVIS.sh`, `docker-compose.yml`, `litellm/`,
+    `JARVIS_CONFIG_template.json`.)
+- 2026-07-28: **Config tab: clearer model setup.** (1) The **API key** field now has a **Show/Hide**
+  toggle so you can read and edit the stored key. (2) **List models** falls back to the saved
+  config key + endpoint when the form fields are blank, so it works as long as a key is configured.
+  (3) **Model mode** now shows ONLY the relevant fields — `single` reveals just the single-model
+  input, `multi` reveals just the chat/cheap/smart/vision tier grid (toggled on load and on change).
+  (`app/public/{index.html,app.js,style.css}`, `app/server.js` models/probe fallback.)
+- 2026-07-28: **Tuning from the two-day log review.** Interactive turns were hitting the tool-step
+  ceiling 41× (terminal "Stopped after the maximum number of tool steps"), and `completion_checks=2`
+  was driving repetitive "verify everything" recitations + a repetition loop. Fixes:
+  `llm.max_tool_iterations` 15 → **22** (fewer mid-task truncations), `llm.completion_checks` 2 → **1**
+  (less over-verification), and `fetch_url` default timeout 30 → **45 s with one automatic retry on
+  timeout** (timeouts were ~1/3 of fetches). New **`app-integration` skill** (+auto-hint) for working
+  with an installed app's own data directory instead of writing into `/workspace` where the app
+  can't see it — the notes-only-say-"Markdown" / wrong-location class of bug.
+  (`JARVIS_CONFIG*.json`, `app/src/{tools.js,skills.js,skills_data.js}`.)
+- 2026-07-27: **Less robotic replies on simple turns.** The active system prompt
+  (`Prompts/default_system.prompt`) now scopes the "restate the goal / verify completion"
+  ritual to substantial (multi-step, tool-using, or hard-to-reverse) work. Simple or
+  conversational turns are told to answer directly — no "Re-reading your request…" opener, no
+  numbered re-verification of the request, no "Job done — nothing left to do" epilogue — and to
+  match reply length to the ask. Log review showed the model prefacing even one-line chit-chat
+  with the full completion ritual. (`stock_system.prompt` left pristine as the backup; read live,
+  no restart needed.)
+- 2026-07-27: **Autopilot launcher + Modify are now floating modals.** Starting a run opens a
+  centered floating window (dimmed backdrop, ✕/Esc/backdrop-click to close, roomier objective
+  box) instead of a cramped header dropdown, and **Modify** opens its own floating window
+  prefilled with the current objective (Save / Cancel, Cmd/Ctrl+Enter to save) instead of a
+  browser `prompt()`. (`app/public/{index.html,app.js,style.css}`.)
+- 2026-07-27: **Lifecycle commands wipe Autopilot state.** `./JARVIS.sh --stop / --delete /
+  --setup / --start` now clear the saved Autopilot run + plan (`data/autopilot.json`,
+  `data/plan.json`) so you always come back up to a clean slate — no zombie banner or leftover
+  plan. An app *auto-restart* (crash recovery) still resumes a run as before; only the deliberate
+  lifecycle commands reset it. (`JARVIS.sh`: `clear_autopilot_state`.)
+- 2026-07-27: **Autopilot clarify leans toward asking.** The pre-flight now confirms at least the
+  architecture and where output should be saved for build/creation tasks instead of replying
+  READY on a merely-specific request, so it asks a question more often than not. (`app/server.js`.)
+- 2026-07-26: **Prompts are now editable files in a top-level `/Prompts` directory.** Replaces
+  the earlier inline/`data` approach. The ACTIVE prompt = `Prompts/default_master.prompt` +
+  `Prompts/default_system.prompt`, read LIVE each turn (edits apply next turn, no reload), with
+  the model receiving master -> system -> built-in tool/planner/coding rules. The Config
+  **Prompts** section edits these; **Save as active** writes the default pair, **Save as… / Load /
+  Delete** manage named sets `Prompts/<name>_master.prompt` + `<name>_system.prompt` (hand-editable
+  outside the app). Ships a starter library: coder, researcher, concise, ops, creative, tutor.
+  `/Prompts` is bind-mounted into the app (compose change -> recreate the container).
+  (`app/src/config.js`, `app/server.js`, frontend, `docker-compose.yml`, `Prompts/`.)
+- 2026-07-26: **Side panel is now a single attached drag-handle drawer.** Removed the header
+  "▥ Panel" button, the separate resize grip, and the » collapse chevron. One handle stays
+  attached to the drawer's left edge and slides in/out with it: **click** to open/close
+  (chevron flips ‹/›), **drag** to resize (drag it to the far right edge to close, or pull it
+  out from the edge to open). Width + open state persist; the "work happening while closed"
+  badge sits on the handle. (`app/public/{index.html,app.js,style.css}`.)
+- 2026-07-26: **Header controls wrap** instead of overflowing — as the window narrows, the
+  toolbar buttons flow onto additional rows so they stay on screen. (`app/public/style.css`.)
+- 2026-07-26: **Removed the "System self-test" button** from the UI (it's a CLI/`curl`
+  concern); the `GET /api/selftest` endpoint stays for command-line use.
+  (`app/public/{index.html,app.js}`.)
+- 2026-07-07: Voice tweaks. The **🎤 Talk** push-to-talk button is now disabled in
+  Wake/Open mic modes (they already listen — it's only useful when the mic is Off).
+  The ambient orb now **animates continuously while the AI speaks** (a synthesized
+  syllable-rate envelope + a fast surface ripple, layered with the per-word pulses),
+  so it visibly reacts when talking, not just to your voice.
+- 2026-07-07: De-cluttered the voice controls (they were redundant). The **Voice**
+  button now toggles spoken replies (text-to-speech) — it was a combined open-mic +
+  TTS shortcut. Removed the separate speaker on/off dip-switch (it did the same thing
+  as the TTS toggle). Listening is now solely the **Off/Wake/Open** mic control +
+  **🎤 Talk** push-to-talk. The wake word is configurable (`voice.wake_word`, defaults
+  to `assistant_name`) and the mic status now shows the actual wake word instead of a
+  hardcoded "Jarvis".
+- 2026-07-07: Added `data-analysis` and `error-recovery` skills (18 total). Also
+  measured whether the local model actually consults skills: across two live tests
+  (a data-analysis ask and a browser task) qwen3-next called `list_skills`/`get_skill`
+  ZERO times, yet behaved correctly — it drove the `browser_*` tools straight from
+  their descriptions and answered sensibly. Takeaway: for this model, behavior is
+  driven by the always-on tool descriptions, not by on-demand skills; getting skills
+  actually used would require per-turn auto-hinting (deferred). The corrected/added
+  skills are still kept (they're accurate now and cost no always-on tokens).
+- 2026-07-07: Skills correctness pass (12 → 16 skills). Removed the dead `sql`-tool
+  references that were teaching the model to call a tool that no longer exists (in
+  the `internet` and `workflow-monitor-and-alert` skills). Rewrote `desktop-control`
+  to match reality (screenshot returns a vision text analysis + coordinates, not a
+  raw image; added `ui_actions`) and reframed it for non-browser apps. Replaced the
+  `browser-automation` (Playwright-via-shell) skill with a `browser` skill leading on
+  the first-class `browser_*` tools. Updated `scheduling` (output destinations,
+  notify-as-stop-signal), `workflow-login-and-act` (browser-first), and `memory`
+  (`update_memory`, timestamps). Added new skills: `vision`, `email`, `documents`,
+  and `task-authoring`. Fixed the stale "seeded into the skills DB table" comment
+  (skills are served in-memory now).
+- 2026-07-06: Documentation overhaul. Rewrote the README to be high-level and
+  accurate (it still described the removed MySQL `jarvis-db` / `sql` tool and
+  predated the gateway, browser/email/document/MCP tools, personas, voice
+  streaming, and the whole web UI). Added a `Docs/` directory with detailed guides:
+  architecture, configuration, tools, web-ui, voice, memory-and-scheduling, cli,
+  api, and extending — all cross-linked from the README and a `Docs/README.md`
+  index.
+- 2026-07-06: Voice made ChatGPT-like. TTS now uses a QUEUE and speaks the reply
+  sentence-by-sentence AS it streams in (previously it waited for the entire reply,
+  which meant ~30-90s of silence with the local reasoning model, then a dump). This
+  also fixes a real soundness bug: the browser truncates long single utterances —
+  chunking into sentences avoids it. Added barge-in: a new turn, the Stop button,
+  Esc, or tapping the mic instantly silences speech and resumes listening. Spoken
+  text is cleaned (code blocks, inline code, URLs, and importance markers are
+  skipped, not read aloud). New one-tap "🎙 Voice" toggle turns on hands-free
+  conversation (continuous listening + spoken replies) and remembers it. Mic still
+  pauses during speech to avoid the assistant hearing itself (browser Web Speech has
+  no echo cancellation for continuous recognition — so voice barge-in isn't possible
+  mid-speech; use the mic tap / Esc / Stop).
+- 2026-07-06: LiteLLM gateway is now the default LLM path (`llm.base_url` →
+  `http://jarvis-litellm:4000/v1`). The local Ollama models are registered in
+  litellm/config.yaml under their exact Ollama tags, so existing model names work
+  unchanged, and cloud tiers (Claude/GPT/Gemini) become available by just exporting
+  the provider key. Verified through the gateway: basic chat, streaming (reasoning
+  arrives as `reasoning_content`), tool calls, vision (needs `ollama_chat/` prefix
+  — plain `ollama/` requires Pillow the image lacks), and the FULL eval suite
+  (11/11). Set base_url back to `http://host.docker.internal:11434/v1` to bypass.
+- 2026-07-06: Tool-weakness fixes from the code review. `run_shell`: hard
+  `timeout_s` (default 120s, killed in-container) and head+tail truncation with an
+  explicit marker (errors live at the tail). `fetch_url`: headers/body/json are now
+  actually exposed to the model (they existed but were unreachable), plus
+  timeout_s, offset paging, binary `save_to`, and SSRF checks on EVERY redirect hop
+  (was bypassable via 302) with fail-closed DNS. `web_search`: snippets, a `limit`
+  param, and explicit rate-limited/blocked detection instead of a silent empty
+  result. `read_file`: offset/max_chars paging, truncation notes, and a directive
+  error on binary files; `list_dir` returns sizes+mtimes. `press_key`: multi-key
+  sequences ("ctrl+a BackSpace") work instead of being silently mangled.
+  `ui_actions`: stops at the first failing step and reports it, supports
+  right_click, caps at 50 steps, and clamps the click button (was a shell-injection
+  vector). `analyze_image`/`read_document` reject missing files. Retryability now
+  lives with each tool definition (tools.isRetryable) instead of a hardcoded set.
+- 2026-07-06: Memory sidecar namespaces its Chroma collection by embed model
+  (`jarvis_<model>`), with a one-time rename migration of the legacy collection —
+  switching embedders now lands in a fresh collection instead of silently
+  corrupting search with mismatched vector dimensions.
+- 2026-07-06: System prompt: removed the dead `sql` tool reference (three places
+  taught the model to call a tool that no longer exists) and added the
+  browser-first guidance + new tool pointers. Dropped the unused `mysql2`
+  dependency.
+- 2026-07-06: Refined the "simplest interpretation" prompt nudge so it no longer
+  discourages real tool use: conversational requests are answered in chat, but tasks
+  that ask to compute/build/run/test/verify or produce a file must actually use the
+  tools and confirm the result. Full eval suite (incl. the new vision test) is 11/11.
 - 2026-07-02: Post-review hardening pass (correctness, performance, usability).
   Correctness/data-integrity: all JSON state (tasks, chatlog, sessions) now writes
   ATOMICALLY via a shared `persist.js` (temp-file + rename) so a crash can't corrupt
@@ -1473,7 +1018,6 @@ infrastructure, security, documentation, or test-policy changes.
   to a fresh database).
 - 2026-06-27: `/api/selftest` endpoint that exercises the memory DB, workbench
   shell, and shared folders without needing a model.
-
 - 2026-06-28: Granted the LLM open internet access via two new tools, `fetch_url`
   (read any URL/API; HTML stripped to text) and `web_search` (DuckDuckGo). Access
   is not allow-listed. Added an internet check to `/api/selftest`.
@@ -1488,7 +1032,6 @@ infrastructure, security, documentation, or test-policy changes.
   permission request (so the OS/browser prompt actually appears), surfaced
   recognition errors instead of failing silently, added a push-to-talk mic button,
   and improved TTS voice selection.
-
 - 2026-06-28: Added desktop control (computer use): a `screenshot` tool whose
   image is fed back to the vision model, plus `open_url`/`open_app`, `click`,
   `double_click`, `right_click`, `move_mouse`, `type_text`, `press_key`, and
@@ -1500,7 +1043,6 @@ infrastructure, security, documentation, or test-policy changes.
   tools so JARVIS can log in to the user's OWN accounts. Policy: JARVIS operates
   accounts the user already owns; it does not create accounts or bypass sign-up
   CAPTCHAs/phone verification.
-
 - 2026-06-28: The credential vault is now writable by JARVIS — added `set_secret`
   (create/update, partial fields) and `delete_secret` tools, persisted to the
   (plaintext, gitignored) `JARVIS_SECRETS.json`.
@@ -1508,7 +1050,6 @@ infrastructure, security, documentation, or test-policy changes.
   (`JARVIS_CONFIG.json` + `JARVIS_SECRETS.json`) by restarting only the app; the
   database and workbench keep running. `/api/selftest` now reports the loaded
   secret count.
-
 - 2026-06-28: Added a command-line interface (`app/cli.js`) and two JARVIS.sh
   commands: `--terminal` (`-t`) for an interactive text chat in the terminal (no
   browser), and `--prompt <text>` (`-p`) for a one-shot request whose answer
@@ -1516,7 +1057,6 @@ infrastructure, security, documentation, or test-policy changes.
   `cat app.log | ./JARVIS.sh --prompt "analyze this log"`. Both reuse the web
   app's tool-calling loop; tool activity goes to stderr. Expanded `--help` with
   example workflows.
-
 - 2026-06-28: Added task scheduling. New tools `schedule_task` (one-shot via
   `in_seconds`/`at`, or recurring via `every_seconds` with a natural-language
   `until` stop condition), `list_tasks`, `cancel_task`, and `notify_user`. A
@@ -1529,7 +1069,6 @@ infrastructure, security, documentation, or test-policy changes.
   with a click, and a notification history), backed by `GET /api/tasks` and
   `POST /api/tasks/cancel`. Notifications also fire a best-effort desktop toast on
   the workbench via `notify-send` (added `libnotify-bin` to the workbench image).
-
 - 2026-06-28: Rewrote the system prompt into a tool-selection guide (which tool for
   which job) plus common multi-tool workflows, and synced it to the local config
   and the template, so the model reliably picks the right tool per task.
@@ -1539,19 +1078,16 @@ infrastructure, security, documentation, or test-policy changes.
   tools the LLM reads on demand. The LLM's own working memory remains
   self-managed (no predefined schema). Also made the CLI exit cleanly after a
   one-shot `--prompt` that opens DB pools.
-
 - 2026-06-28: Added saveable conversation sessions. Save/load/export/import/delete
   conversations via a Sessions menu in the web UI (loads in place to continue where
   you left off) and `/sessions`, `/save [name]`, `/load <id>` in the terminal.
   Backed by `/api/sessions` endpoints and JSON files under `data/sessions/`. Useful
   for resuming work and for iterating on the model/prompt against a fixed transcript.
-
 - 2026-06-28: Added an `assistant_name` config option that sets the AI's name in
   one place: its identity in the system prompt (via the `{assistant_name}`
   placeholder), the displayed title/page title, and the voice wake word + stop
   phrase (which now derive from the name, e.g. say "Friday" to wake an assistant
   named Friday). Voice `wake_word`/`stop_phrase` become optional overrides.
-
 - 2026-06-28: Made scheduled task activity visible. Each run now broadcasts a
   `task_run` event (shown in the web Activity panel) and the Tasks tab shows each
   task's last run + last result. The terminal (`--terminal`) gained a live
@@ -1564,7 +1100,6 @@ infrastructure, security, documentation, or test-policy changes.
   take whatever actions the outcome warrants (e.g. post to chat, notify, run shell,
   update the DB). Verified end-to-end: a scheduled task posted into the chat over
   the WebSocket.
-
 - 2026-06-28: Fixed file writes not appearing on the host. The shared folders are
   now `READ_ONLY_FILES/` and `READ_WRITE_FILES/` (host), mounted to `/READ_ONLY_FILES`
   and `/READ_WRITE_FILES` in the app and workbench, with `config.shared` aligned to
@@ -1572,7 +1107,6 @@ infrastructure, security, documentation, or test-policy changes.
   so `write_file` wrote inside the container (invisible on the host). Also: file
   tools now accept a bare/relative filename (resolved under the read-write folder),
   and the model is told the exact shared-folder paths each turn.
-
 - 2026-06-28: Added a document/image creation toolchain to the workbench base
   image (`workbench/Dockerfile`): Python `fpdf2`, `reportlab`, `python-docx`,
   `python-pptx`, `openpyxl`, `pillow`, `matplotlib`, `markdown` (plus the existing
@@ -1583,7 +1117,6 @@ infrastructure, security, documentation, or test-policy changes.
   prompt so the model knows it is root with internet and must NOT falsely claim it
   cannot install packages (it can, via run_shell). Bumped `max_tool_iterations`
   8 -> 12 for multi-step document tasks.
-
 - 2026-06-28: Streamed model output. The OpenAI-compatible call now uses
   `stream: true`; `llm.js` parses the SSE stream, emits `{type:"token"}` deltas
   over the WebSocket (assembling streamed tool-call deltas across the loop), and
@@ -1598,7 +1131,6 @@ infrastructure, security, documentation, or test-policy changes.
   inserts a newline, and the box auto-grows. Added a "Data & persistence" section
   to `JARVIS.sh --help` documenting where sessions/tasks/files/backups live on the
   host (and that they survive `--delete`).
-
 - 2026-06-28: Added semantic long-term memory (Mem0). New `jarvis-memory` sidecar
   container wraps the Mem0 OSS library over a local Chroma vector store (extraction +
   embeddings via the configured OpenAI key). New tools `add_memory`, `search_memory`,
@@ -1619,7 +1151,6 @@ infrastructure, security, documentation, or test-policy changes.
   the shared-file sandbox (`fs.realpathSync` before the path check); and prompt-injection
   hardening in the system prompt (treat fetched/searched/file content as untrusted data,
   never exfiltrate secrets).
-
 - 2026-06-28: Multi-model support via a LiteLLM gateway. New `jarvis-litellm`
   container exposes ONE OpenAI-compatible endpoint (`litellm/config.yaml`) that routes
   to many providers (OpenAI, Anthropic Claude, Google Gemini, Ollama/local). The app's
@@ -1637,7 +1168,6 @@ infrastructure, security, documentation, or test-policy changes.
   (named volume `jarvis_workbench_work`) that survives rebuilds and is now the default
   working directory for `run_shell`. New `browser-automation` skill; the system prompt
   and `workbench-shell` skill document the new tooling.
-
 - 2026-06-28: Added configurable per-task model tiers. `llm.models` maps tiers
   (`chat`, `cheap`, `vision`, `smart`) to ANY model the gateway knows (any provider).
   `llm.js` routes per call: a vision-capable model auto-selected when the context
@@ -1650,7 +1180,6 @@ infrastructure, security, documentation, or test-policy changes.
   printing pass/fail with per-case time, cost, model, and tools, and exiting non-zero
   on failure. Run via `JARVIS.sh --eval` (`-e`); ships example cases. Adapt saved
   sessions into cases by copying their `messages` and adding an `expect` block.
-
 - 2026-06-28: Removed the MySQL database (jarvis-db) — the stack is now 4 containers.
   Mem0 owns memory; structured/tabular data uses DuckDB/SQLite in the workbench
   `/workspace`. The `sql` tool, schema injection, and DB skills-seeding are gone;
@@ -1662,7 +1191,6 @@ infrastructure, security, documentation, or test-policy changes.
   `backups/jarvis-memory-<ts>.tgz`; `--restore-memory --from <file>` restores it
   (stops the service, swaps the volume contents, restarts), and `--restore-memory`
   with no `--from` resets to an empty memory. Round-trip verified.
-
 - 2026-06-28: Made scheduled tasks more reliable + honest. The task runner now
   (1) instructs the model to report only what tools actually returned — never invent
   data or claim success — and to VERIFY side effects (read a file back after writing);
@@ -1673,7 +1201,6 @@ infrastructure, security, documentation, or test-policy changes.
   run_shell `>>` for the workbench `/workspace`, and sharpened the `schedule_task`
   description: the prompt is executed by the model THROUGH its tools (not as literal
   code), so it must be a concrete, self-contained, verifiable instruction.
-
 - 2026-06-28: Added consistent log output. New `append_log(path, message, fields?)`
   tool where the CODE owns the format — a uniform ISO-8601 UTC timestamp, the message
   collapsed to exactly one line, optional structured `fields` rendered as `k=v`, and a
@@ -1682,7 +1209,6 @@ infrastructure, security, documentation, or test-policy changes.
   its own line (insert a separator newline when the file doesn't end in one). The
   system prompt, the scheduled-task runner, and the files skill now steer recurring
   logs to `append_log`.
-
 - 2026-06-28: Fixed "updating a task stops it." Added an `update_task` tool that
   edits an existing task IN PLACE (prompt/interval/until/label/next-run) so it keeps
   running; the system prompt + scheduling skill now tell the model to use it instead
@@ -1700,7 +1226,6 @@ infrastructure, security, documentation, or test-policy changes.
   (bound to 0.0.0.0), and returns
   http://localhost:<port> for the user to open in their own browser to test a web app
   before receiving the code. New `web-preview` skill + system-prompt guidance.
-
 - 2026-06-28: Added an "analyze before acting" step to the system prompt. For each
   request the model first analyzes what's actually being asked and what success looks
   like, and if anything material is unclear/missing/assumption-dependent it asks a
@@ -1708,7 +1233,6 @@ infrastructure, security, documentation, or test-policy changes.
   immediately (stating any assumptions) so simple asks aren't stalled. Verified: an
   ambiguous "build me a dashboard" produced focused clarifying questions instead of
   guessing.
-
 - 2026-06-29: Made web-app previews reliably show a working UI. Root cause of "the
   demo doesn't work": the model built API-only servers (no GET / route), so the browser
   showed "Cannot GET /" even though the server was up — and serve_app reported "reachable"
@@ -1725,7 +1249,6 @@ infrastructure, security, documentation, or test-policy changes.
   `config.js` (`modelMode()`, used by `modelFor()` and surfaced in `publicConfig`), and
   documented in both `JARVIS_CONFIG.json` and `JARVIS_CONFIG_template.json` with
   `_model_mode_comment`/`_models_comment`. So a single-model setup is a one-line flip.
-
 - 2026-06-29: Added a `TEMPLATES/` directory of ready-to-use example configs:
   `JARVIS_CONFIG.single-openai` (OpenAI direct, simplest), `openai-tiers` (OpenAI
   multi-tier via gateway), `multi-model` (OpenAI+Claude+Gemini), `anthropic-claude`,
@@ -1736,7 +1259,6 @@ infrastructure, security, documentation, or test-policy changes.
   differs per scenario. Templates use REPLACE_ME placeholders (safe to commit); the
   README documents the gateway-vs-direct choice and the Mem0/embeddings caveat for
   local setups.
-
 - 2026-06-29: "Test what you build." Added a system-prompt principle: whenever the
   model generates code/a program it must RUN it and do a baseline functionality test
   before saying it's done (scripts: execute on a representative input, check output +
@@ -1747,7 +1269,6 @@ infrastructure, security, documentation, or test-policy changes.
   issues) — eliminating run_shell heredoc thrashing (a factorial test went from 13
   flailing run_shell calls to write_workbench_file + one run_shell). Bumped
   `max_tool_iterations` 12 -> 15 for build-test-fix loops; regenerated the TEMPLATES.
-
 - 2026-06-29: Added a persistent "still working" indicator to the chat. Previously the
   3-dot typing indicator vanished as soon as the first token streamed, so during long
   tool-running phases (e.g. coding tasks) there was no sign the LLM was still going.
@@ -1755,7 +1276,6 @@ infrastructure, security, documentation, or test-policy changes.
   the reply/ error completes, showing what it's doing (`running <tool>…`, `responding…`,
   `working…`) and a live elapsed timer (Ns). Frontend only (`app/public/app.js` +
   `style.css`, with a prefers-reduced-motion fallback) — refresh the browser to get it.
-
 - 2026-06-29: Tasks now flag "no effective result." The scheduler detects when a run
   accomplished nothing useful — no tools called, every tool errored, or data-producing
   tools (run_shell/fetch_url/web_search) returned empty (e.g. a dead API) — marks the
@@ -1769,7 +1289,6 @@ infrastructure, security, documentation, or test-policy changes.
 - 2026-06-29: Added `--backup-workspace` / `--restore-workspace` to JARVIS.sh (mirrors
   the memory backup): tar the workbench `/workspace` volume to
   backups/jarvis-workspace-<ts>.tgz and restore it (or reset to empty). Verified.
-
 - 2026-06-30: Fixed runaway task duplication. A recurring task whose prompt mentioned
   a schedule ("…every 5 minutes") made the model call schedule_task on each run, spawning
   a new task every run (one user request -> dozens of tasks). Now scheduling tools
@@ -1779,7 +1298,6 @@ infrastructure, security, documentation, or test-policy changes.
   (an "every N minutes" phrase describes the existing schedule, not an instruction).
   Interactive chat is unaffected (it can still create tasks). Verified a task can no
   longer call schedule_task.
-
 - 2026-06-30: Chat readability + LLM-controlled emphasis. User bubbles are now a
   distinct indigo (clearly different from the assistant's teal). Assistant messages
   render a safe markdown subset (**bold**, *italic*, __underline__, `code`, ~~strike~~;
@@ -1788,7 +1306,6 @@ infrastructure, security, documentation, or test-policy changes.
   border + a brief chat-window flash, emergency a red border + pulse — and it works for
   task post_to_chat messages too. System prompt documents the convention; verified the
   model uses it. Frontend-only (app/public) plus the prompt; refresh the browser.
-
 - 2026-06-30: Fixed semantic memory for local models and made it fully-offline capable
   (memory/server.py). Chain of issues fixed: (1) Mem0 reused `llm.model` for its OpenAI
   extraction call, so a LOCAL chat model name broke it — it now MIRRORS the app's LLM
@@ -1806,6 +1323,413 @@ infrastructure, security, documentation, or test-policy changes.
   the eval suite and qwen3-next:80b passes all capabilities (tool-calling, code, files,
   shell, internet, tasks; memory once the fix above is in). Chat/tools run fully local;
   only Mem0 embeddings use OpenAI unless configured otherwise.
+
+### Fixed
+- 2026-10-05: **Review fixes** (data safety, chat, scheduler, Autopilot, models):
+  - **`--restore-memory` / `--restore-workspace` could wipe data** on a typo or a bad backup
+    file. They now need `--from <file>` or `--fresh`, check the backup before touching anything,
+    unpack beside the current data and swap only when that worked, and ask "are you sure?"
+    first (`--force` skips the question; without a terminal the answer is no).
+  - **Chat replies landed in the wrong tab** when you switched tabs mid-reply; a reply now
+    always goes into the tab where it was asked.
+  - **Sending while JARVIS was busy broke the running turn**; it is now refused with a plain
+    "still working" note and your text stays in the box.
+  - The **Config tab overwrote changes made meanwhile** (e.g. a header toggle); a save over a
+    newer config is now refused with a Reload button, and secrets are only re-saved when edited.
+  - **Escape now always stops speech**, also after the reply arrived and inside a dialog.
+  - **Scheduler** — tasks added from the CLI are picked up, `every` + `at` work together,
+    editing a task's timing re-times it, and a run no longer posts its notice twice.
+  - **Autopilot** — two loops can no longer run at once, and Stop works during a pause.
+  - The **planner** advances to the next step correctly.
+  - **Large workbench file writes** work.
+  - **MCP** servers whose session expired are reconnected.
+  - **Email** — TLS settings are honoured, and `set_secret` saves the email fields correctly.
+  - The **context window** is detected for gateway endpoints; `/api/models` asks with the
+    saved API key.
+  - **Retry waits are capped and can be stopped**; **stream errors are shown** instead of an
+    empty reply; JSON bodies that are too large or invalid answer **413 / 400** with a message.
+  - Prompt guards tightened; **uploads never overwrite** an existing file; **backups run one at
+    a time** with a timeout.
+  - **`--reload` / `--update`** — a network change made while JARVIS was stopped is applied,
+    switching search to SearXNG starts its container, and an update renews the app's
+    `node_modules`.
+  - **MLX** (`JARVIS_LOCAL_LLM.sh`) — servers listen on `127.0.0.1` only, `mlx-stop` stops just
+    the listening server, the script returns proper exit codes, and vision models are routed
+    to `mlx-vlm`.
+- 2026-08-31: **`mlx-serve` ignored repo-shipped model code when routing.** A model repo can carry
+  its own MLX implementation (`config.json` → `"model_file": "<arch>.py"`), which is how a model
+  runs on a runtime that has no built-in support for its architecture. Routing looked only at
+  which package implements the `model_type`, so such a model went to mlx-vlm purely because
+  mlx-vlm knows the architecture — and failed with
+  `module 'custom_model' has no attribute 'ModelConfig'`, since both runtimes load shipped code
+  but expect different interfaces (mlx-lm: `Model`/`ModelArgs`; mlx-vlm: `ModelConfig`).
+  `mlx_runtime_for` now detects `model_file` and routes by which framework the file imports.
+  (`JARVIS_LOCAL_LLM.sh`)
+- 2026-08-31: `mlx-ls` and `mlx-up` exited **1 whenever servers were actually running** — their
+  last statement was a `[[ … ]] && info` guard that is false in exactly that case, so the
+  conditional became the exit status and broke `&&` chaining. (`JARVIS_LOCAL_LLM.sh`)
+- 2026-08-27: `--probe-context` used `llm.model` directly, which is empty in multi-model
+  configs — now resolves through `modelFor("chat")`. `data/backups/` added to `.gitignore` so
+  auto-backup tarballs can't pollute git status. Per-chat sync debounce fixed to capture the
+  changed chat id (a tab switch could drop the outgoing chat's pending sync).
+- 2026-08-26: **Closed-browser alerts (ntfy bridge).** `notifications.ntfy_url` POSTs every
+  notification to an ntfy topic (phone app / self-hosted) with mapped priorities;
+  `min_level` filters what leaves the machine. (`app/src/scheduler.js`)
+- 2026-08-26: **Automatic memory + workspace backups.** `backups.auto` tars the semantic-memory
+  volume and `/LLM_WORKSPACE` from inside the app into `data/backups/` on a schedule (default
+  daily, keep 7), with restart-safe last-run stamping, per-run notifications, and a **💾 Back up
+  now** button / `POST /api/backup/run`. (`app/src/autobackup.js`)
+- 2026-08-26: **Parallel chat tabs.** Multiple live conversations in a tab strip — ＋ opens,
+  click switches, double-click renames, ✕ closes; per-tab history persists locally (the legacy
+  single history migrates into tab 1). (`app/public/app.js`)
+- 2026-08-26: **`JARVIS.sh --update`** — pull, show incoming commits, rebuild only the images
+  whose sources changed, restart. (`JARVIS.sh`)
+- 2026-08-26: **Web-UI batch:** styled **modal system** replacing every native
+  prompt/confirm/alert; **light theme** (☀️/🌙 toggle, token-driven); in-chat **search**
+  (Cmd/Ctrl-F, match walker); **⬇ .md export** with timestamps; hover **timestamps** on
+  bubbles; Tasks panel **edit-in-place + pause/resume** (`POST /api/tasks/update`, new `paused`
+  state the tick loop skips); Memory **edit-in-place** (`PUT /api/memories/:id`); Files tab
+  **read-only folder view + ⤒ Upload**; Activity **filter box + per-entry copy** and **live
+  run_shell streaming** (700ms-throttled `tool_stream` events, pulsing live entry); Config →
+  Diagnostics **🩺 self-test panel** (green/red rows from `/api/selftest`); Autopilot **📜 cycle
+  history** (per-cycle summaries persisted with the run, `GET /api/autopilot/history`).
+  (`app/public/*`, `app/server.js`, `app/src/{scheduler,autopilot,tools}.js`, `app/public/style.css`)
+- 2026-08-26: **Six new tools** (63 built-ins now). `delegate` — hand a self-contained subtask to a
+  **sub-agent** running in its own fresh context with the full toolset, returning only a final
+  report (the main lever against context pressure; inherits the caller's tool exclusions so
+  unattended runs can't reach withheld tools through it; activity streams as `sub▸` in the panel).
+  `browser_press` / `browser_back` — expose browserd's existing keyboard + history ops.
+  `browser_screenshot` — page-level JPEG capture through the vision look-step (with daemon
+  self-healing when a stale browserd doesn't know new ops). `transcribe_audio` — fully local
+  speech-to-text via faster-whisper in the workbench (mp3/m4a/wav/mp4/…, [mm:ss] stamps on long
+  recordings). `consolidate_memories` — smart-tier merge of near-duplicate/contradicting memories
+  (guarded: unknown ids dropped, >50%-deletion plans refused; also a 🧹 button in the Memory tab +
+  `POST /api/memories/consolidate`). (`app/src/tools.js`, `app/src/browserd.py`)
+- 2026-08-26: **Readability-grade `fetch_url`.** HTML pages now come back as structure-preserving
+  article text (headings/lists/links as markdown) via Mozilla Readability + jsdom (no page scripts
+  execute), falling back to the old tag-strip when no article is extractable; `raw:true` returns
+  the unprocessed body. (`app/src/tools.js`, deps: `@mozilla/readability`, `jsdom`)
+- 2026-08-26: **Local speech input.** New STT engine "local" (🎚️ popover or `voice.stt_engine`):
+  push-to-talk records in the browser and `POST /api/stt` transcribes with whisper in the workbench —
+  no Google speech service, works beyond Chrome. Wake/Open modes still use the browser engine.
+  (`app/public/voice.js`, `app/server.js`)
+- 2026-08-26: **Hot-reload for custom tools + MCP servers** — a config save (or
+  `POST /api/tools/reload`) re-scans `custom_tools/` (require cache busted) and re-handshakes the
+  MCP server list; no app restart. (`app/src/tools.js`, `app/src/mcp.js`, `app/server.js`)
+- 2026-08-26: **Per-tier generation params + smart routing.** A `llm.models` tier may be an object
+  (`{"model", "temperature"?, "max_tokens"?}`) whose params override the globals for that tier (the
+  Config-tab pickers preserve them); `llm.smart_routing` (default on) routes plan-mode turns and
+  Autopilot's planning/wrap-up cycles to the smart tier. (`app/src/config.js`, `app/src/llm.js`,
+  `app/src/autopilot.js`, `app/server.js`)
+- 2026-08-26: **Optional per-turn memory auto-recall** (`memory_auto_recall`, default off): each chat
+  turn silently searches the store and injects the top hits into the volatile note — recall stops
+  depending on the model calling `search_memory`. 3s-capped, never blocks a turn. (`app/src/llm.js`)
+- 2026-08-26: **Workbench image: verified + expanded.** A final build layer now FAILS the build with
+  the list of anything critical missing (backstop for the `||` fallback install chains). Added:
+  `tesseract-ocr` (exact OCR), `exiftool`, `qpdf`, `yt-dlp`, the **DuckDB CLI** (arch-aware), and
+  **faster-whisper**; plus a system-wide git identity (`JARVIS Workbench <jarvis@workbench.local>`,
+  `safe.directory *`) so in-workbench commits work on first use. (`workbench/Dockerfile`)
+- 2026-08-26: **Markdown viewer branding generalized** — `/view` showed "🧭 Survival Knowledge Base"
+  chrome (Start Here / Index links + title suffix) for EVERY file; KB chrome now appears only for
+  files inside the knowledge base, everything else gets a neutral document topbar. (`app/src/mdview.js`)
+- 2026-08-26: **Test-runner default config path** pointed at a nonexistent repo-root
+  `JARVIS_CONFIG.json`; it now defaults to the tracked placeholder template (deterministic, no real
+  keys). Note: the suspected mdview stash-marker collision (review item CLEAN-5) was a false
+  positive — the file already uses NUL sentinels; no change was needed. (`app/test/run.js`)
+- 2026-08-04: **Live prompt switching + shared-path doubling.** The active system prompt was **cached
+  at boot** (a Config→Prompts change needed a restart) — now read live per turn, with the active
+  prompt name in the per-turn log. Fixed the **`DEFAULT`/Load** dropdown (loads the general base and
+  applies it immediately). Fixed **shared-path doubling** in the file tools: a path like
+  `LLM_READ_WRITE_FILES/x.md` no longer resolves to `…/LLM_READ_WRITE_FILES/LLM_READ_WRITE_FILES/x.md`.
+  Also: `mdview` `__bold__` + top-bar href escaping, autopilot `extend()` on an ended run, log
+  retention only running once per boot, voice-recognizer hot-loop backoff, `pkill` over-matching, and
+  `$CFG` shell interpolation. (`app/src/{config,tools,mdview,autopilot,logger}.js`,
+  `app/public/{app.js,voice.js}`, `JARVIS.sh`, `JARVIS_LOCAL_LLM.sh`)
+- 2026-08-01: **Follow-ups for the LLM_WORKSPACE bind-mount switch.** The token sweep missed a few
+  spots and the volume→bind change broke two commands: (1) `browserd.py` and a custom-tools template
+  still used the old paths — fixed; (2) the workbench `Dockerfile` now sets `WORKDIR /LLM_WORKSPACE`
+  (and its comment no longer calls it a named volume); (3) **`JARVIS.sh --backup-workspace` /
+  `--restore-workspace` were broken** — they operated on the removed `jarvis_workbench_work` volume
+  (e.g. `--restore-workspace --fresh` did a no-op `docker volume rm`); rewritten to tar/clear the host
+  `./LLM_WORKSPACE` folder directly (works even when stopped); (4) `--delete` messaging + several docs
+  and the maintenance guide corrected — `LLM_WORKSPACE` is a bind mount now, so it **survives**
+  `--delete` (only the memory + workbench-home volumes are wiped). (`app/src/browserd.py`, `JARVIS.sh`,
+  `workbench/Dockerfile`, `Docs/cli.md`, `LLM_READ_ONLY_FILES/JARVIS_Guides/maintenance.md`, …)
+- 2026-07-30: **`JARVIS_LOCAL_LLM.sh status` now reports every backend, not just Ollama.** `status`
+  ran `${BACKEND}_status`, and `--backend` defaults to `ollama`, so a plain `status` always said
+  "Ollama" even when MLX was the one running. It now shows Ollama, MLX (when models are configured),
+  and the gateway together. `mlx_status` also keys off the port instead of the name, so a live MLX
+  server still appears even if its `mlx.models` name/model is blank — surfacing a misconfig instead of
+  silently hiding the server. (`JARVIS_LOCAL_LLM.sh`.)
+- 2026-07-30: **Header model badge refreshes on Config "Save all".** The top-of-UI model badge was
+  set only at page load and on the quick model dropdown, so after switching models in the Config tab
+  it kept showing the old value (e.g. a stale `openai · gpt-5` after moving to a local Ollama model)
+  until a manual browser refresh. Saving the config now re-reads `/api/config` and updates the badge
+  immediately. In multi-model mode it shows the **chat-tier** model (always present), matching what
+  the server reports via `publicConfig()`'s `modelFor("chat")`. The underlying config was never wrong
+  — this was display-only. (`app/public/app.js`.)
+- 2026-07-28: **Forgiving file-write tools (from the GPT-4.1 build review).** Two friction points a
+  real Autopilot build kept hitting: (1) `write_workbench_file` / `edit_workbench_file` now accept a
+  **relative path** (resolved under `/workspace`) instead of erroring with "path must be absolute" —
+  a `toWorkbenchPath` helper normalizes it. (2) `write_file` given a **directory** path now returns
+  an actionable error ("… is a directory — include a filename, e.g. …/index.html") instead of a raw
+  `EISDIR`. Both let any model self-correct instantly rather than burning retries. (`app/src/tools.js`.)
+- 2026-07-28: **Model pickers now populate reliably.** The model fields (single + the four
+  chat/cheap/smart/vision tiers) were `<input list=datalist>` — native datalists don't reliably
+  drop down, so the multi-mode tier pickers looked empty. Replaced them with real `<select>`
+  dropdowns that **List models** fills; each keeps its currently-configured value even if the
+  endpoint didn't return it, plus a **✎ Custom…** option to enter a model by hand.
+  (`app/public/{index.html,app.js}`.)
+- 2026-07-27: **Autopilot converges instead of burning cycles re-verifying.** Log review showed
+  runs repeatedly exhausting the per-cycle tool-step cap without ever declaring "done" — each
+  cycle restarted the whole serve→browse→screenshot→verify arc from scratch. Three fixes in
+  `autopilot.js`: (1) it now remembers a **live preview server** (port captured from `serve_app`)
+  and tells later cycles NOT to re-serve it; (2) an explicit **"if it works, you are DONE"** nudge
+  so a passing verification marks the plan complete and exits rather than looping to the step cap;
+  (3) **retry-on-empty** — a cycle where the model returns nothing is retried (up to twice) without
+  being counted, instead of wasting a cycle. Covered by new tests. (`app/src/autopilot.js`,
+  `app/test/autopilot.test.js`.)
+- 2026-07-26: **Autopilot review — 6 planning/loop bugs fixed.**
+  (1) **Stale plan hijack** (reported): a NEW Autopilot objective inherited a leftover plan
+  from a previous task (e.g. a SimCity run continued the earlier DOOM plan). `start()` now
+  clears any existing plan so each objective begins fresh; a fresh chat (New chat) clears it too.
+  (2) **Anti-thrash misfire**: only file-writes counted as "work", so research/browser/serve
+  cycles were wrongly nagged to "stop re-reading and write code" — now ANY non-read/non-plan
+  tool counts as progress.
+  (3) **Sporadic errors killed long runs**: the transient-error counter never reset; it now
+  clears after each successful cycle.
+  (4) **Completion vs budget**: a genuinely-finished objective is now reported "done" even if
+  the time budget was hit the same cycle.
+  (5) **Start guard**: starting a new run while one was PAUSED silently clobbered it; now
+  rejected until you stop it.
+  (`app/src/autopilot.js`, `app/public/app.js`; regression test added.)
+- 2026-07-25: **File tools can now reach the workbench build area.**
+  `list_dir`/`read_file`/`write_file`/`analyze_image` were restricted to the
+  user-exchange folders, so the model couldn't inspect what it built in
+  `/workspace` (7 errors in one session, e.g. `read_file /workspace/doom.html`).
+  The workbench's `/workspace` volume is now also mounted into the app, and the
+  path check allows `/workspace` (read + write). The model can inspect its own
+  work instead of falling back to `run_shell cat`.
+- 2026-07-25: **`fetch_url` can self-check served preview apps.** The SSRF guard
+  blocked the model from fetching `localhost:9101` to check the app it just
+  served. Now `fetch_url` transparently routes `localhost:<9101-9150>` to the
+  workbench (where preview apps actually run) and allows the workbench host on
+  those ports — other private/loopback addresses stay blocked. Verified: a
+  served page fetched back `200`.
+- 2026-07-26: **Context meter now always visible (even at 0%).** It was hidden until the
+  first turn reported usage, so a fresh or just-refreshed chat showed nothing. It now renders
+  on load — 0% on a new chat, and a rough estimate after a refresh / when loading a saved
+  session — and the exact value replaces the estimate on the next turn. (`app/public/app.js`.)
+- 2026-07-26: **Bare URLs in chat are now clickable.** When the model posts a plain link
+  (e.g. `http://localhost:9101` for a served app), it now renders as a clickable link.
+  Existing markdown links and URLs inside inline code are left as-is. (`app/public/app.js`.)
+- 2026-07-26: **Autopilot objective box no longer closes when you select its text.** The
+  launcher closed on any outside click, including a text-selection drag that ended outside
+  the box — so clearing the field was painful. It now only closes when the press *started*
+  outside. (`app/public/app.js`.)
+- 2026-07-26: **Phantom "RUNNING" Autopilot bar on an idle app.** The `.autopilot-bar`
+  CSS set `display:flex`, which (author > UA cascade) overrode the HTML `hidden`
+  attribute, so the bar rendered with its default "running" text even with no run active.
+  Added a global `[hidden] { display: none !important; }` guard. (`app/public/style.css`.)
+- 2026-07-25: **Tool calls written as TEXT now actually run — a top cause of "said it
+  did it but didn't."** The chat model (Qwen3 via Ollama) intermittently emitted a
+  tool call as plain text — `<tool_call>run_shell <parameter=command>…</parameter>`
+  (an XML-parameter dialect the server's JSON tool-call parser doesn't recognize) —
+  so the command never executed, yet the model believed it had and carried on
+  reporting the work as done. In one session **22 of 40** no-tool-call turns were
+  actually leaked calls like this. The loop now detects `<tool_call>` blocks in the
+  reply, **salvages and executes** the parseable ones for real (feeding results
+  back), and **corrects** the model to use the real tool-call mechanism; malformed/
+  unparseable ones get a corrective nudge instead of being silently accepted.
+  Bounded to 6 fixes/turn. Verified against the real malformed strings from the logs
+  (clean, garbled, JSON, and multi-call variants). (`app/src/llm.js`.)
+- 2026-07-25: **Follow-through guardrail no longer 400s.** The nudge was pushed
+  as a **system** message, but `oneSystemAtFront` relocates system messages to
+  the front — which both defeated the nudge and left two assistant messages
+  adjacent at the end → `400: Cannot have 2 or more assistant messages`. All
+  in-loop nudges (follow-through, completion check, repeat-tool guard) are now
+  **user**-role messages, so they stay where they belong and never trigger the
+  400. Verified: a real task fired a completion check with zero 400s.
+- 2026-07-24: **"Launched an app but it never started" — now verified & honest.**
+  `open_app`/`open_url` used `nohup CMD & ; echo launched`, which reported success
+  even when the app **crashed on startup** (e.g. Chromium exiting because as root it
+  needs `--no-sandbox`) — so the model believed it had started something that never
+  actually came up. Both now launch detached (`setsid`, survives the exec) AND
+  verify the process is still alive ~1.5s later, returning the real startup output
+  and a clear **`FAILED: the app exited immediately…`** with the reason instead of a
+  false "launched". Confirmed against the exact Chromium-sandbox crash from the logs.
+- 2026-07-24: **Browser tools were completely broken — now fixed, durably.**
+  Root cause found via the new level-5 logs: the browser-daemon start command
+  ran `pkill -f '[b]rowserd.py'` in a shell whose own command line contained
+  `python3 /opt/jarvis/browserd.py`, so **pkill killed its own launching shell
+  before the daemon could start** (surfacing as "browser daemon failed to
+  start:" with an empty reason after a 30s hang). Now it frees the port with
+  `fuser -k 9251/tcp` (port-based, can't match a command line), logs the daemon
+  lifecycle, and surfaces the real failure detail instead of an empty string.
+  Verified end-to-end: `browser_goto` + `browser_extract` work again.
+  - **Durability** (answering "will it come back on rebuild?"): Playwright
+    browsers now install to a fixed image path `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright`
+    in the workbench Dockerfile instead of `~/.cache` under the `/config`
+    volume (which shadowed them on fresh volumes), and the install **fails the
+    build loudly** if Chromium is missing instead of the old silent `|| true`.
+    `fuser` (psmisc) was already in the Dockerfile, so the fix's dependency is
+    baked in.
+  - **JavaScript** is explicitly enabled in `browserd.py`
+    (`java_script_enabled=True`) for JS-dependent sites — safe given the
+    intentional sandboxed-container/root design.
+- 2026-07-24: **Follow-through guardrail for "says it but doesn't do it."** When
+  the model ends a turn narrating an action ("let me search that…", "I'll run
+  the command…") but emits no tool call, the loop now nudges it to actually call
+  the tool and continues (bounded budget). Matching is deliberately conservative
+  (`ACTION_INTENT_RE` in `llm.js`) so ordinary conversation ("it's going to be
+  great", "let me know") doesn't trip it; triggers are logged at WARN.
+- 2026-07-24: **Workbench desktop can be brought back after opening it in a new
+  tab.** The embedded desktop iframe shares the workbench's VNC session; opening
+  it in a new tab (or backgrounding the JARVIS tab) left the embedded view frozen
+  with no way to reconnect. Added a **"↻ Reconnect here"** button in the
+  Workbench panel, and the desktop now **auto-reconnects** when you switch back to
+  the JARVIS tab with the Workbench panel open. Front-end only (`app/public/`),
+  no restart needed — just refresh.
+- 2026-07-21: **Massive prompt-processing latency fix (~50s → ~1s per turn).**
+  Per-turn volatile context (the current-time note and the skill hint) was
+  injected as a leading **system** message, so — merged to the front by
+  `oneSystemAtFront` — the large, otherwise-stable system-prompt + tools
+  prefix (~8k tokens) was byte-different every turn. That defeated
+  Ollama/llama.cpp KV-cache reuse and forced a full re-prefill of the whole
+  prompt on the first model call of EVERY turn (~40s on a 70B). Now that
+  volatile context is prepended to the **last user message** instead, so the
+  system+tools prefix stays byte-identical and the cache is reused; only the
+  changing user tail is re-processed. (`app/src/llm.js`.) Pairs with the
+  `--reload` Ollama `keep_alive:-1` fix that keeps the model + its cache
+  resident. Note: model choice matters too — Llama-3.x templates render tool
+  definitions inside the *last user message* (so the tools payload never
+  caches across prompts), whereas Qwen3 templates put tools in the stable
+  system block; on this hardware Qwen3.6 (35B-A3B MoE) is dramatically faster
+  than a dense 70B for JARVIS's tool-heavy prompts.
+- 2026-07-20: **Tool calls now work with strict chat templates (e.g. Qwen3
+  derivatives).** JARVIS injects system notes anywhere in a turn (current
+  time, per-turn skill hint, repeat-tool warning), but some models' chat
+  templates raise `System message must be at the beginning`, which made
+  Ollama's tool-call parser generation 400 the moment tools were attached
+  (e.g. `AI-TAVS/Qwen3.6-35b-a3b-Uncensored:35b`). `app/src/llm.js` now
+  collapses all system messages into a single leading one
+  (`oneSystemAtFront`) before each request — the standard, most-compatible
+  message shape, and a no-op in effect for lenient templates. Verified
+  against Ollama: the same model that 400'd now returns a clean tool call.
+- 2026-07-07: Recurring gateway error `litellm.APIConnectionError: Extra data: line 1
+  column N` (a JSON-decode failure in LiteLLM's Ollama NDJSON parser when Ollama's
+  streamed chunks coalesce). Rerouted the local models in `litellm/config.yaml` from
+  the `ollama_chat/` provider to `openai/` pointing at Ollama's OpenAI-compatible
+  `/v1` endpoint, so LiteLLM is a clean OpenAI-dialect passthrough and never touches
+  the flaky parser. Verified through the gateway: chat, tool calls, streaming
+  reasoning (`reasoning_content` → the Thinking panel), vision, and the full app
+  path. No functionality or flexibility lost (multi-provider tiers unchanged). Note:
+  the bug is present even in the newest LiteLLM (running 1.92.0), so an upstream
+  update would not have fixed it — the reroute was the right call.
+
+### Security
+- 2026-10-05: **Security review** of the whole app, CLI scripts and containers:
+  - The **workbench is cut off from the Docker API proxy and the memory store** — it now sits on
+    its own `workbench` network shared only with the app, so the model's root shell can no
+    longer reach the proxy (which can create and run containers) or the auth-less memory store.
+  - `edit_workbench_file` could copy the real config and API keys into the workbench; it can't
+    any more.
+  - **Withheld tools are refused when they run**, not just hidden from the model — guarded
+    Autopilot runs, scheduled tasks and sub-agents can no longer call a tool that was withheld.
+  - A file write through a **symlink** could escape the shared folders; paths are now
+    resolved through links (even for files that don't exist yet) before they are checked.
+  - One malformed **WebSocket frame crashed the whole app**; a bad frame no longer takes it
+    down.
+  - **Closing a tab or losing the connection stops the running turn** and its tools (also for
+    an HTTP API caller that disconnects).
+  - The sign-in is **re-checked on every chat message**: a removed user, a changed password or
+    an ended session gets an error and the connection is closed.
+  - A **broken config file fails closed**: while it can't be read, the login settings are
+    unknown, so requests and the WebSocket are refused (503) instead of let through.
+  - The **login rate limit counts only failed attempts**, per address and login name, so
+    successful sign-ins no longer use up the allowance.
+  - **Secrets are redacted in escaped forms too** (e.g. inside JSON strings), not only verbatim.
+  - **Backups are no longer tracked by git** (`backups/` is ignored; the 4 old memory/workspace
+    tarballs were removed from the repository — the files stay on disk). Runtime logs and
+    records in `data/` (`*.log`, `*.jsonl`, `data/plans/`) are ignored too.
+  - `config/JARVIS_CONFIG.json` and `config/JARVIS_SECRETS.json` are **created from their
+    templates when missing** (Docker would otherwise create a folder in their place) and kept
+    **owner-only**.
+- 2026-08-27: **Guards on the heavy auth-less endpoints.** `/api/stt` is single-flight (409 while
+  a transcription runs — no stacking whisper jobs in the workbench); `/api/upload` enforces an
+  uploads-folder budget (default 10GB, `UPLOADS_MAX_BYTES`). (`app/server.js`)
+- 2026-08-27: **PWA install.** Web-app manifest + generated arc-reactor icons (192/512, pure-Python
+  PNG writer at `app/public/icon-*.png`) — JARVIS installs as a standalone app (own window, dock
+  icon). Deliberately no service worker (a localhost app gains nothing offline).
+  (`app/public/manifest.webmanifest`, `app/public/index.html`)
+- 2026-08-27: **Live chats auto-persist server-side.** Each chat tab debounce-syncs (per-chat
+  timers) into `data/sessions/` as a ● `live_*` session; a fresh browser pointed at the same JARVIS
+  restores all tabs automatically. Closing a tab removes its server copy. (`app/public/app.js`)
+- 2026-08-27: **Headless server smoke test** (`app/test/smoke-server.test.js`, part of
+  `npm test` — 20 assertions): boots the real server with the mock provider in scratch dirs and
+  verifies the HTTP surface, PWA assets, sessions CRUD, the WebSocket chat loop, and the
+  Host/Origin cross-site guard (403s + WS handshake rejection) end-to-end — no Docker, model, or
+  browser needed.
+- 2026-08-27: **Dependency chain cleaned — npm audit now reports 0 vulnerabilities** (was 10, 5
+  high): non-breaking `npm audit fix` (body-parser, deepmerge-ts/html-to-text/mailparser chain,
+  ip-address, protobufjs), `@mozilla/readability` → 0.6 (extraction regression-tested),
+  `nodemailer` → 9.x (transport API verified), and an `overrides` pin for dockerode's `uuid`.
+  Server-side chat paths now also strip unknown client message fields (e.g. the UI's `ts`) before
+  anything reaches the model API. (`app/package.json`, `app/server.js`)
+- 2026-08-26: **Cross-site request guard on the REST API.** The WS handshake was origin-checked but
+  the ~40 HTTP endpoints weren't: no-body POSTs (autopilot stop/pause, notifications clear) were
+  CSRF-able from any website, and **DNS rebinding** sidestepped CORS to read `GET /api/config/full`
+  (API key + vault). Every request now validates `Host` and `Origin` against a localhost allowlist
+  (403 otherwise); extra names for proxies/tunnels go in `security.allowed_hosts`. The WS check now
+  shares the same allowlist. (`app/server.js`)
+- 2026-08-26: **Config/secrets backups are pruned.** Every Config-tab save wrote a timestamped backup
+  to `data/` and never cleaned up — 74 key-bearing copies had accumulated. Backups are now pruned to
+  the newest N per file (`backups.retain`, default 10; 0 = unlimited); the existing pile was pruned
+  to 10+10. (`app/src/config.js`)
+- 2026-08-26: **jarvis-memory is internal-only.** The Mem0 store (no auth) was published at
+  `127.0.0.1:8120`, readable/writable by any local process. The host port is gone — the app reaches
+  it at `jarvis-memory:8000` over the compose network, and `JARVIS.sh` now health-checks it via
+  `docker exec` (`wait_mem`). Uncomment the ports mapping in `docker-compose.yml` to debug directly.
+  (`docker-compose.yml`, `JARVIS.sh`)
+- 2026-08-26: **Vault reads are surfaced in the chat.** Every `get_secret` call posts a
+  "🔑 Vault access" notice into the live conversation (in addition to the audit log), so the moment
+  a credential enters the model's context is always visible. Disable with
+  `secret_access_notice: false`. (`app/src/tools.js`)
+- 2026-08-04: **Security & quality hardening pass (multi-batch review).** Closed a **cross-site
+  WebSocket hijack** (any website the user visited could open `ws://127.0.0.1/ws` and drive the full
+  tool loop → RCE) via an Origin allowlist on `/ws`. Hardened `fetch_url` **SSRF**: IPv6/IPv4-mapped
+  private-range detection, credential (`Authorization`/`Cookie`) stripping on cross-origin redirects,
+  connect-time **DNS-rebind pinning** (undici), and a response **size cap**. Stopped
+  `/api/models/probe` from sending the **saved API key to a user-supplied host**. Non-image files
+  served from the shared folders now **force-download** instead of rendering inline (stored-XSS).
+  **Deep, key-based secret redaction** across logs + the audit trail; **backup-before-write** for the
+  config and secrets vault. Scheduled/background tasks no longer receive the irreversible tools
+  (`send_email`, `set_secret`, `delete_secret`, `delete_memory`); autopilot gained a **cost ceiling**
+  (`llm`/autopilot `max_cost_usd`). Infra: the app no longer mounts the raw Docker socket — it uses a
+  **filtered `jarvis-docker-proxy`** (containers+exec only); the app runs **non-root** with its source
+  mounted `:ro`; the workbench uses Docker's **default seccomp** profile (was `unconfined`).
+  (`app/server.js`, `app/src/{tools,llm,scheduler,config,logger,autopilot}.js`, `docker-compose.yml`,
+  `app/Dockerfile`, `app/package.json`)
+
+### Performance
+- 2026-08-26: **Screenshots are JPEG-compressed before the vision model.** The desktop look-step
+  sent ~1MB PNGs (~1.3MB as base64) into the vision prefill; captures are now re-encoded at JPEG
+  quality 82 (several times smaller) with automatic PNG fallback if the convert fails.
+  (`app/src/tools.js`)
+
+### Documentation
+- 2026-08-26: **`Docs/tools.md` is now auto-generated from the code** (`node
+  app/scripts/gen-tools-md.js`) — 57 built-in tools with exact signatures and the descriptions the
+  model sees; a new tool missing a family lands in a visible "Uncategorized" section instead of
+  silently vanishing. **Drift sweep** across the docs: five containers (not four), 57 tools (not
+  ~48), memory internal-only, the stale "app mounts the Docker socket" security bullet (it uses the
+  filtered proxy), missing API endpoints (`/api/autopilot/forcestop`, `/api/autopilot/clarify`,
+  `/view`), missing slash commands (`/guide`, `/ro`, `/rw`), 20 skills (not 18) + prompt-scoped
+  skills, `--restore-memory/--restore-workspace --fresh`, and `TEMPLATES/README.md`'s pre-refactor
+  copy paths/gateway/embedder guidance. New **`Docs/evals.md`** documents the regression suite
+  (schema, authoring, reading reports); config templates now carry the local-embedder `mem0`
+  defaults plus the new `backups` / `security` / `secret_access_notice` keys; `app/public/app.js`
+  gained a file-level section index.
 
 ### Notes
 - The LLM intentionally has root in the workbench container, open internet access,

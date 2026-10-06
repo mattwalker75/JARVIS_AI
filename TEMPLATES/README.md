@@ -9,10 +9,14 @@ and all sections included) — only the `llm` block differs between them.
 ```bash
 # from the repo root:
 cp TEMPLATES/JARVIS_CONFIG.single-openai.json   config/JARVIS_CONFIG.json
-cp TEMPLATES/JARVIS_SECRETS.empty.json          config/JARVIS_SECRETS.json
+cp TEMPLATES/JARVIS_SECRETS.empty.json          config/JARVIS_SECRETS.json   # optional (see below)
 # edit config/JARVIS_CONFIG.json -> fill in your api_key(s)
 ./JARVIS.sh --start        # or --reload if it's already running
 ```
+
+If `config/JARVIS_SECRETS.json` (or `JARVIS_CONFIG.json`) is missing, `./JARVIS.sh --setup`,
+`--start` and `--reload` create it from the `config/*_template.json` copy, and they keep both
+files readable by your user account only.
 
 `JARVIS_CONFIG.json` and `JARVIS_SECRETS.json` are gitignored; these template files use
 only `REPLACE_ME` placeholders, so they're safe to keep in the repo.
@@ -56,6 +60,16 @@ gateway by `JARVIS_LOCAL_LLM.sh` when it starts it.
 - **Gateway** configs (`openai-tiers`, `multi-model`, `anthropic-claude`) point `base_url`
   at the standalone LiteLLM gateway (`http://host.docker.internal:4000/v1`, started with
   `./JARVIS_LOCAL_LLM.sh start --gateway`) so one endpoint can route to many providers.
+
+> **You must add the cloud routes yourself.** The gateway's shipped config
+> (`litellm/config_template.yaml` → `litellm/config.yaml`) has **no cloud models** — only the
+> auto-generated block of your local ones. Before using a gateway config, add a route for every
+> cloud model it names (e.g. `gpt-4o`, `o4-mini`, `claude-sonnet-4-6`) **above** the
+> `BEGIN local routes` marker — see
+> [Local models → Mixing a cloud model into the gateway](../Docs/local-llm.md#mixing-a-cloud-model-into-the-gateway-optional).
+> Otherwise "model not found". If all the models come from **one** provider (e.g.
+> `openai-tiers`), it's simpler to skip the gateway and point `base_url` straight at that
+> provider (e.g. `https://api.openai.com/v1`) — multi mode works there too.
 
 ## Semantic memory needs an embedder
 

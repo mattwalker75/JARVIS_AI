@@ -7,7 +7,8 @@ Hands-free voice conversation. **Speech-to-text** has two selectable engines (in
   powers the continuous **Wake**/**Open** mic modes — but the audio goes through the
   browser vendor's speech service.
 - **Local (whisper)** — fully local **push-to-talk**: tap **🎤 Talk** to record, tap
-  again (or pause 30s) to stop; the clip is transcribed by faster-whisper in the
+  again to stop (a recording stops by itself after 30 seconds — a hard cap, not pause
+  detection); the clip is transcribed by faster-whisper in the
   workbench (`POST /api/stt`) and nothing leaves your machine. Works in any browser
   with MediaRecorder; the continuous Wake/Open modes still need the Browser engine
   (they rely on streaming interim results). First use downloads the whisper model
@@ -27,8 +28,11 @@ server proxy in `app/src/tts.js`; the TTS service in `piper/`.
 
 ## The controls
 
-Open the UI at `http://localhost:8110` (a **secure context** — localhost or HTTPS is
-required for the mic). Two independent things: whether JARVIS **speaks** its replies,
+Open the UI at `http://localhost:8110`. Browsers only allow the microphone on a **secure
+page** — `http://localhost` or HTTPS. Opened over plain `http://` from another device (a LAN IP
+or a Tailscale name), the mic pill shows **mic needs HTTPS**, and using the mic explains why;
+serve JARVIS over HTTPS (for example with `tailscale serve`), or open `http://localhost:8110`
+on the computer that runs it. Two independent things: whether JARVIS **speaks** its replies,
 and how it **listens**.
 
 | Control | Behavior |
@@ -43,8 +47,10 @@ and how it **listens**.
 on — now you talk and it talks back. In any continuous mode, saying
 **"<wake word> stop listening"** turns the mic off.
 
-To interrupt while it's speaking (barge-in): **tap the mic**, press **Esc**, or click
-**Stop**.
+To interrupt while it's speaking (barge-in): press **Esc** (always works — also after the
+reply arrived and inside a dialog), click the **🔇 Stop speaking** button that appears by the
+message box while JARVIS talks, click **⏹ Stop** while a reply is still coming, or — with the
+mic **Off** — tap **🎤 Talk** (Talk is disabled in Wake/Open).
 
 ## The wake word
 
@@ -76,7 +82,7 @@ just reply — no wake word needed. Say the name again only once the window laps
 
 Click **🌌 Ambient** in the header for a full-screen, hands-free view: the UI disappears
 and JARVIS becomes a large glowing avatar that animates with its state — so you can lean
-back and just talk, without watching text. **✕ Exit** returns to the normal UI.
+back and just talk, without watching text. **✕ Exit** (or **Esc**) returns to the normal UI.
 
 Two avatar styles, switchable live with the button in the **top-left** of ambient mode
 (persists to `voice.ambient_style`):
@@ -172,20 +178,27 @@ a key + internet, which Piper deliberately avoids.
   single-utterance length limit.
 - **Cleaned** — code blocks, inline code, URLs, and importance markers are skipped, so
   it speaks the prose, not the punctuation and syntax.
-- **Barge-in** — a new message, the Stop button, Esc, or tapping the mic instantly
-  silences speech and resumes listening.
+- **Barge-in** — a new message, **Esc**, the **🔇 Stop speaking** button, the ⏹ Stop
+  button, or tapping 🎤 Talk (mic Off) / the ambient avatar instantly silences speech and
+  resumes listening.
 
 While JARVIS is speaking, the mic is **paused** (browser Web Speech has no echo
 cancellation for continuous recognition, so otherwise it would hear itself). That
-means you can't interrupt *by voice* mid-speech — use the mic tap / Esc / Stop.
+means you can't interrupt *by voice* mid-speech — use Esc / 🔇 Stop speaking (or the 🎤 Talk
+tap when the mic is Off).
 
 ## Configuration
 
 In `JARVIS_CONFIG.json` under `voice` (see [Configuration](configuration.md#voice)):
-`enabled`, `tts`, `stt`, `mic_mode`, `silence_timeout_seconds`, `followup_seconds`,
-optional `wake_word` / `stop_phrase`, and the TTS settings `tts_engine` (`browser` | `piper`),
-`tts_voice`, `tts_rate`, `tts_pitch`. The engine, voice, mic mode, and TTS toggle are
-all settable from the UI and persist.
+`enabled`, `tts`, `stt`, `mic_mode`, `stt_engine` (`browser` | `local`), `silence_timeout_seconds`,
+`followup_seconds`, `ambient_style` (`face` | `orb`), optional `wake_word` / `stop_phrase`, and the
+TTS settings `tts_engine` (`browser` | `piper`), `tts_voice`, `tts_rate`, `tts_pitch`. The speech
+engines, voice, mic mode, avatar style, and TTS toggle are all settable from the UI and persist
+(each value's type is checked before it is saved).
+
+The **local (whisper)** speech engine runs in the workbench, so it needs the workbench turned on
+(with it off, `POST /api/stt` answers 409 — use the Browser engine); it transcribes one clip
+at a time and accepts an optional `language` hint.
 
 ## Snappier voice
 
@@ -197,7 +210,9 @@ point the **chat** tier at a smaller/faster model with the header model switcher
 
 - **No mic / permission denied** — allow the microphone for `localhost` in the browser,
   and check macOS System Settings → Privacy & Security → Microphone for your browser.
-- **"needs a secure context"** — open `http://localhost:8110` (not a LAN IP), or use HTTPS.
+- **"mic needs HTTPS"** — the page was opened over plain `http://` from another device. Open
+  `http://localhost:8110` on the computer that runs JARVIS, or serve it over HTTPS (for
+  example `tailscale serve`).
 - **No speech output** — check the 🔊 toggle and your system output. Browser voices come
   from the OS; for **Piper**, make sure `jarvis-piper` is running (`docker ps`) — if the
   Voice dropdown shows "(Piper unavailable)" the container is down or still starting.

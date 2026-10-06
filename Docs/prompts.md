@@ -28,7 +28,9 @@ Prompts/<name>_system.prompt     # instructions
 ```
 
 - **Active prompt** = `default_master.prompt` + `default_system.prompt`. These are read
-  **live** every turn, so edits apply on the **next turn** — no restart needed.
+  **live** every turn, so edits apply on the **next turn** — no restart needed. That
+  includes an open `./JARVIS.sh --terminal` session, which rebuilds the system prompt
+  for every turn too.
 - **`stock`** = a protected, permanent copy of the original defaults. Load it and "Save as
   active" to restore the originals anytime. (`default` and `stock` can't be deleted.)
 

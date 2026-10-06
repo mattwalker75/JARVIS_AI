@@ -32,7 +32,7 @@ the current list.
   "expect": {
     "contains":     ["391"],                 // reply must include ALL of these (case-insensitive)
     "not_contains": ["error"],               // reply must include NONE of these
-    "tools_used":   ["run_shell"],           // these tools must actually have been CALLED
+    "tools_used":   ["run_shell"],           // the model must have CALLED these tools
     "max_ms":       60000,                   // wall-clock ceiling for the run
     "max_cost_usd": 0.03,                    // estimated-cost ceiling (cloud models)
     "no_error":     true                     // default: the run must not throw
@@ -45,8 +45,11 @@ Every `expect` field is optional — assert only what matters for the case.
 ## Authoring tips
 
 - **`tools_used` is the strongest assertion.** A reply can *claim* work happened; the
-  tool list records what actually ran. Use it whenever the point of the case is "the
-  model must act, not narrate" (the follow-through / tool-call-as-text guardrails).
+  tool list records which tools the model actually **called**. Use it whenever the point
+  of the case is "the model must act, not narrate" (the follow-through / tool-call-as-text
+  guardrails). Note that a call is recorded when it is made, before it runs — so a call
+  that errored still counts. If the case needs the tool to *succeed*, also assert on its
+  result with `contains` (e.g. a number only the real output would give).
 - **Adapt a real conversation.** Any saved session (`data/sessions/*.json`) becomes a
   case by copying its `messages` and adding an `expect` block — the cheapest way to
   turn a bug you just fixed into a permanent regression check.

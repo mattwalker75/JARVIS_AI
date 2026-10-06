@@ -17,7 +17,7 @@ the exact text the model sees. [Custom tools](extending.md#custom-tools) and
 
 ### `add_memory(text, metadata?)`
 
-Save a durable fact about the user or the world to your long-term semantic memory (Mem0). It auto-extracts the salient fact(s), dedupes, and makes them searchable by meaning. Use for names, preferences, relationships, places, decisions — anything worth recalling in future conversations.
+Save a durable fact about the user or the world to your long-term semantic memory (Mem0), searchable by meaning. Use for names, preferences, relationships, places, decisions — anything worth recalling in future conversations. With mem0.infer off (the default, best for local models) the text is stored exactly as given and is NOT deduplicated or merged — so search_memory first, and if the fact is already there (or changed), use update_memory instead of adding a near-duplicate. (With infer on, Mem0 extracts the salient facts and dedupes for you.)
 
 - `text` (string, required) — The fact(s) to remember, in natural language.
 - `metadata` (object) — Optional tags, e.g. {category: 'preference', topic: 'food'} — returned with search results.
@@ -54,7 +54,7 @@ MAINTENANCE: clean up the long-term memory store — merge near-duplicate facts 
 
 ### `run_shell(command, timeout_s?)`
 
-Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs, and run servers in the background (nohup ... &) instead of foreground. Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.
+Run a bash command as ROOT in your Linux workbench container. You may install packages (apt-get) and do any work or research. Returns stdout/stderr and the exit code. Commands are killed after timeout_s (default 120s) — pass a larger timeout_s for long builds/installs. Never run a server in the foreground: for a web app the user should open, use serve_app; for any other long-running background process, fully detach it with 'setsid nohup CMD </dev/null >/tmp/CMD.log 2>&1 &' (a plain 'nohup CMD &' is killed along with this command). Long output is truncated in the MIDDLE (head+tail kept) with an explicit marker.
 
 - `command` (string, required)
 - `timeout_s` (integer) — Max seconds before the command is killed (default 120, max 600).
@@ -87,13 +87,13 @@ Run a web app/server inside the workbench and expose it so the USER can open it 
 
 ### `list_dir(path?)`
 
-List a directory inside the shared folders (read-only or read-write).
+List a directory in /LLM_READ_WRITE_FILES (the default, read-write), /LLM_READ_ONLY_FILES (read-only), or the workbench build area /LLM_WORKSPACE. Files come with their size and modified time.
 
 - `path` (string)
 
 ### `read_file(path, offset?, max_chars?)`
 
-Read a TEXT file from the shared folders. Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document).
+Read a TEXT file from /LLM_READ_WRITE_FILES, /LLM_READ_ONLY_FILES, or the workbench build area /LLM_WORKSPACE (a bare name like notes.txt means /LLM_READ_WRITE_FILES/notes.txt). Long files are paged: a truncated response tells you the offset to re-call with. Binary files error with a pointer to the right tool (analyze_image / read_document); files over 20 MB are refused (use run_shell with head/tail/grep).
 
 - `path` (string, required)
 - `offset` (integer) — Character offset to start from (for long files).
@@ -109,7 +109,7 @@ Extract the TEXT of a PDF, DOCX, ODT, RTF, EPUB, or HTML document from the share
 
 ### `write_file(path, content, append?)`
 
-Write a text file into the read-write shared folder to share it back to the user. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). This tool only reaches the shared folders — to write under the workbench /LLM_WORKSPACE, use write_workbench_file. To CHANGE part of an existing shared file, prefer edit_file.
+Write a text file into /LLM_READ_WRITE_FILES to share it back to the user (a bare name like report.md lands there), or into the workbench build area /LLM_WORKSPACE. By default this OVERWRITES the file; pass append=true to add to the end instead (e.g. for a running log). /LLM_READ_ONLY_FILES can't be written. For any other workbench path (outside /LLM_WORKSPACE), use write_workbench_file. To CHANGE part of an existing file, prefer edit_file.
 
 - `path` (string, required)
 - `content` (string, required)
@@ -143,7 +143,7 @@ HTTP request to any internet URL (GET/POST/PUT/DELETE...). HTML pages come back 
 - `headers` (object) — Request headers, e.g. {"Authorization": "Bearer <token>"}.
 - `body` (string) — Raw request body (set your own Content-Type header).
 - `json` (object) — JSON payload — sent as the body with Content-Type: application/json.
-- `timeout_s` (integer) — Max seconds to wait (default 30).
+- `timeout_s` (integer) — Max seconds to wait (default 45, max 120). A GET that times out is retried once.
 - `offset` (integer) — Character offset for paging a long text response (a truncated response tells you the next offset).
 - `save_to` (string) — For binary downloads: a path in the read-write shared folder to save the response to, e.g. 'downloads/report.pdf'.
 - `raw` (boolean) — Return the unprocessed body — skip article extraction AND html stripping (for scraping markup).
@@ -442,15 +442,20 @@ Get a saved credential (including password) by name, to log in to the user's own
 
 - `name` (string, required)
 
-### `set_secret(name, username?, password?, url?, notes?)`
+### `set_secret(name, username?, password?, url?, notes?, imap_host?, imap_port?, smtp_host?, smtp_port?, from?)`
 
-Create or update a saved credential in the user's vault (e.g. after the user gives you a login for one of their own accounts, or after you change a password on a site they own). Only the fields you pass are updated.
+Create or update a saved credential in the user's vault (e.g. after the user gives you a login for one of their own accounts, or after you change a password on a site they own). Only the fields you pass are updated. For the email tools, save a secret named 'email' with username, password, imap_host and smtp_host (optional: imap_port, smtp_port, from).
 
 - `name` (string, required)
 - `username` (string)
 - `password` (string)
 - `url` (string)
 - `notes` (string)
+- `imap_host` (string) — Email only: IMAP server, e.g. imap.gmail.com.
+- `imap_port` (integer) — Email only: IMAP port (default 993).
+- `smtp_host` (string) — Email only: SMTP server, e.g. smtp.gmail.com.
+- `smtp_port` (integer) — Email only: SMTP port (default 465).
+- `from` (string) — Email only: the From address, if different from username.
 
 ### `delete_secret(name)`
 

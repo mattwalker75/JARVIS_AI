@@ -35,7 +35,8 @@ _Last updated: 2026-07-28 — capabilities/limits change often; verify against y
 | `gpt-5-mini` / `gpt-5-nano` | cheap (+vision for mini) | Smaller GPT‑5 tiers. |
 | `o3` | smart, vision | Deep reasoning. Pricier/slower — use for hard problems, not chat. |
 | `o4-mini` | smart, vision | Cheaper reasoning; good smart-tier value. |
-| `o1` / `o3-mini` / `o1-mini` | smart | Reasoning (o1‑mini/o3‑mini are text‑only). |
+| `o1` | smart, vision | Reasoning; reads images. |
+| `o3-mini` / `o1-mini` | smart | Text‑only reasoning. |
 | `text-embedding-3-*`, `whisper-1`, `tts-1`, `dall-e-3`, `gpt-4o-transcribe` | — (not a chat tier) | Embeddings / audio / image — excluded from the pickers. |
 
 ## Anthropic (Claude)
@@ -45,7 +46,8 @@ _Last updated: 2026-07-28 — capabilities/limits change often; verify against y
 | `claude-sonnet-4` | chat, vision | Balanced flagship. |
 | `claude-opus-4` / `claude-opus-4-1` | smart, vision | Strongest reasoning. |
 | `claude-3-7-sonnet` / `claude-3-5-sonnet` | chat, vision | Prior strong chat models. |
-| `claude-3-5-haiku` / `claude-haiku-4-5` | cheap, vision | Fast/cheap. |
+| `claude-3-5-haiku` | cheap, vision | Fast/cheap. |
+| `claude-haiku-4-5` | cheap | Fast/cheap. |
 | `claude-3-opus` | smart, vision | Older top-tier reasoning. |
 
 ## Google (Gemini)
@@ -53,9 +55,11 @@ _Last updated: 2026-07-28 — capabilities/limits change often; verify against y
 | Model | Buckets | Notes |
 | --- | --- | --- |
 | `gemini-2.5-pro` | chat, smart, vision | Flagship. |
-| `gemini-2.5-flash` / `gemini-2.0-flash` | chat, cheap, vision | Fast, huge context. |
+| `gemini-2.5-flash` | chat, cheap, vision | Fast, huge context. |
+| `gemini-2.0-flash` | chat, vision | Fast, huge context. |
 | `gemini-1.5-pro` | chat, vision | Long context. |
-| `gemini-1.5-flash` / `2.0-flash-lite` | cheap, vision | Cheapest. |
+| `gemini-1.5-flash` | cheap, vision | Cheapest. |
+| `gemini-2.0-flash-lite` | cheap | Cheapest. |
 
 ## Local (Ollama)
 

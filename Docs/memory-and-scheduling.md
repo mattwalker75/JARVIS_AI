@@ -23,7 +23,10 @@ exposed to other local processes.
 
 The chat model decides *what* is worth remembering; `mem0.infer` is `false` by default,
 so a fact is embedded directly (fast, and works with any model) rather than running
-Mem0's own LLM extraction stages.
+Mem0's own LLM extraction stages. In that mode `add_memory` stores the text exactly as
+given and does **not** dedupe or merge it — the model is told to `search_memory` first and
+use `update_memory` when the fact is already there. (With `infer: true`, Mem0 extracts and
+dedupes facts itself.)
 
 ### The embedder (separate model)
 Embeddings need a dedicated model, not the chat model. Configure it under `mem0`:
@@ -61,8 +64,12 @@ models, at the cost of one embedding lookup per turn.
 The store is a Docker volume (wiped by `--delete`). Back it up:
 ```bash
 ./JARVIS.sh --backup-memory
-./JARVIS.sh --restore-memory --from backups/<file>.tgz
+./JARVIS.sh --restore-memory --from backups/<file>.tgz   # replace memory with a backup
+./JARVIS.sh --restore-memory --fresh                     # reset to an EMPTY memory
 ```
+`--restore-memory` needs one of `--from <file>` or `--fresh`, and asks "are you sure?"
+first (add `--force` to skip the question, e.g. in a script). A backup that isn't a
+readable `.tgz` is refused before anything is deleted.
 
 ---
 
@@ -78,12 +85,26 @@ notifies you. Tasks persist to `data/tasks.json` and survive restarts.
 - **Recurring + stop condition:** *"every 5 minutes, check the error log and alert me
   if anything looks critical — until I say stop"* → runs every 300s and **stops when it
   notifies you** (condition met) or when you cancel it.
+- **Recurring from a start time:** *"every day at 8am"* → `every_seconds` plus `at`; the
+  `at` time is the **first** run, then it repeats every 86400s.
 
-Recurring runs advance from the scheduled slot (no drift), collapse missed runs after
-downtime into a single catch-up, and recover cleanly if the app restarts mid-run.
+Times are **this computer's local time**: `./JARVIS.sh` passes this computer's time zone into
+the app container (set `TZ` yourself to override it; if it can't be detected the
+compose file falls back to `America/Los_Angeles`), and the model is told the local time.
+
+Recurring runs advance from the scheduled slot (no drift from slow runs), collapse missed
+runs after downtime into a single catch-up, and recover cleanly if the app restarts
+mid-run. The interval is a fixed number of seconds, not a calendar rule — so a daily
+task shifts by an hour when daylight saving time starts or ends (re-time it with
+`update_task` if that matters). If you re-time a task while it is running, the new time
+sticks. A one-shot task that fails sends you a single error notification.
 
 ### Managing tasks
-- In chat: *"what's scheduled?"* (`list_tasks`), *"stop the log monitor"* (`cancel_task`).
+- In chat: *"what's scheduled?"* (`list_tasks`), *"make it run at 9 instead"*
+  (`update_task`), *"stop the log monitor"* (`cancel_task`).
+- From the terminal: tasks scheduled in `./JARVIS.sh --terminal` or `--prompt` are picked
+  up by the server too (it re-reads `data/tasks.json` when another process changed it).
+  In `--terminal`, `/tasks` lists them and `/notes` shows recent notifications.
 - In the **Tasks** tab: see active tasks, **✏️ edit**, **⏸/▶ pause & resume**, cancel,
   browse each task's **📜 recent runs** (the run-history log keeps past results — the
   task itself only carries the latest), review notifications, and **quick-add** a task
@@ -99,6 +120,17 @@ Notifications appear in-app (🔔), as a browser notification, spoken (if audio 
 and as a desktop toast on the workbench. With the **notification bridge** configured
 (`notifications.ntfy_url` — see [Configuration](configuration.md#notifications-optional)),
 they also reach your **phone/other devices with the browser closed** via an ntfy topic.
+
+### What a scheduled run can't do
+Scheduled runs are unattended and may read untrusted text (web pages, email), so they
+don't get the risky tools: `send_email`, `delete_memory`, `consolidate_memories`,
+`set_secret`, `delete_secret` (the list is in `app/src/policy.js`). They also can't
+schedule, change, or cancel tasks — the scheduler handles repetition. If the model calls
+one of these anyway, the call is refused ("`<name>` is not available in this run").
+
+So *"email me a summary every morning"* will **not** send an email: the run can check
+and read email, but it delivers the summary in the app instead — `post_to_chat` or a
+file. (For a recurring task, `notify_user` is the stop signal, so it ends the task.)
 
 ### Chat-awareness
 Scheduled tasks run stateless, but they can call `read_recent_chat({roles:["user"]})`

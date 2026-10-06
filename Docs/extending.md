@@ -1,7 +1,8 @@
 # Extending JARVIS
 
-JARVIS is built to grow without editing core code. Five extension points, cheapest
-first.
+JARVIS is built to grow without editing core code. Six extension points (custom
+tools, MCP servers, prompts, personas, models & providers, skills), cheapest first —
+plus email setup at the end.
 
 ## Custom tools
 
@@ -33,6 +34,10 @@ module.exports = {
 The handler runs **in the app container** (Node.js) and can `require` anything the
 app has.
 
+A custom tool can't replace a tool that already exists: if its `name` matches a built-in
+tool (or a custom tool loaded earlier), the file is skipped and the app log says so.
+Pick a unique name.
+
 ### Model-authored tools
 Set `custom_tools.allow_model_authored: true` in config to **also** load
 `/LLM_READ_WRITE_FILES/custom_tools/*.js` — files JARVIS itself can write. Powerful
@@ -56,7 +61,10 @@ Streamable-HTTP transport). Add to config:
 On start, the app handshakes each server and registers its tools as
 `mcp_<server>_<tool>`. A dead server is logged and skipped (never blocks startup).
 Config changes apply **without a restart** — saving from the Config tab re-handshakes
-the server list (or hit `POST /api/tools/reload`). Implementation: `app/src/mcp.js`.
+the server list (or hit `POST /api/tools/reload`). If a server forgets JARVIS's session
+(it restarted, or the session expired), JARVIS starts a new session and retries the
+call once, automatically. A tool whose name is already taken is skipped and logged.
+Implementation: `app/src/mcp.js`.
 
 ## Prompts
 
@@ -167,7 +175,9 @@ before your message — e.g. *"get_skill('browser') has a playbook for this…"*
 ## Email setup
 
 To enable the `check_email` / `read_email` / `send_email` tools, save a vault secret
-named `email` (ask JARVIS to `set_secret`, or edit `JARVIS_SECRETS.json`):
+named `email`. Either ask JARVIS in chat (its `set_secret` tool accepts every field
+below, including `imap_host`, `imap_port`, `smtp_host`, `smtp_port` and `from`), or
+edit `JARVIS_SECRETS.json`:
 
 ```json
 {
@@ -181,3 +191,26 @@ named `email` (ask JARVIS to `set_secret`, or edit `JARVIS_SECRETS.json`):
 ```
 Use an **app password** for Gmail/Outlook (not your login password). Optional fields:
 `imap_port` (993), `smtp_port` (465), `from`.
+
+The password is never sent unencrypted:
+- **IMAP** uses TLS from the start on port 993; on any other port (usually 143) it must
+  upgrade with STARTTLS.
+- **SMTP** uses TLS from the start on port 465; on any other port (587, 25) the server
+  must offer STARTTLS, or the send fails.
+
+`send_email` is withheld from guarded Autopilot runs and from scheduled tasks, so those
+can read email but not send it (a **full**-autonomy Autopilot run can).
+
+## Tool limits worth knowing
+
+When you write a custom tool or a playbook, these built-in behaviours matter:
+- `read_file` and `edit_file` refuse files over **20 MB** — use `run_shell` with `head`,
+  `tail` or `grep` to work with part of a big file.
+- `write_workbench_file` handles large files (big content is sent in chunks).
+- `edit_workbench_file` reads a file from the app side only when it really lives in the
+  shared folders (`/LLM_READ_ONLY_FILES`, `/LLM_READ_WRITE_FILES`, `/LLM_WORKSPACE`);
+  anything else is read inside the workbench. It also refuses files over 20 MB.
+- The browser daemon (`browserd.py`) accepts only JSON requests. If a browser action
+  (a click, say) times out or the connection drops, it is **not** sent again — it may or
+  may not have happened, so the model is told to check the page with `browser_snapshot`
+  first.

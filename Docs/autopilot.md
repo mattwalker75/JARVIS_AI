@@ -12,7 +12,7 @@ via these tools:
 | Tool | Purpose |
 | --- | --- |
 | `plan_create(objective, steps[])` | Start a plan (replaces any existing one). |
-| `plan_update(step, status)` | Set a step to `pending` / `active` / `done` / `blocked`. Marking done auto-activates the next step. |
+| `plan_update(step, status)` | Set a step to `pending` / `active` / `done` / `blocked`. Marking a step done activates the next pending step after it, unless another step is already active. |
 | `plan_add_step(text, after?)` | Add a step discovered mid-task. |
 | `plan_show()` | Return the current plan (rarely needed — see below). |
 | `plan_clear()` | Close the plan when the objective is complete. |
@@ -51,7 +51,9 @@ running, or re-shows the ended bar so you can continue).
 
 > A run survives an app *auto-restart* (crash recovery), but the deliberate lifecycle
 > commands — `./JARVIS.sh --stop`, `--delete`, `--setup`, `--start` — **wipe the saved run
-> and plan** so you always come back up to a clean slate.
+> and plan** so you always come back up to a clean slate. They delete `data/autopilot.json`
+> plus the Autopilot and default plans (`data/plans/autopilot.json`, `data/plans/default.json`);
+> each chat tab's own plan (`data/plans/chat_<id>.json`) is kept.
 
 ### Launching
 
@@ -79,16 +81,17 @@ While running it shows `state · cycle N · countdown · tokens ~$cost`, plus co
 | Control | Effect |
 | --- | --- |
 | **📜 History** | Browse what every cycle reported so far (also `GET /api/autopilot/history`). |
-| **⏸ Pause / ▶ Resume** | Stop starting new cycles (the time budget freezes) and resume later. |
+| **⏸ Pause / ▶ Resume** | Pause the run (the time budget freezes) and resume later. Pause also cuts short the cycle that is running right now; nothing is lost, because the plan and the files are the memory, and Resume starts a fresh cycle from where the plan stands. |
 | **+15m** | Extend the time budget (also rescues a run about to stop on the budget). |
 | **Modify** | Change the objective mid-run; the next cycle re-checks its plan against it. |
 | **Wrap up** | Finish the current step, summarize, and stop for review (graceful). |
-| **Stop** | Stop immediately (also kills any in-flight workbench command). If a step is wedged and won't quit, the button becomes **Force stop** — one more click ends the run instantly and kills any preview servers (ports 9101-9150). |
+| **Stop** | Stop immediately (also kills any in-flight workbench command). Stop wins over a Pause that hasn't finished yet. If a step is wedged and won't quit, the button becomes **Force stop** — one more click ends the run instantly and kills any preview servers (ports 9101-9150). The cycle that was cut off is dropped, so a Continue or a new run afterwards can never end up with two loops running at once. |
 
 ### When it ends
 
-When a run ends **incomplete** (time budget, stuck, or you stopped it), the bar stays
-visible in a grey **ended** state and the plan is preserved. From there:
+When a run ends **incomplete** (time budget, cost ceiling, stuck, or you stopped it), the bar stays
+visible in a grey **ended** state and the plan is preserved. A **stuck** run has ended too (it
+shows **⚠️ stuck**) — use **Continue**, not Resume, to keep going. From there:
 
 - **▶ Continue** — resume on the **same plan** with a fresh budget, picking up from the first incomplete step (no rebuild).
 - **Modify** — change the objective, then Continue.
@@ -103,7 +106,11 @@ Set the default in config (`autopilot.autonomy`), override per run in the launch
 - **guarded** (default) — free to build and test in `/LLM_WORKSPACE`, but it will **not** send
   email, post online, make purchases, or delete/overwrite your files outside `/LLM_WORKSPACE`
   on its own; those become *blocked* steps for you to handle. It also withholds the
-  dedicated risky tools (`send_email`, `delete_memory`, `set_secret`, `delete_secret`).
+  dedicated risky tools (`send_email`, `delete_memory`, `consolidate_memories`, `set_secret`,
+  `delete_secret`; the list is in `app/src/policy.js`). They are hidden from the model, and
+  if it calls one anyway (from memory or from text it read) the call is refused with
+  "`<name>` is not available in this run". Sub-agents started with `delegate` get the same
+  restrictions.
 - **full** — no restrictions.
 
 > Guarded mode is **best-effort**: `run_shell` stays available (Autopilot needs it to
@@ -113,14 +120,21 @@ Set the default in config (`autopilot.autonomy`), override per run in the launch
 ### Safeguards
 
 - **Time budget + cycle cap** (`autopilot.max_cycles`, default 100) trigger a graceful wrap-up.
-- **Stuck detection** pauses and notifies after several cycles with no plan progress.
+- **Cost ceiling** (`autopilot.max_cost_usd`, off by default) — once the run's estimated cost
+  reaches it, the run wraps up the same way. Tokens used by sub-agents (`delegate`) count
+  toward the run's total too.
+- **Stuck detection** ends the run (status **stuck**) and notifies you after 5 cycles in a row
+  with no plan progress. Continue it from the bar when you're ready.
 - **Anti-thrash** nudges the model when it spends cycles only reading/planning without acting.
 - **Patient mode** — Autopilot runs with the stream watchdog off, so slow local cold-loads aren't killed.
 
 ### API
 
 `POST /api/autopilot/start` `{objective, minutes, autonomy, verbose}` ·
-`GET /api/autopilot` (status) · `POST /api/autopilot/{pause,resume,wrapup,stop,extend,modify,continue,dismiss}`.
+`GET /api/autopilot` (status) · `GET /api/autopilot/history` ·
+`POST /api/autopilot/{pause,resume,wrapup,stop,forcestop,extend,modify,continue,dismiss}` ·
+`POST /api/autopilot/clarify` `{objective}` (before a run: the model reviews the objective and
+returns the questions it wants answered, or `ready: true`).
 
 ### Config
 
@@ -128,6 +142,7 @@ Set the default in config (`autopilot.autonomy`), override per run in the launch
 "autopilot": {
   "autonomy": "guarded",     // "guarded" | "full"
   "default_minutes": 30,     // time budget prefilled in the launcher
-  "max_cycles": 100          // safety cap on build/test iterations
+  "max_cycles": 100,         // safety cap on build/test iterations
+  "max_cost_usd": 0          // estimated-cost ceiling for one run; 0 = no ceiling
 }
 ```

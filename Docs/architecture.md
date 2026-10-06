@@ -1,9 +1,11 @@
 # Architecture
 
-JARVIS is a five-container Docker Compose stack (project name `jarvis`), everything
-bound to `127.0.0.1` (localhost only). The fifth container, `jarvis-docker-proxy`, is a
-**filtered Docker-API proxy** the app uses to reach the workbench (see below) instead of
-mounting the raw Docker socket. The LLM itself is **not** in the stack — the app
+JARVIS is a six-container Docker Compose stack (project name `jarvis`): `jarvis-app`,
+`jarvis-memory`, `jarvis-piper`, `jarvis-docker-proxy`, and two optional ones —
+`jarvis-workbench` and `jarvis-searxng`. Published ports bind to `127.0.0.1` (this computer
+only), except the app's own port while network access is on (see [Security model](#security-model)).
+`jarvis-docker-proxy` is a **filtered Docker-API proxy** the app uses to reach the workbench
+(see below) instead of mounting the raw Docker socket. The LLM itself is **not** in the stack — the app
 is a pure OpenAI-dialect client and talks to whatever URL is in `llm.base_url` (see
 [LLM serving is external](#llm-serving-is-external)).
 
@@ -40,7 +42,10 @@ The brain. A Node.js/Express server that:
 It runs as a **non-root** user and reaches the workbench with `docker exec` **through the
 `jarvis-docker-proxy`** (a filtered Docker API restricted to containers+exec) rather than
 mounting the raw `/var/run/docker.sock` — so an app compromise can't drive the host daemon.
-Everything else goes over the internal Docker network. (Set `DOCKER_PROXY_HOST=""` and re-add
+Everything else goes over the internal Docker networks (see [Networks](#networks)). It runs
+under a tiny init (`init: true`) and shuts down cleanly on a stop signal (saving the chat log
+first), so `--stop` / `--reload` don't wait for Docker's 10-second kill. Its time zone (`TZ`) is
+this computer's, passed in by `./JARVIS.sh`. (Set `DOCKER_PROXY_HOST=""` and re-add
 the socket mount to fall back to the direct-socket behavior.)
 
 ### jarvis-memory (internal-only) — semantic memory
@@ -67,6 +72,16 @@ model so in the system prompt, and hides the Workbench tab. Nothing else depends
 workbench, so the rest of the stack runs unchanged. See
 [Configuration](configuration.md#running-without-the-workbench-workbenchenabled).
 
+### jarvis-docker-proxy (internal-only)
+[docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy) in front of the host's
+Docker socket, allowing only the container + exec calls the app needs to drive the workbench.
+On the `backend` network only — the workbench can't reach it.
+
+### jarvis-searxng (internal-only, optional)
+The self-hosted [SearXNG](https://docs.searxng.org/) metasearch engine behind `web_search`,
+started only when `search.provider` is `"searxng"` (compose profile `search`). See
+[Configuration → `search`](configuration.md#search-optional).
+
 ### jarvis-piper (`:5000`, internal-only) — offline neural voice
 A tiny Python HTTP service (`piper/serve.py`) wrapping [Piper](https://github.com/rhasspy/piper),
 an on-device neural text-to-speech engine. The engine binary and voice models are baked
@@ -75,6 +90,20 @@ offline** and the voice is **machine-independent**. Not published to the host �
 reaches it at `http://jarvis-piper:5000` and proxies the browser through `/api/tts`
 (`app/src/tts.js`). Only used when the voice engine is set to **Piper** (browser TTS needs
 no container). See [Voice](voice.md#neural-voice-piper).
+
+## Networks
+
+The stack uses two private Docker networks, so the root shell the model drives can't reach the
+sensitive services:
+
+| Network | Members | Why |
+| --- | --- | --- |
+| `backend` | `jarvis-app`, `jarvis-docker-proxy`, `jarvis-memory`, `jarvis-piper`, `jarvis-searxng` | The app's sidecars. |
+| `workbench` | `jarvis-app`, `jarvis-workbench` | The app reaches the workbench's preview ports (9101–9150) by name. |
+
+`jarvis-app` is the only container on both. The workbench — where the LLM has a root shell — sits
+on `workbench` alone, so it **cannot reach the Docker API proxy** (which can create and exec into
+containers) **or the memory store** (which has no auth). It still has outbound internet.
 
 ## LLM serving is external
 
@@ -98,7 +127,8 @@ and [Configuration → `llm`](configuration.md#llm).
 
 ## How a chat message flows
 
-1. The browser sends `{type:"chat", messages}` over the WebSocket (`/ws`).
+1. The browser sends `{type:"chat", chatId, messages}` over the WebSocket (`/ws`); the
+   sign-in is checked again for every message.
 2. The app builds the prompt (system prompt + capped history) and calls the model at
    `llm.base_url` (the external LLM endpoint) using the tier's model (`chat` by default).
 3. The model streams back. `reasoning_content` deltas feed the **Thinking** panel;
@@ -106,6 +136,8 @@ and [Configuration → `llm`](configuration.md#llm).
 4. If the model emits **tool calls**, the app runs them (in parallel where possible),
    streams each to the **Activity** panel, appends results, and loops.
 5. When the model produces a final answer with no tool calls, it's sent as the reply.
+   Every event of the turn carries its `chatId`, so it lands in the right chat tab. Stop, or
+   closing the tab, aborts the turn and its tools.
 
 The same `chat()` path backs the WebSocket UI, the REST `POST /api/chat`, the
 terminal (`--prompt`/`--terminal`), and each scheduled task run.
@@ -115,11 +147,11 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 | Host path | Container | Purpose |
 | --- | --- | --- |
 | `./app` | `/usr/src/app` | App source (bind mount — edits apply on app restart) |
-| `./config/JARVIS_CONFIG.json` | `/cfg/JARVIS_CONFIG.json` | Config (read-write so the UI can persist settings) |
-| `./config/JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault |
+| `./config/JARVIS_CONFIG.json` | `/cfg/JARVIS_CONFIG.json` | Config (read-write so the UI can persist settings; owner-only on the host) |
+| `./config/JARVIS_SECRETS.json` | `/cfg/JARVIS_SECRETS.json` | Credential vault (owner-only on the host) |
 | `./LLM_READ_ONLY_FILES` | `/LLM_READ_ONLY_FILES` (ro) | Files you share to JARVIS |
 | `./LLM_READ_WRITE_FILES` | `/LLM_READ_WRITE_FILES` | Files exchanged both ways (uploads, deliverables) |
-| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plan.json` (task ledger), `autopilot.json` (run state), config/secrets backups (pruned to `backups.retain`, default 10) |
+| `./data` | `/data` | `tasks.json`, `chatlog.json`, `sessions/`, `custom_tools/`, `audit.log`, `plans/<key>.json` (task ledgers — one per chat tab, plus `autopilot` and `default`; an old single `plan.json` is migrated), `autopilot.json` (run state), config/secrets backups (pruned to `backups.retain`, default 10) |
 | `./Prompts` | `/Prompts` | Active + saved master/system prompt files (see [Prompts](prompts.md)) |
 | `./Logs` | `/logs` | Debug logs (per-day, rotated by size + retention) |
 | `jarvis_memory_data` | `/data/chroma` | Vector store (Docker volume) |
@@ -129,7 +161,8 @@ terminal (`--prompt`/`--terminal`), and each scheduled task run.
 Bind mounts (config, secrets, shared folders, `data/`, and **`LLM_WORKSPACE`**) survive
 `--delete`; the Docker **volumes** (memory, workbench home) are wiped by it — back them up
 first (see [CLI](cli.md)). Note `LLM_WORKSPACE` is now a host folder, so the AI's working
-files persist through a `--delete`.
+files persist through a `--delete`. Backups made by `./JARVIS.sh` land in `backups/`
+(owner-only, and not tracked by git).
 
 To reset **just the workbench OS** (after the LLM has installed a pile of packages) without
 touching any data, `./JARVIS.sh --reset-workbench` recreates that one container from its clean
@@ -145,21 +178,30 @@ them while the `/LLM_WORKSPACE` bind mount (a host folder) and the home **volume
   computer.
 - **Optional login** (`app/src/auth.js`, no dependencies): several users, one shared JARVIS.
   Salted scrypt hashes in `data/.password`; a signed session cookie (per-boot key) checked on
-  every `/api` route, `/view` and the WebSocket handshake. The terminal client runs inside the
+  every `/api` route, `/view`, the WebSocket handshake and every chat message on an open
+  socket (a removed user or changed password ends it). Failed sign-ins are rate-limited per
+  address + login name. If the config file can't be read the app **fails closed** — every API
+  answers 503 until it's fixed, so a broken file can't switch the login off. The terminal client runs inside the
   app container on its own loopback, which compose marks as trusted (`JARVIS_TRUST_LOOPBACK`).
-- **Cross-site request guard.** The REST API and the WebSocket both validate the
-  `Host` and `Origin` headers against localhost names, so a malicious website can't
-  fire requests at `127.0.0.1:8110` (CSRF) or reach it via DNS rebinding. Fronting
+- **Cross-site request guard.** The REST API validates the `Host` header (and `Origin`, when
+  sent) against localhost names; the WebSocket handshake validates `Origin` (browsers always
+  send it; a no-`Origin` client such as a script skips this check and still faces the login).
+  So a malicious website can't fire requests at `127.0.0.1:8110` (CSRF) or reach it via DNS
+  rebinding. Fronting
   JARVIS with a proxy/tunnel under another hostname? Add it to
   `security.allowed_hosts` in `JARVIS_CONFIG.json`.
 - **Root is in a container**, not on your host — and the app reaches the Docker daemon
   only through the filtered `jarvis-docker-proxy` (containers + exec), never the raw
-  socket. Still: every signed-in user has the whole of JARVIS — never open it to a network
+  socket. The workbench is on its own network, so the root shell can't reach that proxy or
+  the memory store. Still: every signed-in user has the whole of JARVIS — never open it to a network
   without the login on, and only on a network you trust.
 - **Untrusted content.** The system prompt instructs the model to treat web pages,
   files, and screenshots as data, never instructions, and never to send secrets to
   external tools.
 - **Secrets** live in `JARVIS_SECRETS.json` and are exposed to the model only via the
   vault tools; every `get_secret` read is surfaced as a 🔑 notice in the chat
-  (`secret_access_notice`, default on). Config write access is limited to an allowlist
-  (see [Configuration](configuration.md)); secrets keys can't be written through it.
+  (`secret_access_notice`, default on). The UI's quick settings (`POST /api/settings`) are
+  limited to an allowlist with type checks — no keys or secrets. The Config tab's full editor
+  (`POST /api/config/full`) can rewrite both files, secrets included (any signed-in user
+  can), and refuses a save if a file changed since the tab loaded it. Secrets are redacted
+  from the debug logs. See [Configuration](configuration.md#settings-the-ui-can-change).

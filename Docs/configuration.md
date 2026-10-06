@@ -1,14 +1,21 @@
 # Configuration
 
 All configuration lives in **`config/JARVIS_CONFIG.json`** (gitignored). Copy the template
-and edit:
+and edit (or let `./JARVIS.sh --setup` / `--start` create it from the template for you):
 
 ```bash
 cp config/JARVIS_CONFIG_template.json config/JARVIS_CONFIG.json
 ```
 
 > The config + secrets files live in **`config/`** (`JARVIS_CONFIG.json`, `JARVIS_SECRETS.json`,
-> and their `*_template.json`) to keep the repo root tidy.
+> and their `*_template.json`) to keep the repo root tidy. `./JARVIS.sh --setup`, `--start` and
+> `--reload` create either file from its template when it's missing, and keep both (and the
+> config's backup copies) **owner-only** — readable by your user account only.
+
+> **If the file can't be read** (a JSON typo, say), JARVIS doesn't guess: the page shows a plain
+> sentence naming the problem, every other request is refused, and nothing is saved — so a broken
+> file is never overwritten, and the login can't be skipped. Fix the file, then
+> `./JARVIS.sh --reload`.
 
 Keys beginning with `_` are documentation-only and ignored by the app.
 
@@ -19,10 +26,17 @@ raw JSON editor; only the structured blocks (`personas`, `mcp.servers`) are raw-
 
 **Applying changes:** saving from the **Config tab** applies them **live** — the app re-reads
 the config on your next message, no restart needed for ordinary settings (endpoint, model, tiers,
-temperature, max_tokens, completion_checks, prompts, log level, …). A restart (`./JARVIS.sh
---reload`, or `--stop --start`) is only needed for the memory service's embedding key (a separate
-container) and container-level settings like ports. If you edit `JARVIS_CONFIG.json` **by hand**
-(outside the UI), run `./JARVIS.sh --reload` to pick it up.
+temperature, max_tokens, completion_checks, prompts, log level, …). Container-level settings
+(network access, the workbench switch, the SearXNG search container) need `./JARVIS.sh --reload`.
+The **memory service** (a separate container) only reads its settings — e.g. the embedding key and
+the `mem0` block — when *it* starts, and `--reload` doesn't restart it: run
+`docker restart jarvis-memory`, or `./JARVIS.sh --stop --start`. If you edit `JARVIS_CONFIG.json`
+**by hand** (outside the UI), run `./JARVIS.sh --reload` to pick it up.
+
+> **Two tabs, one file.** The Config tab remembers which version of the files it loaded. If
+> something else changed them in the meantime (a header toggle, a secret JARVIS saved, another
+> tab), **Save** is refused with a message asking you to reload the tab — instead of silently
+> overwriting that change.
 
 > The file is mounted **read-write** so the UI can persist a few settings (see
 > [below](#settings-the-ui-can-change)). It's written **in place** (a bind-mounted
@@ -35,7 +49,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 | --- | --- |
 | `assistant_name` | The AI's name — sets its identity (via `{assistant_name}` in the prompt), the UI title, and the voice wake word. |
 | `llm` | Model backend, routing, generation params, and system prompt. |
-| `ollama` | Local-Ollama tuning — read by `JARVIS_LOCAL_LLM.sh`, not by JARVIS core. |
+| `ollama` | Local-Ollama tuning — applied by `JARVIS_LOCAL_LLM.sh`; JARVIS core reads only `context_length` (for the context meter). |
 | `voice` | Speech-to-text / text-to-speech behavior. |
 | `mem0` | Semantic memory service settings. |
 | `workbench` | Whether the Linux workbench is used at all (`enabled`), its container name + embedded desktop URL. |
@@ -59,7 +73,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
 
 ```jsonc
 "llm": {
-  "provider": "ollama",                         // "openai" | "ollama" | "mock" (offline canned replies)
+  "provider": "ollama",                         // "openai" | "ollama" | "local" | "mock" (offline canned replies); ollama/local = no API key is sent
   "base_url": "",                                // OpenAI-dialect endpoint JARVIS talks to. "" = OpenAI.
   "model": "qwen3-next:80b",                     // used in single-model mode
   "model_mode": "multi",                         // "single" | "multi" | omit to auto-detect
@@ -80,7 +94,7 @@ container) and container-level settings like ports. If you edit `JARVIS_CONFIG.j
   "idle_watchdog": true,                          // default for the 🐕 watchdog toggle (off = patient mode)
   "max_tool_iterations": 15,
   "completion_checks": 2,                          // times to re-verify "is it really done?" before accepting (0 = off)
-  "context_window": 0,                            // context-meter ceiling; 0/omit = auto (Ollama num_ctx / gateway /model/info)
+  "context_window": 0,                            // context-meter ceiling; 0/omit = auto (see below)
   "master_prompt": "",                            // FALLBACK identity prompt (the active one is Prompts/default_master.prompt)
   "system_prompt": "You are {assistant_name}, ..."  // FALLBACK (active one is Prompts/default_system.prompt)
 }
@@ -147,6 +161,14 @@ stalled stream — the **rest of that turn** runs on the fallback, the chat show
 `base_url`, only `failover.api_key` is ever sent there — the primary key never leaves
 its own endpoint (regression-tested).
 
+### The context window (`context_window`)
+A number here wins. With `0` (or no key), JARVIS works it out:
+
+- talking **straight to Ollama** (`provider` `"ollama"` / `"local"`, or a `base_url` on port
+  `11434`) → `ollama.context_length`, the window Ollama actually loads the model with;
+- anything else (the LiteLLM gateway, a cloud provider) → it asks the endpoint's `/model/info`;
+- if neither answers → **32768**.
+
 ### Context-size discipline
 
 ```jsonc
@@ -209,9 +231,11 @@ at the runtime (this is what `JARVIS_LOCAL_LLM.sh start` without `--gateway` pri
 }
 ```
 
-This block is read by **`JARVIS_LOCAL_LLM.sh`** (the local-LLM helper) — **not** by
-JARVIS core or `JARVIS.sh --reload`. On `./JARVIS_LOCAL_LLM.sh start` it applies these as
-`OLLAMA_*` settings and restarts Ollama so they take effect (macOS). Cloud-only setups can
+This block is applied by **`JARVIS_LOCAL_LLM.sh`** (the local-LLM helper), not by
+`JARVIS.sh --reload`: on `./JARVIS_LOCAL_LLM.sh start` it sets these as `OLLAMA_*` settings and
+restarts Ollama so they take effect (macOS). JARVIS core reads just one of them —
+`context_length`, as the context meter's ceiling when it talks straight to Ollama (see
+[the context window](#the-context-window-context_window)). Cloud-only setups can
 ignore it. See [CLI → `JARVIS_LOCAL_LLM.sh`](cli.md#jarvis_local_llmsh--local-model-runtime).
 
 ## MLX (Apple Silicon) — no config block
@@ -234,6 +258,7 @@ several stay hot at once), then `start --backend mlx --gateway`. See
   "stt_engine": "browser",          // speech input: "browser" (streaming; needed for wake/open) | "local" (whisper push-to-talk)
   "silence_timeout_seconds": 12,    // wake mode: sleep after this much silence
   "followup_seconds": 0,            // wake mode: reply without the wake word for N s AFTER it stops talking (0 = off)
+  "ambient_style": "face",          // the voice-mode avatar: "face" | "orb" (persisted from the UI)
   "wake_word": "jarvis",            // optional; defaults to assistant_name
   "stop_phrase": "jarvis stop listening",
   "tts_engine": "browser",          // "browser" (OS/Chrome voices) | "piper" (offline neural)
@@ -369,10 +394,11 @@ See [Autopilot & the Planner](autopilot.md).
 "logging": {
   "level": 0,          // 0 off … 3 info, 4 verbose (tool args/results), 5 debug (full LLM req/resp)
   "max_mb": 50,        // roll the day's file to jarvis-<day>.N.log past this size
-  "retain_days": 14    // delete log files older than this on startup
+  "retain_days": 14    // delete log files older than this (checked at startup and once a day after)
 }
 ```
-Read live — change `level` from the Config tab and it applies immediately. Secrets are redacted.
+Read live — change `level` from the Config tab and it applies immediately. Secrets are redacted —
+also when they appear JSON-escaped or base64-encoded inside a logged request.
 
 ## `backups` (optional)
 
@@ -392,7 +418,9 @@ per file on every new backup.
 streamed out of the containers into `data/backups/`, which survives `--delete`). The
 newest `keep` tarballs are kept per kind, a notification reports each run, and
 **💾 Back up now** in Config → Diagnostics (or `POST /api/backup/run`) triggers the
-same pair on demand.
+same pair on demand. Only one backup runs at a time (pressing it while one is running says
+"A backup is already running…"), each part is stopped if it takes longer than 10 minutes, and
+a new backup never overwrites an existing file.
 
 ## `notifications` (optional)
 
@@ -468,10 +496,11 @@ regardless). Set `false` to silence the notices.
 The `web_search` tool's backend. **`duckduckgo`** (default) scrapes DuckDuckGo's HTML —
 zero setup, but rate-limit-prone and parser-fragile. **`searxng`** uses the optional
 self-hosted [SearXNG](https://docs.searxng.org/) sidecar: a real JSON metasearch API
-across many engines. `./JARVIS.sh --start` brings the container up automatically when
+across many engines. `./JARVIS.sh --start` (and `--reload`) bring the container up when
 selected (compose profile `search`; settings in `searxng/settings.yml`), and
-`web_search` **falls back to DuckDuckGo** if the sidecar is unreachable. Switching
-providers needs one stack restart to start/stop the container; afterwards it applies live.
+`web_search` **falls back to DuckDuckGo** if the sidecar is unreachable. So after switching to
+`searxng`, run `./JARVIS.sh --reload` once to start the container; switching back to
+`duckduckgo` needs nothing (the idle container is stopped by the next `--stop`).
 
 ## `custom_tools` (optional)
 
@@ -485,16 +514,25 @@ it's **off by default**. See [Extending](extending.md#custom-tools).
 
 ## Settings the UI can change
 
-These can be changed from the web UI (voice toggles, mic mode, model switcher) and
-are persisted back to `JARVIS_CONFIG.json` via `POST /api/settings`, gated by an
+These can be changed from the web UI (voice toggles, mic mode, avatar style, model switcher)
+and are persisted back to `JARVIS_CONFIG.json` via `POST /api/settings`, gated by an
 allowlist:
 
 ```
 voice.tts   voice.stt   voice.enabled   voice.mic_mode   voice.silence_timeout_seconds
-voice.followup_seconds   voice.tts_engine   voice.tts_voice   voice.tts_rate   voice.tts_pitch
+voice.followup_seconds   voice.ambient_style   voice.tts_engine   voice.tts_voice
+voice.tts_rate   voice.tts_pitch   voice.stt_engine
 llm.model   llm.models.chat   llm.temperature   llm.max_tokens   assistant_name
 skills_autohint
 ```
 
+Each value's type is checked (on/off switches must be true/false, numbers must be numbers,
+`llm.max_tokens` above 0, text under 500 characters) — a wrong one is refused and nothing is
+saved. The header model switcher (`llm.models.chat`) sets `llm.model` in **single** mode
+(so it never flips you into multi mode), and in multi mode changes only the tier's model,
+keeping a tier object's other overrides.
+
 Anything not on this list (notably `api_key` and other secrets) **cannot** be written
-through the settings endpoint.
+through the settings endpoint. The Config tab's **full editor** is a different route
+(`POST /api/config/full`): it rewrites the whole `JARVIS_CONFIG.json` and/or
+`JARVIS_SECRETS.json` (keys included), backing each file up first — see [API](api.md).

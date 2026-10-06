@@ -4,7 +4,7 @@ A personal, local **AI framework**: a private web app around an LLM that has rea
 capabilities — persistent semantic **memory**, a **root Linux workbench**, a real
 **web browser** it drives, **desktop/computer use**, **email**, **file** exchange,
 open **internet** access, a **task scheduler**, and hands-free **voice**. Everything
-runs on your machine and binds to **localhost only**.
+runs on your machine and, by default, is reachable from **this computer only**.
 
 The model backend is flexible: JARVIS is a pure OpenAI-dialect client that talks to
 whatever endpoint you point it at — a **cloud provider** (OpenAI, Anthropic, Gemini, …),
@@ -16,13 +16,17 @@ bigger one for hard reasoning, a vision model for screenshots).
 > ⚠️ **Powerful by design.** JARVIS runs arbitrary root commands in its workbench
 > container, drives a browser, and can use your saved accounts. That's intentional.
 > The stack is **localhost-only by default**, root is **inside a container** (not your host),
-> and keys live in the gitignored `JARVIS_CONFIG.json`. Run it on a machine you trust.
+> and keys live in the gitignored `config/JARVIS_CONFIG.json` / `config/JARVIS_SECRETS.json`
+> (readable by your user account only). Run it on a machine you trust.
 > To use it from another device, turn on the **login** and **network access** in
 > Config → Access & users (never network access without the login).
 
 ## The stack
 
-Five containers (`docker compose`, project `jarvis`, published ports bound to `127.0.0.1`):
+Six containers (`docker compose`, project `jarvis`; two are optional). Their ports are open to
+**this computer only** — except the chat app's port, which is opened to your network while
+"Allow other devices on my network" is on (the workbench desktop and its preview ports always
+stay this-computer-only):
 
 | Container | Role | Port |
 | --- | --- | --- |
@@ -42,6 +46,9 @@ The app (running **non-root**) drives the workbench with `docker exec` **through
 `jarvis-docker-proxy`** — a filtered Docker API — instead of mounting the raw Docker socket,
 reaches memory over the internal network, and shares two host folders
 (`LLM_READ_ONLY_FILES/` → you-to-JARVIS, `LLM_READ_WRITE_FILES/` ↔ both ways).
+The workbench sits on its **own private network** that it shares only with the app, so the
+root shell the AI uses there can't reach the Docker API proxy or the memory store.
+The containers run on **this computer's time zone**, so "remind me at 5pm" means 5pm where you are.
 
 ## Quick start
 
@@ -52,9 +59,14 @@ cp config/JARVIS_CONFIG_template.json config/JARVIS_CONFIG.json   # then edit: p
 ./JARVIS.sh --start      # start everything; prints the URLs
 ```
 
+(If you skip the copy, `--setup` / `--start` create `config/JARVIS_CONFIG.json` and
+`config/JARVIS_SECRETS.json` from their templates for you — you can then pick the model and
+paste keys in the Config tab. Both files are kept readable by your user account only.)
+
 - **Chat UI:** <http://localhost:8110/>
 - **Workbench desktop:** <http://localhost:8111/>
-- **Health / self-test:** `curl http://localhost:8110/api/selftest`
+- **Health / self-test:** `curl http://localhost:8110/api/selftest` (with the login turned on
+  this answers "Sign in first" — sign in in the browser and press **🩺 Run self-test** in the Config tab instead)
 
 Running fully local? Install [Ollama](https://ollama.com) on your host, pull a model
 (`ollama pull qwen3-next:80b`), then run `./JARVIS_LOCAL_LLM.sh start` and **paste the URL

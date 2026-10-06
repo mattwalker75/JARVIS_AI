@@ -7,7 +7,7 @@ Detailed documentation for JARVIS, a personal local AI framework. Start with the
 
 | Doc | What's inside |
 | --- | --- |
-| [Architecture](architecture.md) | The five containers, how a message flows end to end, external LLM serving, volumes, ports, and the security model. |
+| [Architecture](architecture.md) | The six containers (two optional) and their networks, how a message flows end to end, external LLM serving, volumes, ports, and the security model. |
 | [Configuration](configuration.md) | Complete `JARVIS_CONFIG.json` reference — every section and key, with examples for local / cloud / mixed setups. |
 | [Local models](local-llm.md) | Running models on your own machine — Ollama vs MLX compared, step-by-step setup, the gateway, and troubleshooting. |
 | [Tools](tools.md) | Every tool the model can call, grouped by family, with parameters and notes. **Auto-generated** from the code (`node app/scripts/gen-tools-md.js`). |
